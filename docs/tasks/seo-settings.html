@@ -353,8 +353,9 @@
       <section>
         <h2 id="verification">Verification and test matrix</h2>
         <p>
-          Use the repository's pinned Node version and install the root, Studio and Studio fixture dependencies as documented. Run the contribution checks from
-          the repository root. Use a disposable fixture checkout for build and publish-path tests.
+          Check the <a href="../../.github/workflows/check.yml">GitHub Actions workflow</a> for required builds and regression suites. Wait for the checks on
+          the current pull request commit. Use the commands below only when a maintainer requests local verification. For those runs, use the pinned Node
+          version, install the root, Studio and fixture dependencies, and use a disposable fixture for build and publish-path tests.
         </p>
         <pre><code>npm run build:runtime
 npm run check:changed
