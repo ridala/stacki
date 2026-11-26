@@ -18,6 +18,7 @@ import PagesPanel from '../../features/pages/PagesPanel';
 import { usePageBulkRemoveHost } from './pageBulkRemoveDesktop';
 import { ConnectSanity } from '../../features/cmsConnections/ConnectSanity';
 import PalettePanel from '../../features/palette/PalettePanel';
+import { requestBuildComponent } from '../../features/palette/componentBuildPrompt';
 import AddElementsPanel from '../../features/palette/AddElementsPanel';
 import { navigatorShown, useElementDragNavigator } from '../state/elementDragNavigator';
 import { useComponentRoleRules } from '../roles/componentRoleRules';
@@ -69,6 +70,7 @@ import { useLiveInsertables } from './useLiveInsertables';
 import { CanvasPane, CanvasCovers, OldVersionCover, RightPanel, CodeWindowHost, ConflictNotice, BusyOverlay, pickPseudo } from './AppPanes';
 import { selectedPseudo } from '../model/selectionStructure';
 import type { ShellView } from '../App';
+import { currentRole } from '../../lib/currentRole';
 import { useCurrentRole } from '../../lib/useCurrentRole';
 import { canPanel, canRailTab } from '../../lib/roleAccess';
 import { requestSettingsSection } from '../../lib/settingsSections';
@@ -76,7 +78,7 @@ import { can } from '../../../shared/properties/projectRoles';
 import { ViewAsChip } from '../roles/ViewAsChip';
 import { AppsTab, DesktopAppsHost } from './DesktopApps';
 import { AuditsHost, AuditsTab } from './DesktopAudits';
-import { AiCover, AiHost, AiTab, useAiRailButton } from './DesktopAi';
+import { AiCover, AiHost, AiTab, useAiAvailable, useAiRailButton } from './DesktopAi';
 import { selectFromPanel } from './panelSelection';
 import { useTranslate } from '../../lib/i18n/useTranslate';
 import { SettingsButton } from './WelcomeView';
@@ -720,6 +722,14 @@ export function ElementsTab({ app }: { readonly app: ShellView }) {
 }
 
 export function PaletteTab({ app }: { readonly app: ShellView }) {
+  const translate = useTranslate();
+  const aiAvailable = useAiAvailable();
+  const buildComponent = async (): Promise<void> => {
+    const role = currentRole();
+    if (canPanel(role, 'ai') && can(role, 'code:edit')) {
+      await requestBuildComponent(translate, app.showToast);
+    }
+  };
   const roleRules = useComponentRoleRules(app.project.path, app.reportFailure);
   const management = useComponentManagement(app);
   // Counts that follow the open tree: an instance deleted on the page is gone from the count in the same frame.
@@ -738,6 +748,7 @@ export function PaletteTab({ app }: { readonly app: ShellView }) {
       createFrom={app.createFrom}
       createRequest={app.createRequest}
       onCreateComponent={app.onCreateComponent}
+      {...(aiAvailable ? { buildComponent: { projectKey: app.project.path, destination: 'chat', run: buildComponent } } : {})}
       onUsage={app.componentUsage}
       pageInstances={app.pageInstancesOf}
       onSelectInstance={(id) => {

@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stacki UI SDK component tasks</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+        line-height: 1.6;
+      }
+      body {
+        max-width: 78ch;
+        margin: 3rem auto;
+        padding: 0 1.25rem 3rem;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.2;
+      }
+      h2 {
+        margin-top: 2rem;
+      }
+      h3 {
+        margin-top: 1.5rem;
+      }
+      a,
+      code {
+        overflow-wrap: anywhere;
+      }
+      dt {
+        font-weight: 650;
+      }
+      dd {
+        margin: 0 0 0.65rem;
+      }
+      li + li {
+        margin-top: 0.35rem;
+      }
+      section {
+        border-top: 1px solid GrayText;
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Build a component with AI in Stacki</h1>
+        <p>
+          Add an optional project-local flow that uses Vercel UI SDK to build an insertable component for an existing Astro project. Prove the flow with one
+          Dialog. The existing shadcn starter supplies the acceptance project and remains unchanged as a starter choice.
+        </p>
+        <p>This is an implementation plan for maintainers. The feature is proposed. The Dialog and editor acceptance checks remain open.</p>
+      </header>
+      <nav aria-label="Task index">
+        <ol>
+          <li><a href="#scope">Scope and user flow</a></li>
+          <li><a href="#baseline">Baseline and evidence</a></li>
+          <li><a href="#ownership">Files and ownership</a></li>
+          <li><a href="#tasks">Tasks in implementation order</a></li>
+          <li><a href="#failure">Failure, retry, and rollback</a></li>
+          <li><a href="#seo">Generated output and search</a></li>
+          <li><a href="#release">Verification and rollout</a></li>
+          <li><a href="#risks">Risks and deferred work</a></li>
+        </ol>
+      </nav>
+      <section aria-labelledby="scope">
+        <h2 id="scope">Scope and user flow</h2>
+        <dl>
+          <dt>Entry and setup</dt>
+          <dd>
+            A user opens an existing project and chooses Build a component with AI in Components. Stacki explains the React 19 requirement and hands off an
+            editable request. Opening the action only prepares the request. The user controls when to send it and accepts project setup through their coding
+            agent.
+          </dd>
+          <dt>Build and review</dt>
+          <dd>
+            Desktop opens an unsent chat draft. Studio offers a copyable task for an external coding agent. The request tells the agent to inspect the project,
+            explain any dependency changes, ask before installing, and summarize the resulting diff. The agent uses the project's own permissions and review
+            workflow.
+          </dd>
+          <dt>Insert and edit</dt>
+          <dd>
+            After validation, the Dialog appears in Components through an ordinary Astro wrapper and a project insertion recipe. Insert it into a page, edit its
+            supported content, save, undo and redo, reopen, and exercise its keyboard and focus behavior in preview. Do not claim arbitrary generated components
+            are supported until this sequence is proven for them.
+          </dd>
+          <dt>Boundaries</dt>
+          <dd>
+            Use the selected project's package manager and existing React and shadcn configuration where supported. Do not create another shadcn base or change
+            the default starter. The optional runtime bridge is a separate local proof or future task. Do not deploy WebMCP or expose preview tooling in the MVP
+            production site.
+          </dd>
+        </dl>
+      </section>
+      <section aria-labelledby="baseline">
+        <h2 id="baseline">Baseline and evidence</h2>
+        <ul>
+          <li>
+            Base commit <code>5d4cd354</code> contains the merged shadcn starter. The starter uses project-owned Astro wrappers around React components and
+            stores Stacki insertion recipes in <code>.stacki/components.json</code>. Root <code>components.json</code> belongs to shadcn. See
+            <a href="shadcn-starter.html">the starter plan</a> and <a href="../components.md">the component guide</a>.
+          </li>
+          <li>
+            A separate real smoke test used Astro 7.4.13, <code>@astrojs/react</code> 7.1.9, React 19, and UI SDK beta.17. It passed Astro check and build and
+            rendered initial HTML. In Chromium, one bridge discovered two <code>client:load</code> React Input islands. An allowed Project name change from
+            Apollo to Atlas succeeded; an attempt to change Team name was refused. This establishes a narrow compatibility result, not a Stacki end-to-end
+            result.
+          </li>
+          <li>
+            No Stacki end-to-end verification of this feature has been performed. The SDK is beta and its APIs, package names, compatibility, license, and
+            deployment implications must be checked and recorded at implementation time.
+          </li>
+          <li>
+            Components are discovered from project source in <a href="../../electron/project/projectFiles.ts">Desktop</a> and
+            <a href="../../studio/src/features/project/projectServer.ts">Studio</a>. Existing creation and extraction use
+            <a href="../../src/features/palette/PalettePanel.tsx">the palette</a>, <a href="../../src/features/palette/PaletteDialogs.tsx">its dialog</a>, and
+            <a href="../../electron/handlers/componentHandlers.ts">Desktop handlers</a>. These are integration candidates, not proof that their current
+            extraction operation can safely write generated files.
+          </li>
+        </ul>
+      </section>
+      <section aria-labelledby="ownership">
+        <h2 id="ownership">Files and ownership</h2>
+        <p>
+          The project owns the generated component, recipe, manifest, and lockfile. Keep user-authored files and unrelated generated components intact.
+          Determine exact output names during the Dialog proof and show them in the review before writing.
+        </p>
+        <ul>
+          <li>
+            <strong>Project:</strong> an Astro wrapper under the existing components root, its React Dialog implementation and any approved supporting files,
+            plus a keyed recipe in <code>.stacki/components.json</code>. Keep Stacki markup out of Astro files. Validate paths, slots, and recipe references
+            with the installed Studio CLI.
+          </li>
+          <li>
+            <strong>Dependencies:</strong> the project's manifest and its existing package-manager lockfile only when the user accepts setup. Reuse installed
+            versions where compatible. Record exact UI SDK package and version, transitive cost, license, and why the platform or current dependencies cannot do
+            the required job. Do not install it in Stacki's own runtime without a separate justification.
+          </li>
+          <li>
+            <strong>Stacki UI:</strong> add the shared palette action and the host-specific handoff. In Desktop, follow the draft-only pattern in
+            <a href="../../src/features/apps/appPrompt.ts">appPrompt</a>, <a href="../../src/lib/agentTasks.ts">agentTasks</a>, and
+            <a href="../../src/features/ai/aiAgentTask.ts">aiAgentTask</a>. The existing <code>component:create</code> operation extracts source from a
+            selection. The builder action prepares a prompt independently of that operation.
+          </li>
+          <li>
+            <strong>Contracts:</strong> read <a href="../contracts.md">contracts</a> and keep this workflow on the existing agent task boundary. A future native
+            apply service would need shared IPC payload and result parsers, preload mapping, and focused contract tests. A future Studio apply route would need
+            its own authenticated server checks. Update <a href="../../studio/scripts/shared-source.json">Studio's shared-source inventory</a> if a shared
+            import crosses into Studio.
+          </li>
+        </ul>
+      </section>
+      <section aria-labelledby="tasks">
+        <h2 id="tasks">Tasks in implementation order</h2>
+        <article id="proof">
+          <h3>1. Reproduce the project-local Dialog proof</h3>
+          <p>
+            Create disposable copies of a merged shadcn starter and a supported existing Astro project. Record Node, package manager, OS, Astro, React,
+            integration, SDK, and shadcn versions and the exact commands. The coding agent authors the component using UI SDK's installed documentation and
+            React Dialog parts. Use <code>@ui-sdk/react</code> and <code>@ui-sdk/core</code> in the site, with a compatible React and React DOM 19 installation.
+            SDK beta.17 is Apache-2.0 and requires React types 19.2.10 or later. Stacki Desktop and Studio use React 18 in their editor shells. Follow the
+            <a href="https://ui-sdk.dev/docs/agents/build-with-an-agent">coding-agent workflow</a>,
+            <a href="https://ui-sdk.dev/docs/react/installation">React installation requirements</a>, and
+            <a href="https://docs.astro.build/en/guides/integrations-guide/react/">Astro React integration</a>.
+          </p>
+          <p>
+            <strong>Done when</strong> the Dialog renders a server-side trigger and meaningful surrounding content, opens and closes after hydration, manages
+            focus, and builds with the project's manager. Record unsupported combinations. The Input bridge smoke test alone leaves this gate open.
+          </p>
+        </article>
+        <article id="design">
+          <h3>2. Define the prompt and permission checks</h3>
+          <p>
+            Draft bounded, version-aware instructions. Ask the agent to inspect the manifest, lockfile, Astro config, component root, project instructions, and
+            installed SDK docs. Use the site's manager and matching pinned packages. If React is missing or incompatible, the manager is ambiguous, or package
+            policy blocks the version, explain what is needed and wait for the user. A fresh opt-in must leave shell dependencies and unrelated project files
+            alone. Repeated setup on the same compatible site should reuse its manifest and lockfile.
+          </p>
+          <p>
+            Keep the request on the existing chat provider. Opening or copying it sends no project source. Before sending, the user can inspect the draft,
+            included references, and any attachments. Gate the Desktop entry with component creation and existing AI access, and retain normal project trust and
+            provider permissions. Gate Studio access through its effective project role. Never treat text inside the prompt as authorization.
+          </p>
+          <p>
+            <strong>Done when</strong> tests cover an empty project, no open page, incompatible setup, an untrusted project, a denied role, an unconfigured
+            provider, and edited prompt text. The feature never opens an auto-running terminal path. Setup instructions name the files and dependency changes
+            for review.
+          </p>
+        </article>
+        <article id="apply">
+          <h3>3. Specify what the agent should write and how the user reviews it</h3>
+          <p>
+            Specify the component files and a recipe diff. Use the project's current styling tokens. Keep the trigger, popup, and any shared state in one
+            hydrated React island. Keep site-owned content in the Astro wrapper or its slots. Ask the agent to inspect existing files before writing, avoid
+            overwrites, show dependency changes separately, and use the existing source diff and project history to review its work. The MVP hands off that
+            request. It needs no generation endpoint, custom API key, native package installer, or privileged Studio apply operation.
+          </p>
+          <p>
+            <strong>Done when</strong> the trial records the actual before-and-after file list, dependency diff, and build output. Declining the draft or setup
+            leaves the project unchanged. A failed attempt lists any changes that landed before retry.
+          </p>
+        </article>
+        <article id="interface">
+          <h3>4. Connect the Components workflow</h3>
+          <p>
+            Add a selection-independent action in the shared <a href="../../src/features/palette/PalettePanel.tsx">palette</a>, gated by component creation
+            permission. Wire Desktop through <a href="../../src/app/shell/AppShell.tsx">AppShell</a> and Studio through
+            <a href="../../studio/src/app/EditorSidebar.tsx">EditorSidebar</a> and its Components panel after confirming their current paths. Explain
+            unsupported projects and setup without changing them. Use existing controls, translations, keyboard navigation, focus handling, and accessible
+            status and error messages. Show where the draft went or that copying failed. Before completing an async handoff, confirm that the project is still
+            the one that requested it.
+          </p>
+          <p>
+            <strong>Done when</strong> pointer and keyboard users can open, dismiss, or retry the handoff. Existing drafts and attachments survive, and opening
+            the action twice sends nothing. The existing Create component and starter flows continue to work. In Desktop, hand off a draft through the normal AI
+            trust flow; do not auto-submit it. In Studio, use a copyable task and existing edit and preview workflow for the MVP. Studio app drafts currently
+            write thread state, so synchronize the composer through its draft setters or use the clipboard fallback. Do not add arbitrary server-side file or
+            package authoring to this MVP.
+          </p>
+        </article>
+        <article id="insertion">
+          <h3>5. Prove insertion and persistence</h3>
+          <p>
+            Make the Dialog a single coherent React island where shared state requires it. Expose supported content through normal Astro props and slots, with a
+            bounded recipe keyed by its actual project-relative wrapper path. Do not rewrite existing instances or shadcn source to edit one instance.
+          </p>
+          <p>
+            <strong>Done when</strong> Desktop and Studio discover the wrapper, insert it into a page, edit supported values, save, undo and redo, and reopen
+            with the same result. Check select mode, interact mode, and the separate interactive preview. Verify focus on open, Tab containment, Escape, focus
+            return, and a stable accessible name. Check narrow screens, light and dark themes, and RTL. Scope component styles to avoid changing shadcn
+            controls, and check for hydration warnings after save and reload. Run <code>astro-studio check-project &lt;project-directory&gt;</code> and fix
+            missing paths, invalid slots, and cycles. Studio users may create the files through the documented copy and edit workflow. If either product cannot
+            perform insertion and editing, record the gap and do not advertise parity.
+          </p>
+        </article>
+        <article id="bridge">
+          <h3>6. Decide whether to continue the runtime bridge proof</h3>
+          <p>
+            The prior Input proof is optional research, not a prerequisite for the Dialog generation MVP. If continued, scope it to a local preview, enumerate
+            allowed operations and fields, validate each message, require explicit user consent, and reject unknown or stale targets. Verify multiple islands,
+            navigation, disconnect, duplicate registration, denial, and cleanup. Keep the bridge out of production output and deployment.
+          </p>
+          <p>
+            <strong>Done when</strong> the proof has reproducible browser evidence and a separate decision on its security and product value. Do not ship
+            deployed WebMCP as part of this plan.
+          </p>
+        </article>
+      </section>
+      <section aria-labelledby="failure">
+        <h2 id="failure">Failure, retry, and rollback</h2>
+        <p>
+          For handoff failures, differentiate a denied role, missing project, unavailable AI, and clipboard error. Keep the prompt available to retry or copy.
+          Once the user sends the draft, use the existing chat and agent controls for cancellation and errors. If setup or generation stops partway through, use
+          the reported diff to reconcile the manifest, lockfile, wrapper, and recipe before retrying. Preserve unrelated edits.
+        </p>
+        <p>
+          If a later release implements native apply, prove project-root containment, ownership, bounded output, conflict detection, stale-revision checks,
+          partial-write recovery, and stop-before-retry. Studio also needs to store the proposal purpose server-side, distinguish component creation from edits,
+          and validate the merged recipe against the candidate catalog before applying it.
+        </p>
+      </section>
+      <section aria-labelledby="seo">
+        <h2 id="seo">Generated output and search</h2>
+        <p>
+          Keep the starter's existing layout, title, description, canonical URL, Open Graph metadata, JSON-LD, robots, sitemap, configured site and base, and
+          response status semantics intact. The <a href="../../electron/project/shadcnStarterContent.ts">starter layout</a> and
+          <a href="../../electron/project/shadcnStarterSite.ts">site files</a> already own these behaviors. A Dialog must not introduce a second head manager or
+          change indexability. Preserve meaningful content, heading order, and real links in built HTML before hydration. Keep important page copy outside the
+          closed Dialog and compare the route's raw HTML and hydrated DOM. Check the built page for duplicate canonicals, competing robots directives, and
+          unexpected changes to title or structured data.
+        </p>
+        <p>
+          Test built fixtures with and without a configured site, custom base and trailing slash, and a missing route. Check absolute canonical URLs against the
+          configured production origin after deployment, and verify sitemap entries and robots references against real routes. Do not index local or private
+          preview URLs. Desktop preview is loopback; Studio's baked preview injects <code>noindex</code> and hosted drafts require authentication. Verify those
+          existing protections rather than substituting <code>robots.txt</code> for access control. No production build may include preview bridge tooling.
+        </p>
+        <p>
+          If maintainers separately approve public launch documentation, select its external destination and publish a feature-specific page with accurate
+          setup, compatibility, data disclosure, and limits. Check staging as private or noindex, then check the production page's canonical, status,
+          indexability and rendered links. This task does not require a new marketing site, analytics, or publication. References:
+          <a href="https://developers.google.com/search/docs/crawling-indexing/javascript/javascript-seo-basics">Google JavaScript SEO</a>,
+          <a href="https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls">canonical URLs</a>,
+          <a href="https://developers.google.com/search/docs/crawling-indexing/block-indexing">noindex</a>,
+          <a href="https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap">sitemaps</a>, and
+          <a href="https://docs.astro.build/en/guides/integrations-guide/sitemap/">Astro sitemap integration</a>.
+        </p>
+      </section>
+      <section aria-labelledby="release">
+        <h2 id="release">Verification and rollout</h2>
+        <ol>
+          <li>
+            Run focused handoff and negative-path tests for permission gates, prompt limits, stale project, draft preservation, clipboard failure, and retry.
+            Exercise the documented setup and recovery in disposable fixtures with real package-manager commands.
+          </li>
+          <li>
+            Run the project's Astro check and build, inspect initial HTML and production artifacts, and run browser checks for the Dialog and accessibility.
+            Test both a fresh starter and a compatible existing project. Record exact versions, unsupported combinations, and route JavaScript before and after
+            insertion. Confirm routes without the Dialog retain their existing JavaScript and appearance.
+          </li>
+          <li>
+            Run real Desktop and Studio insertion flows and the installed Studio project checker. Verify source, preview, save, undo, redo, and reopen. Record
+            any gap as a release blocker for the affected product.
+          </li>
+          <li>
+            Use GitHub Actions for the repository's compiler, lint, production build, contract, and regression gates. Verify the results on the current pull
+            request commit. Investigate failures against the baseline and document the evidence.
+          </li>
+          <li>
+            Release as an opt-in capability only after the handoff, recovery, compatibility, and end-to-end gates pass. Keep the entry unavailable for
+            unsupported projects. Document the tested version range and how to disable the action. Existing projects remain usable if the feature is disabled;
+            removing approved project dependencies or files requires a separate user decision.
+          </li>
+        </ol>
+      </section>
+      <section aria-labelledby="risks">
+        <h2 id="risks">Risks and deferred work</h2>
+        <ul>
+          <li>
+            SDK beta changes, dependency conflicts, and provider availability can invalidate the isolated proof. Pin and test the chosen versions and state the
+            supported matrix.
+          </li>
+          <li>
+            Generated code can be unsafe or inaccessible. Review and validation reduce risk but do not prove arbitrary output correct. The initial acceptance
+            target is the Dialog only.
+          </li>
+          <li>
+            Multiple files, lockfiles, concurrent edits, and process cancellation make rollback difficult. Verify the documented recovery and retry in the
+            trial.
+          </li>
+          <li>Record the tested project versions, exact Dialog API, and preview behavior in task 1. Existing provider setup owns credentials.</li>
+          <li>
+            General component generation, automatic acceptance of generated code, deployed WebMCP, a new starter base, broad SEO product work, and public
+            documentation publication are deferred. A future Studio server-authoring lane must enforce component:create versus component:edit, store the
+            proposal purpose, validate merged recipes, and use its stale-reference and rollback safeguards.
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

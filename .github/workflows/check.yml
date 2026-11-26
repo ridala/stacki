@@ -44,6 +44,12 @@ jobs:
       - run: npm run format:check
       - run: npm run check:policy
       - run: npm run typecheck
+      - name: Build and inspect the UI SDK Dialog fixture
+        working-directory: studio/test/fixtures/ui-sdk-dialog
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          npm run build
+          node verifyOutput.mts
 
   # The full gate on every platform the app ships on, split so no job carries
   # more than about a quarter of it. One Linux job runs the builds and the
