@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "components": {
+    "src/components/ProjectDialog.astro": {
+      "props": { "label": "Project details" },
+      "children": [
+        { "element": "p", "props": { "slot": "body" }, "text": "Review the project details." }
+      ]
+    }
+  }
+}

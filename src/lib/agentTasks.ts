@@ -70,10 +70,11 @@ export async function requestAgentTask(task: AgentTask): Promise<AgentTaskOutcom
       return answer;
     }
   }
-  return copyPrompt(checked.prompt);
+  return copyAgentPrompt(checked.prompt);
 }
 
-async function copyPrompt(prompt: string): Promise<AgentTaskOutcome> {
+/** Copies an agent prompt without dispatching to the host's registered handlers. */
+export async function copyAgentPrompt(prompt: string): Promise<Exclude<AgentTaskOutcome, { readonly tag: 'sent' }>> {
   try {
     await navigator.clipboard.writeText(prompt);
     return { tag: 'copied' };

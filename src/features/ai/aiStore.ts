@@ -264,11 +264,17 @@ const INITIAL: AiState = {
 };
 
 let state: AiState = INITIAL;
+let projectSession = Symbol();
 const listeners = new Set<() => void>();
 let unsubscribe: (() => void) | undefined;
 
 export function aiState(): AiState {
   return state;
+}
+
+/** Identifies one visit to a project, including a switch away and back to the same path. */
+export function aiProjectSession(): symbol {
+  return projectSession;
 }
 
 export function useAiState(): AiState {
@@ -293,10 +299,12 @@ export async function loadAiProject(projectPath: string): Promise<void> {
   listen();
   if (state.projectPath !== projectPath) {
     flushDrafts(); // The old project's last words are stored before its state goes.
+    projectSession = Symbol();
     update(() => ({ ...INITIAL, projectPath, visibility: state.visibility }));
   }
+  const session = projectSession;
   const [agents, chats] = await Promise.all([aiAgents(projectPath), aiChats(projectPath)]);
-  if (state.projectPath !== projectPath) {
+  if (projectSession !== session) {
     return; // Another project opened meanwhile.
   }
   update((current) => ({
@@ -321,20 +329,23 @@ export function resetAiStore(): void {
     clearTimeout(persistTimer);
     persistTimer = undefined;
   }
+  projectSession = Symbol();
   state = INITIAL;
 }
 
 /** Re-reads the chat list from the main process; for changes whose reply is one chat but which move others (pin, archive, create). */
 export async function refreshChatList(): Promise<void> {
   const projectPath = requireProject();
+  const session = projectSession;
   const reply = await aiChats(projectPath);
+  if (projectSession !== session) {
+    return;
+  }
   if (!reply.ok) {
     fail(reply.error);
     return;
   }
-  if (state.projectPath === projectPath) {
-    applyList(reply.value);
-  }
+  applyList(reply.value);
 }
 
 export function setChatListFilter(filter: ChatListFilter): void {
@@ -368,11 +379,21 @@ export async function installAgent(agent: AgentId): Promise<void> {
 }
 
 /** A new chat with `agent`. It starts with the settings last used for that agent: the main process applies them when its session starts. */
-export async function newChat(agent: AgentId, surface: AgentSurface = 'chat'): Promise<ChatId | undefined> {
+export async function newChat(agent: AgentId, surface: AgentSurface = 'chat', canOpen: () => boolean = () => true): Promise<ChatId | undefined> {
+  if (!canOpen()) {
+    return undefined;
+  }
   const projectPath = requireProject();
+  const session = projectSession;
   // The project agent chosen for this surface rides with the chat; main applies it once the session exists.
   const settings = agentSettingsForSurface(surface, agent);
   const reply = await aiChatCreate(settings.length === 0 ? { projectPath, agent } : { projectPath, agent, settings });
+  if (projectSession !== session) {
+    return undefined;
+  }
+  if (!canOpen()) {
+    return undefined;
+  }
   if (!reply.ok) {
     fail(reply.error);
     return undefined;
@@ -1188,8 +1209,11 @@ export async function openStartingChat(): Promise<void> {
     await openChat(chat.id);
     return;
   }
+  const session = projectSession;
   await newChat(preferredAgent());
-  assert(state.open !== undefined || state.error !== undefined, 'openStartingChat: a chat is open, or why not is shown');
+  if (projectSession === session) {
+    assert(state.open !== undefined || state.error !== undefined, 'openStartingChat: a chat is open, or why not is shown');
+  }
 }
 
 function rememberOpenChat(chat: ChatId): void {

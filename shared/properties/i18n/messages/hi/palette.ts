@@ -11,6 +11,12 @@ export const messages = {
   'palette.apps.empty.title': 'अभी कोई ऐप नहीं',
   'palette.apps.loading': 'ऐप लोड हो रहे हैं…',
   'palette.apps.marketplace': 'मार्केटप्लेस',
+  'palette.components.buildWithAI': 'AI से कंपोनेंट बनाएँ',
+  'palette.components.buildWithAI.copyTask': 'टास्क कॉपी करें',
+  'palette.components.buildWithAI.description':
+    'टास्क में कोडिंग एजेंट से यह जाँचने के लिए कहा जाता है कि प्रोजेक्ट React 19 का समर्थन करता है या नहीं, और निर्भरताएँ बदलने से पहले आपसे पूछने के लिए कहा जाता है।',
+  'palette.components.buildWithAI.draftReady': 'AI चैट में ड्राफ़्ट तैयार है। भेजने से पहले उसे देख लें।',
+  'palette.components.buildWithAI.openDraft': 'AI ड्राफ़्ट खोलें',
   'palette.create.folderRoot': '{folder} (रूट)',
   'palette.create.taken': '{file} पहले से मौजूद है।',
   'palette.create.hint': '{label}, {tag} बन जाता है और {file} के रूप में सहेजा जाता है',

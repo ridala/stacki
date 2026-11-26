@@ -1637,6 +1637,7 @@
     "src/features/palette/PaletteRowMenu.tsx",
     "src/features/palette/RenameComponentDialog.tsx",
     "src/features/palette/astroAssets.ts",
+    "src/features/palette/componentBuildPrompt.ts",
     "src/features/palette/componentName.ts",
     "src/features/palette/componentRolesMenu.ts",
     "src/features/palette/componentVisibility.ts",

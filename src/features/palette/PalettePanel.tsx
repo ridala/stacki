@@ -15,7 +15,19 @@ import type { MenuEntry } from '../../ui/Menu';
 import { rolesSubmenu } from './componentRolesMenu';
 import { componentRuleFile } from '../../../shared/properties/componentAccess';
 import { groupPaletteComponents, parseComponentUsage, prettyComponentName } from './paletteModel';
-import { CopyIcon, ElementComponentIcon, GearIcon, LayoutIcon, MoveFolderIcon, PencilIcon, PlusIcon, TargetIcon, TrashIcon, UsersIcon } from '../../ui/Icons';
+import {
+  CopyIcon,
+  ElementComponentIcon,
+  GearIcon,
+  LayoutIcon,
+  MoveFolderIcon,
+  PencilIcon,
+  PlusIcon,
+  SparkleIcon,
+  TargetIcon,
+  TrashIcon,
+  UsersIcon,
+} from '../../ui/Icons';
 import { PanelSearch } from '../../ui/PanelSearch';
 import { RenameComponentDialog } from './RenameComponentDialog';
 import type { RenameCandidate } from './renameAvailability';
@@ -28,6 +40,14 @@ import { useCurrentRole } from '../../lib/useCurrentRole';
 import { currentRole } from '../../lib/currentRole';
 import { useTranslate, useTranslateDescribed, useTranslateRich } from '../../lib/i18n/useTranslate';
 import { PanelHeader } from '../../ui/PanelHeader';
+import Popup from '../../ui/Popup';
+
+interface BuildComponentAction {
+  /** A project switch dismisses any confirmation that belonged to the previous project. */
+  readonly projectKey: string;
+  readonly destination: 'chat' | 'clipboard';
+  readonly run: () => Promise<void>;
+}
 
 interface PalettePanelProps {
   readonly components: readonly ScanComponent[];
@@ -48,6 +68,7 @@ interface PalettePanelProps {
   readonly onSelectInstance?: (id: string) => void;
   readonly createFrom: ComponentCreationSource;
   readonly createRequest?: number;
+  readonly buildComponent?: BuildComponentAction;
 }
 
 interface Point {
@@ -70,7 +91,7 @@ export default function PalettePanel(props: PalettePanelProps) {
   const groups = useMemo(() => groupPaletteComponents(list), [list]);
   return (
     <div className="panel-section grow">
-      <PaletteHeader source={props.createFrom} setCreating={setCreating} tooltip={tooltip} />
+      <PaletteHeader source={props.createFrom} setCreating={setCreating} tooltip={tooltip} buildComponent={props.buildComponent} />
       <PaletteSearch query={query} setQuery={setQuery} />
       <PaletteList
         groups={groups}
@@ -185,10 +206,12 @@ function PaletteHeader({
   source,
   setCreating,
   tooltip,
+  buildComponent,
 }: {
   readonly source: ComponentCreationSource;
   readonly setCreating: React.Dispatch<React.SetStateAction<boolean>>;
   readonly tooltip: ReturnType<typeof useDelayedTooltip>;
+  readonly buildComponent: BuildComponentAction | undefined;
 }) {
   const translate = useTranslate();
   const translateDescribed = useTranslateDescribed();
@@ -199,19 +222,22 @@ function PaletteHeader({
       <PanelHeader
         title={translate('palette.panel.title')}
         actions={
-          <span hidden={!allowed} className="tip-anchor" onMouseEnter={tooltip.show} onMouseLeave={tooltip.hide}>
-            <button
-              className="ghost"
-              aria-label={translate('palette.panel.new')}
-              disabled={!canCreate}
-              onClick={() => {
-                tooltip.hide();
-                setCreating(true);
-              }}
-            >
-              <PlusIcon size={14} />
-            </button>
-          </span>
+          <>
+            {allowed && buildComponent !== undefined ? <BuildComponentButton key={buildComponent.projectKey} action={buildComponent} /> : undefined}
+            <span hidden={!allowed} className="tip-anchor" onMouseEnter={tooltip.show} onMouseLeave={tooltip.hide}>
+              <button
+                className="ghost"
+                aria-label={translate('palette.panel.new')}
+                disabled={!canCreate}
+                onClick={() => {
+                  tooltip.hide();
+                  setCreating(true);
+                }}
+              >
+                <PlusIcon size={14} />
+              </button>
+            </span>
+          </>
         }
       />
       {tooltip.value && (
@@ -221,6 +247,75 @@ function PaletteHeader({
             : translateDescribed({ message: source.reason, messageRef: source.reasonRef })}
         </div>
       )}
+    </>
+  );
+}
+
+function BuildComponentButton({ action }: { readonly action: BuildComponentAction }) {
+  const translate = useTranslate();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const label = translate('palette.components.buildWithAI');
+  return (
+    <>
+      <button
+        type="button"
+        className="ghost"
+        aria-label={label}
+        aria-haspopup="dialog"
+        aria-disabled={busy}
+        title={label}
+        onClick={() => {
+          if (!busy) {
+            setOpen(true);
+          }
+        }}
+      >
+        <SparkleIcon size={14} />
+      </button>
+      {open ? (
+        <Popup className="modal confirm-dialog" label={label} onClose={() => setOpen(false)}>
+          {({ close, finish }) => (
+            <>
+              <div className="modal-header">{label}</div>
+              <div className="modal-body confirm-body">{translate('palette.components.buildWithAI.description')}</div>
+              <div className="modal-footer">
+                <button type="button" onClick={close}>
+                  {translate('ui.cancel')}
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => {
+                    const run = (): void => {
+                      if (!can(currentRole(), 'component:create')) {
+                        setBusy(false);
+                        return;
+                      }
+                      void action.run().finally(() => setBusy(false));
+                    };
+                    setBusy(true);
+                    if (action.destination === 'clipboard') {
+                      // Clipboard access needs the browser's user activation from this click.
+                      run();
+                      close();
+                    } else {
+                      // Let the modal release focus before handing it to the composer.
+                      finish(() => {
+                        setOpen(false);
+                        run();
+                      });
+                    }
+                  }}
+                >
+                  {translate(action.destination === 'chat' ? 'palette.components.buildWithAI.openDraft' : 'palette.components.buildWithAI.copyTask')}
+                </button>
+              </div>
+            </>
+          )}
+        </Popup>
+      ) : undefined}
     </>
   );
 }
