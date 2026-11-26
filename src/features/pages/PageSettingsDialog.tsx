@@ -53,6 +53,7 @@ export interface PageSettingsDialogProps {
   readonly allowed: { readonly rename: boolean; readonly create: boolean; readonly remove: boolean };
   /** Locale folders of the project's i18n config, when the host knows them. */
   readonly locales?: readonly string[];
+  readonly seo?: ReactNode;
   /** The Layout props section's content, drawn by the host; undefined leaves the section out. */
   readonly layoutProps?: ReactNode;
   /** The Template section's content for a CMS template page; undefined leaves the section out. */
@@ -257,6 +258,12 @@ function SettingsSections({ model, props }: { readonly model: Model; readonly pr
         <h3>{translate('pages.settings.section.general')}</h3>
         {home ? <HomeBadge /> : <UrlNameField key={props.page.name} model={model} props={props} />}
       </section>
+      {props.seo !== undefined && (
+        <section className="page-settings-section">
+          <h3>{translate('pages.settings.seo.heading')}</h3>
+          {props.seo}
+        </section>
+      )}
       {props.layoutProps !== undefined && (
         <section className="page-settings-section page-settings-layout">
           <h3>{translate('pages.settings.section.layout')}</h3>

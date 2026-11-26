@@ -264,3 +264,8 @@
 .page-settings-layout .panel-body {
   overflow: visible;
 }
+
+.page-settings-seo-input {
+  min-width: 0;
+  width: 100%;
+}
