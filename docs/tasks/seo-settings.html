@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stacki SEO settings tasks</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+        line-height: 1.6;
+      }
+      body {
+        max-width: 78ch;
+        margin: 3rem auto;
+        padding: 0 1.25rem 3rem;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.2;
+      }
+      h2 {
+        margin-top: 2rem;
+      }
+      h3 {
+        margin-top: 1.5rem;
+      }
+      a,
+      code {
+        overflow-wrap: anywhere;
+      }
+      dt {
+        font-weight: 650;
+      }
+      dd {
+        margin: 0 0 0.65rem;
+      }
+      li + li {
+        margin-top: 0.35rem;
+      }
+      section {
+        border-top: 1px solid GrayText;
+        margin-top: 2rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid GrayText;
+        padding: 0.4rem;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      @media (max-width: 40rem) {
+        body {
+          margin-top: 1rem;
+        }
+        th,
+        td {
+          padding: 0.3rem;
+          overflow-wrap: anywhere;
+        }
+      }
+      @media print {
+        :root {
+          color-scheme: light;
+        }
+        body {
+          max-width: none;
+          margin: 0;
+        }
+        a {
+          color: inherit;
+        }
+        h2,
+        h3 {
+          break-after: avoid;
+        }
+        tr {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Stacki SEO settings tasks</h1>
+        <p>
+          Implement page SEO settings in Desktop first, then Studio parity, starter support, and explicitly adopted site settings. Astro source remains the
+          source of truth.
+        </p>
+        <p>
+          Audited local <code>main</code> at <code>5d4cd354</code>. The work below covers editor, source, build and publish paths that affect SEO. It does not
+          assess a live site, traffic, rankings or unrelated repository features. Each task ends with an acceptance check before the next one starts.
+        </p>
+      </header>
+      <nav aria-label="Task index">
+        <ol>
+          <li><a href="#audit">Audit and decisions</a></li>
+          <li><a href="#contract">Define ownership and facts</a></li>
+          <li><a href="#desktop">Desktop page settings</a></li>
+          <li><a href="#studio">Studio parity</a></li>
+          <li><a href="#starter">Starter support</a></li>
+          <li><a href="#site">Adopted site settings</a></li>
+          <li><a href="#advanced">Dynamic routes and locales</a></li>
+          <li><a href="#verification">Verification and test matrix</a></li>
+          <li><a href="#references">References</a></li>
+        </ol>
+      </nav>
+      <section>
+        <h2 id="audit">Audit and decisions</h2>
+        <p>
+          Desktop <a href="../../src/app/shell/PageSettingsDesktop.tsx">PageSettingsDesktop</a> orders <code>title</code>, <code>description</code>,
+          <code>image</code>, <code>ogImage</code>, <code>canonical</code>, <code>noindex</code>, and <code>keywords</code> ahead of other layout props and
+          edits them through InstancePropFields. A matching name does not prove that a prop controls an SEO tag. The shared
+          <a href="../../src/features/pages/PageSettingsDialog.tsx">PageSettingsDialog</a> supplies section slots. Studio's
+          <a href="../../studio/src/features/pages/PagesPanel.tsx">PagesPanel</a> passes a rename-only host to that dialog. Studio already writes layout
+          attributes through its Properties inspector.
+        </p>
+        <p>
+          <a href="../../src/features/props/useLayoutMetadata.ts">useLayoutMetadata</a> and
+          <a href="../../electron/preload/framePageText.ts">framePageText</a> provide preview text with social metadata priority. They are not a complete
+          representation of the actual head. The <a href="../../shared/page/auditRendered.ts">rendered canonical check</a> uses a dummy base and compares paths.
+          The <a href="../../src/features/audits/auditRunner.ts">crawl-file check</a> looks for sitemap and robots presence. Neither proves the published URLs
+          are correct. Add separate head facts and treat unavailable or stale preview results as unknown.
+        </p>
+        <p>
+          Studio <a href="../../studio/src/features/settings/Settings.tsx">Settings</a>,
+          <a href="../../studio/src/features/collaboration/useDocument.ts">useDocument</a>, and
+          <a href="../../studio/src/features/roles/clientPolicy.ts">clientPolicy</a> are starting points for guarded collaborative writes, role and selection
+          checks, and Yjs undo. Review the source-document gates as well as client policy; UI visibility alone is not authorization. The current Studio guard
+          checks the canvas selection. SEO writes must check the actual layout target, including when the dialog opens for a different page. Read the
+          <a href="../contracts.md">shared contracts</a> before changing cross-process data or bridges.
+        </p>
+        <p>
+          The shadcn starter has head markup in <a href="../../electron/project/shadcnStarterContent.ts">shadcnStarterContent</a> and a sitemap with two
+          hardcoded gallery routes in <a href="../../electron/project/shadcnStarterSite.ts">shadcnStarterSite</a>. External create-lumos and vanilla Astro are
+          separate creation paths. The <a href="../../studio/test/fixtures/site/">Studio site fixture</a> includes project constants, BaseLayout, BaseHead,
+          Astro sitemap and robots. <a href="../../shared/properties/astroConfigText.ts">astroConfigText</a> reads configuration as text; computed or opaque
+          values do not establish a safe writable owner.
+        </p>
+        <p>
+          Desktop's <a href="../../electron/project/publisher.ts">publisher</a> uses a snapshot build. Studio uses a normal Astro build; its
+          <a href="../../studio/src/features/bake/bakeBuild.ts">demo bake</a> overrides the base and
+          <a href="../../studio/src/features/bake/bakeHtml.ts">inserts noindex</a>. Private Studio drafts and published output have different visibility.
+          Preview and draft origins must never become public canonicals. The <a href="../../electron/project/astroCopyPlan.ts">Astro Copy path</a> preserves
+          extension URLs and can emit redirect documents. The <a href="../apps.md">Apps API</a> can support optional tooling, but general file writes require
+          code-edit access and lack Studio undo. Use the native editor paths for this contribution.
+        </p>
+      </section>
+      <section>
+        <h2 id="contract">1. Define ownership and facts</h2>
+        <p>
+          Inventory static Astro source, rendered head and site configuration separately. Specify a bounded shared contract with declared values, actual
+          rendered facts, provenance, unsupported and unknown states. Capture actual title, description, canonical, robots and explicit social tags
+          independently, including duplicates and invalid placement. Bind each response to the project, source file, concrete preview route and navigation
+          generation and the rendered source revision or refresh generation. One template file can have several routes. Invalidate on navigation, save, undo,
+          and remote source changes. Keep facts unknown until the expected render arrives, even when the route stays the same. A generic
+          <code>image</code> prop provides no evidence of social image semantics.
+        </p>
+        <p>
+          Show read-only facts where ownership is unknown. For the first release, support concrete <code>.astro</code> routes with one resolvable layout
+          instance and an explicit author mapping. Implement the mapping as a bounded project-authored JSDoc annotation on supported layout props. Define its
+          accepted semantic names, require one field per role, and reject duplicate roles, incompatible types, unresolved imports and ambiguous targets.
+          Prototype the annotation with the existing prop inference on the fixture before exposing edits. Preserve unmarked projects' current Properties
+          workflow.
+        </p>
+        <p>
+          Model editable literal, inherited default, bound and unsupported values separately. Read only bound values and props shadowed by spreads in the first
+          release. Reset an optional literal override by removing its attribute if the existing layout can supply the default. Required props stay required. A
+          later binding override needs an explicit author-owned fallback representation or undo of the exact patch. Reload must never require reconstructing a
+          lost expression from a preview value.
+        </p>
+        <p>
+          Parse boundary data in <code>shared/</code> or the matching existing parser before use. Bound strings, tags, duplicate observations and preview
+          requests. Keep raw HTML and script out of the contract. Use source-located edits and expected revisions, preserve unrelated bytes, and report stale or
+          unsupported operations before writing. The Astro project remains the only store for metadata values.
+        </p>
+        <p>
+          <strong>Acceptance:</strong> A contract test covers valid, malformed and bounded facts, duplicate tags, stale replies, unknown preview, literal, bound
+          and ambiguous ownership. An audit shows declared and rendered values separately, with reasons for read-only fields. No source changes occur from
+          inspection. Delay an old same-route head reply until after saving a new title. The reply must never replace the new facts.
+        </p>
+      </section>
+      <section>
+        <h2 id="desktop">2. Desktop page settings MVP</h2>
+        <ol>
+          <li>
+            Add <strong>SEO</strong> before <strong>Layout props</strong> in Page settings. Reuse the current layout field editors and edit handlers. Use the
+            full schema to classify extra attributes before deciding which fields each section renders, so moved fields appear only once. Page rename,
+            duplication, homepage change and deletion keep their existing handlers.
+          </li>
+          <li>
+            Support page title, meta description, social image and alt text, canonical override and <code>noindex</code> when the author mapping exposes them.
+            Put canonical and indexing controls last. Show <strong>Use site default</strong> for an optional unset or resettable field, and make a denied or
+            bound field read-only with a reason. For optional <code>noindex</code>, offer three distinct states: inherit by removing the attribute, write
+            explicit <code>true</code>, or write explicit <code>false</code>. Classify bare booleans and exact <code>{true}</code> or <code>{false}</code>
+            expressions as literals. Leave computed expressions, unsupported formats and unknown owners inspectable.
+          </li>
+          <li>
+            Show the actual title, description, canonical and link card separately from authored fields. Label a search or social card approximation as a
+            preview. An unavailable preview leaves the source field visible and the output unknown. Use the shared message catalog, keyboard focus, existing
+            asset picker and modal controls. Keep long URLs and translations within the dialog. Validate absolute HTTP(S) canonical overrides without
+            credentials or fragments. Resolve local social assets with Astro's public base and the configured production origin. Keep server-side preview
+            queries scoped to the active project; avoid fetching arbitrary remote URLs on the user's behalf.
+          </li>
+          <li>
+            Use the ordinary editor save and undo path. Revalidate file, layout identity and revision when applying the patch. A failed write keeps the draft
+            visible and emits an actionable error. Run the linked audit for unsupported output rather than injecting fallback tags.
+          </li>
+        </ol>
+        <p>
+          For indexable pages, audit title, description, head validity, canonical origin and URL, robots and social declarations. For explicitly noindex pages,
+          suppress recommendations that presume indexing while still reporting malformed or conflicting directives. Do not add a meta keywords field as a Google
+          ranking recommendation. Do not impose fixed title or snippet limits; Google chooses display text and truncation varies.
+        </p>
+        <p>
+          <strong>Acceptance:</strong> Literal edits round-trip through source and build. Undo restores the exact source, reset removes an optional override,
+          and bound or unsupported layouts remain read-only with no filesystem changes. Preview navigation cannot display another page's facts. Audit recognizes
+          noindex exemptions and distinguishes the public origin from preview. Save, reopen, build and undo all three indexing states on a route that defaults
+          to <code>noindex</code>. Check the fixture's existing sitemap both when excluding and restoring a page. If a separately owned sitemap still lists a
+          newly excluded or noncanonical page, or omits a restored indexable page, show the observed mismatch and preserve its configuration. Show unknown for a
+          sitemap whose output cannot be checked.
+        </p>
+      </section>
+      <section>
+        <h2 id="studio">3. Studio parity</h2>
+        <p>
+          Register shared files in <a href="../../studio/scripts/shared-source.json">shared-source.json</a> and run
+          <code>npm --prefix studio run assemble</code>. Edit canonical source and Studio adapters. Wire the dialog to the exact current source document and
+          concrete route. Use <a href="../../studio/src/features/settings/attributeEdit.ts">attributeEdit</a> and the existing collaborative document write
+          path. Apply one deliberate edit as one local undo operation. Recheck role, document readiness, actual layout lock and revision before applying. Handle
+          remote edits with the document's established conflict path.
+        </p>
+        <p>
+          Keep access within the existing <code>page:layout</code> authority in the first Studio release. Before enabling SEO writes, extend the server's
+          <a href="../../studio/src/features/roles/documentAccess.ts">document policy</a> to reject protected SEO layout attribute changes from restricted
+          roles, including changes via raw collaboration updates. The current Client comparison checks the layout name and surrounding bytes. An opening tag's
+          attributes can change without changing either. Use the authoritative current source and check additions, removals and changes of protected attributes.
+          Keep permitted child content edits functional.
+        </p>
+        <p>
+          <strong>Acceptance:</strong> Authorized users see and edit the same supported fields as Desktop. Read-only roles and denied source documents cannot
+          write even through a forged collaboration update. Through the actual room, verify that a restricted role can still update child content, and that the
+          room rejects a protected attribute mutation without changing the document. Concurrent editing, selection changes, stale replies, undo and redo
+          preserve unrelated content. Private drafts are labeled and do not supply public canonical origins.
+        </p>
+      </section>
+      <section>
+        <h2 id="starter">4. Starter support</h2>
+        <p>
+          Define explicit SEO prop semantics in the shadcn starter's own layout and head, including a specifically named social image. Generate valid head
+          markup and an absolute canonical only when a verified public site URL exists. Replace the two-route sitemap assumption with a route inventory
+          appropriate to the starter. Keep robots behavior consistent with the deployed host root. Examine the separate create-lumos and vanilla Astro paths;
+          add support only where their generated source can safely declare the same ownership, and document any external generator limitation.
+        </p>
+        <p>
+          Use Astro's escaped markup for title and attributes. Verify that metadata changes do not break the existing JSON-LD output. For a complete managed
+          Open Graph card, emit title, type, URL and a crawlable absolute image URL, alongside alt text when available. Align <code>og:url</code> with the
+          canonical. Preserve existing <code>twitter:*</code> fields where the project uses them. Publish no automatic preview-host canonical or image URL when
+          the public site URL is missing.
+        </p>
+        <p>
+          <strong>Acceptance:</strong> Fresh starters build with and without a configured public site, preserve custom source on reopen, and expose only
+          declared fields. A newly added eligible route appears in the sitemap. Excluded routes stay out. Generated sitemap and robots agree with actual
+          published URLs. Existing projects are never migrated merely by opening settings.
+        </p>
+      </section>
+      <section>
+        <h2 id="site">5. Explicitly adopted site settings</h2>
+        <p>
+          Add a project-level <strong>Settings / SEO</strong> section after the page editor passes its output checks. Start with detected public URL, base,
+          trailing slash, output mode, sitemap and robots ownership. Link to the source when a value is computed, imported or produced by an existing
+          integration. Keep route policy read-only in this contribution because changing base or slash policy can move every public URL.
+        </p>
+        <p>
+          For an explicitly managed project, support the public site URL and author-declared site defaults: site name, title template, fallback description,
+          fallback social image and image alt text. The public URL belongs in Astro <code>site</code>. Defaults belong in the existing shared head or its
+          declared constants. Define fallback precedence as an explicit page value, then the project's existing default, then omission when the field is
+          optional. Apply the title template once. Support a managed sitemap and a robots sitemap reference only where each output has one clear owner.
+        </p>
+        <p>
+          Start adoption from a fresh read of the project. Adoption must identify exact source owners, show a reviewable change, and require an explicit user
+          action. Support only safely editable literal configuration; computed, imported or ambiguous configuration stays read-only. Preview the exact file diff
+          and every impacted route class. Re-read and compare all expected source revisions before applying edits. Use existing project containment and
+          witnessed write patterns. If a second file write fails, compare each affected file to the exact bytes adoption wrote before attempting an atomic,
+          witnessed restore. Preserve an intervening edit and report each file that needs recovery. Re-read affected files after recovery. If the host cannot
+          enforce this compare-and-write guarantee, limit adoption to one-file edits. Return a conflict for changed sources, duplicate owners or unsupported
+          config shapes.
+        </p>
+        <p>
+          Define one native owner for each output: Astro configuration for site and URL policy, the project's existing head for canonical and metadata, and an
+          explicitly adopted sitemap or robots implementation for those files. Do not generate competing outputs. Managed sitemap entries must be public
+          canonical URLs and exclude noindex, noncanonical, redirect, 404 and probe routes. Use real build output or an explicit route declaration, not guessed
+          paths. A root <code>/robots.txt</code> belongs to the host even when the app is deployed under a base path; document deployment responsibility and do
+          not assume a subpath file controls the host root.
+        </p>
+        <p>
+          Use the same route policy for managed head tags and sitemap filtering. <code>noindex</code> is a page directive and needs crawler access. A robots
+          crawl block can keep crawlers from seeing the directive. Preserve independent <code>nofollow</code> and existing HTTP headers. Warn when a configured
+          canonical or indexing directive conflicts with observable output. Sitemap generation should omit duplicates that canonicalize elsewhere and preserve
+          intentional redirect aliases as redirects.
+        </p>
+        <p>
+          <strong>Acceptance:</strong> Adoption shows a diff and writes only approved owners; cancellation, conflict and unsupported config leave files
+          unchanged. Force a failed second write with an intervening edit to the first. Keep the newer edit and report the recovery status. Builds cover root
+          and subpath bases, trailing slash policies and <code>.html</code> output. Sitemap, canonical and robots are consistent with the public deployment, and
+          demo bake noindex and base override do not leak into published configuration.
+        </p>
+      </section>
+      <section>
+        <h2 id="advanced">6. Dynamic routes, SSR, collections and i18n</h2>
+        <ol>
+          <li>
+            For statically generated dynamic routes, prototype with the Astro fixture and verify each concrete output from <code>getStaticPaths()</code>. Bind
+            per-entry SEO to explicitly selected content schema fields through the CMS editing path. Label template-level defaults as affecting multiple URLs.
+            Check removed entries, duplicate slugs, stable entry identity and draft entries.
+          </li>
+          <li>
+            For Markdown and MDX, add a format-aware frontmatter path only where the layout is known to use the mapped values. Test comments, delimiters,
+            existing expressions, bad YAML, and exact-byte preservation outside the changed fields.
+          </li>
+          <li>
+            For real on-demand SSR, require a bounded author-provided route inventory or a deployment-specific sitemap endpoint. Validate true public requests
+            with the production adapter and a request hostname distinct from the configured public origin. Probe HTTP robots headers and keep unavailable facts
+            unknown.
+          </li>
+          <li>
+            For localized pages, preserve each route's own metadata and canonical. Add alternates only from explicit route groups with absolute, reciprocal
+            links including each page's own URL. Verify same-language canonicals where available and treat <code>x-default</code> as optional.
+          </li>
+        </ol>
+        <p>
+          <strong>Acceptance:</strong> Fixture builds and deployed SSR integration tests exercise multiple routes, changed collection data, missing provider
+          values, localized variants and failures. Unsupported providers remain untouched. Document cache, refresh and host responsibilities before enabling
+          each integration.
+        </p>
+        <p>
+          Risk and effort: Desktop ownership and accurate rendered facts are high effort and high risk because source edits and asynchronous previews can
+          corrupt or misrepresent state. Studio parity adds collaboration and authorization risk. Starter changes are medium effort with compatibility risk for
+          existing generated sites. Site adoption and SSR/i18n are high effort and deployment-dependent; ship them separately after the MVP and do not promise
+          automatic coverage of arbitrary Astro projects.
+        </p>
+      </section>
+      <section>
+        <h2 id="verification">Verification and test matrix</h2>
+        <p>
+          Use the repository's pinned Node version and install the root, Studio and Studio fixture dependencies as documented. Run the contribution checks from
+          the repository root. Use a disposable fixture checkout for build and publish-path tests.
+        </p>
+        <pre><code>npm run build:runtime
+npm run check:changed
+env -u ELECTRON_RUN_AS_NODE npm test
+npm run studio:verify
+npm run roundtrip:report
+npm --prefix studio run dev
+npm --prefix studio run test:browser</code></pre>
+        <p>
+          Run the browser suite against the running local draft. Run <code>npm --prefix studio/test/fixtures/site run build</code> for a real static build. Use
+          the fixture's preview server to inspect actual URLs and status codes, then parse the built HTML, XML and robots response. Assert values and duplicates
+          explicitly. A passing Stacki audit by itself does not cover protocol, origin or URL consistency.
+        </p>
+        <p>
+          Extend <a href="../../test/renderer/pages/pageSettingsDialog.test.js">Page settings dialog tests</a>,
+          <a href="../../test/shared/page/auditRendered.test.ts">rendered audit tests</a>,
+          <a href="../../test/shared/properties/i18n/catalogParity.test.ts">translation parity</a>,
+          <a href="../../studio/test/clientRole.browser.ts">Studio Client role tests</a>,
+          <a href="../../studio/test/collaborativeEdits.browser.ts">Studio collaborative edit tests</a>,
+          <a href="../../test/electron/project/shadcnStarterContent.test.ts">starter tests</a>, and
+          <a href="../../studio/test/demoBake.test.ts">demo bake tests</a> where each step changes behavior.
+        </p>
+        <table>
+          <caption>
+            Regression coverage by area
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Area</th>
+              <th scope="col">Required cases</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Ownership and source</th>
+              <td>
+                Literal and explicit declarations, arbitrary image prop, bound read-only value, optional reset, ambiguous owner, malformed input, exact
+                round-trip, no-op and conflict. Extend existing source round-trip and legacy fixtures.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Facts and UI</th>
+              <td>
+                Actual title versus social title, duplicate or invalid head, missing preview, stale response, noindex exemptions, public versus preview origin,
+                keyboard access and mobile layout.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Studio</th>
+              <td>
+                Role and client policy, source-document denial, forged request, collaborative concurrent change, selection switch, Yjs undo/redo, private draft
+                and published output. Extend existing role tests.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Build and URLs</th>
+              <td>
+                Desktop snapshot, Studio normal build and demo bake, root and nested base, slash variants, <code>.html</code>, missing site, sitemap exclusions,
+                host-root robots, redirects and 404s.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Compatibility</th>
+              <td>
+                Existing fixture BaseLayout/BaseHead and constants, Astro sitemap and robots, shadcn starter, external Lumos and vanilla Astro, old projects
+                with unsupported or computed config. Assert no writes on inspection.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Later integrations</th>
+              <td>
+                Dynamic route inventory, opt-in SSR, collection updates, locale reciprocity and unknown mappings; compare emitted public URLs with deployed
+                output.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section>
+        <h2 id="references">Primary references</h2>
+        <ul>
+          <li>
+            Google Search Central: <a href="https://developers.google.com/search/docs/appearance/title-link">title links</a>,
+            <a href="https://developers.google.com/search/docs/appearance/snippet">snippets</a>,
+            <a href="https://developers.google.com/search/docs/crawling-indexing/special-tags">supported tags</a>, and
+            <a href="https://developers.google.com/search/docs/crawling-indexing/valid-page-metadata">valid page metadata</a>.
+          </li>
+          <li>
+            Google Search Central: <a href="https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls">canonical URLs</a>,
+            <a href="https://developers.google.com/search/docs/crawling-indexing/block-indexing">noindex</a>,
+            <a href="https://developers.google.com/search/docs/crawling-indexing/robots/intro">robots.txt</a>,
+            <a href="https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap">sitemaps</a>, and
+            <a href="https://developers.google.com/search/docs/specialty/international/localized-versions">localized versions</a>.
+          </li>
+          <li>
+            Astro: <a href="https://docs.astro.build/en/reference/configuration-reference/">configuration</a> and
+            <a href="https://docs.astro.build/en/guides/integrations-guide/sitemap/">sitemap integration</a>. On-demand routes require explicit URLs; the
+            integration cannot automatically enumerate them.
+          </li>
+          <li><a href="https://ogp.me/">Open Graph protocol</a>. Treat platform-specific presentation as outside the guarantee of this editor.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

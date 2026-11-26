@@ -32,7 +32,8 @@ export function componentFileOf(context: ComponentReference): string | undefined
   return named.length === 1 ? named[0]?.path : undefined;
 }
 
-function importedComponent(context: ComponentReference): ScanComponent | undefined {
+/** Resolves only the actual import so source edits never use a same-name guess. */
+export function importedComponent(context: ComponentReference): ScanComponent | undefined {
   const specifier = context.imports.find((item) => item.name === context.name)?.path;
   const installed = context.components.find((item) => item.origin?.kind === 'package' && item.origin.importPath === specifier);
   if (installed) {
