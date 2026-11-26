@@ -79,7 +79,9 @@ function renderPropsPanel(props: PropsPanelProps, stashRef: React.MutableRefObje
  * Only an instance's own props, drawn by the same editors and written through the same handlers as the Properties
  * panel: the Page settings dialog shows its layout's props this way, so a field there is the panel's field.
  */
-export function InstancePropFields(props: Omit<PropsPanelProps, 'node'> & { readonly node: ElementPropsPanelProps['node'] }) {
+export function InstancePropFields(
+  props: Omit<PropsPanelProps, 'node'> & { readonly node: ElementPropsPanelProps['node']; readonly hiddenFields?: ReadonlySet<string> },
+) {
   const stashRef = useRef(new Map<string, PropValues>());
   return (
     <PropValuePolicyContext.Provider value={props.valuePolicy ?? 'instance'}>
@@ -87,13 +89,13 @@ export function InstancePropFields(props: Omit<PropsPanelProps, 'node'> & { read
     </PropValuePolicyContext.Provider>
   );
 }
-function InstancePropFieldsView(props: ElementPropsPanelProps) {
+function InstancePropFieldsView(props: ElementPropsPanelProps & { readonly hiddenFields?: ReadonlySet<string> }) {
   const state = useElementProps(props);
   return (
     <SoundHere>
       <div className="panel-section" ref={state.rootRef}>
         <div className="panel-body" style={{ padding: 0 }}>
-          <ElementSchemaFields state={state} />
+          <ElementSchemaFields state={state} hiddenFields={props.hiddenFields} />
           <ElementExtraFields state={state} />
         </div>
       </div>

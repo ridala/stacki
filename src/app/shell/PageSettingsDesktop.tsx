@@ -15,6 +15,8 @@ import { can } from '../../../shared/properties/projectRoles';
 import type { FieldDefinition } from '../../features/props/propRules';
 import { InstancePropFields } from '../../features/props/PropsPanel';
 import { PageSettingsDialog, type PageSettingsHost } from '../../features/pages/PageSettingsDialog';
+import { PageSeoFields } from '../../features/pages/PageSeoFields';
+import { pageSeoFields } from '../../features/pages/pageSeo';
 import { ContentFields } from '../../features/pages/PageTemplateDialog';
 import { ENTRY_ID, EMPTY_TEMPLATE_FORM, type TemplateForm } from '../../features/pages/pageTemplateForm';
 import { readContentCollections, type AppCollection } from '../../ipc/appBridge';
@@ -28,13 +30,15 @@ import TipAnchor from '../../ui/TipAnchor';
 import { BracesIcon, PlusIcon } from '../../ui/Icons';
 import { SkeletonRows } from '../../ui/Skeleton';
 import type { ShellView } from '../App';
+import { importedComponent } from '../model/componentReference';
 import { settingsHandlers, settingsValues } from './AppPanes';
 
-/** Props a layout passes to the page's head, shown first when the layout declares them; never invented. */
+/** Preserve the existing Layout props order for projects without explicit SEO mappings. */
 const SEO_PROPS = ['title', 'description', 'image', 'ogImage', 'canonical', 'noindex', 'keywords'] as const;
 
 export function DesktopPageSettings({ app, page, close }: { readonly app: ShellView; readonly page: ScanPage; readonly close: () => void }) {
   const role = useCurrentRole();
+  const translate = useTranslate();
   const projectPath = app.project.path;
   // The layout props are the open page's: settings for another page open that page first, so edits show on the canvas.
   const open = app.currentScanPage?.path === page.path;
@@ -47,6 +51,26 @@ export function DesktopPageSettings({ app, page, close }: { readonly app: ShellV
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per page the dialog opens for; a later navigation is the person's own
   }, [page.path]);
   const host = useDesktopHost(app, page);
+  const layout = app.layoutNode;
+  const loaded = open && app.pageState !== undefined;
+  const owner =
+    loaded && page.name.endsWith('.astro') && !page.name.includes('[') && layout?.kind === 'component' && !layout.dynamicTag
+      ? importedComponent({ name: layout.name, project: projectPath, file: page.path, imports: app.model?.imports ?? [], components: app.insertables })
+      : undefined;
+  const fields = owner !== undefined && layout?.kind === 'component' ? pageSeoFields(owner.schema ?? [], layout) : [];
+  const reason = loaded && app.pageState?.editable === false ? app.pageState.reason : undefined;
+  const write =
+    owner !== undefined && can(role, 'page:layout') && layout?.kind === 'component'
+      ? (name: string, value: Parameters<ShellView['setProp']>[2]) => {
+          const current = app.pageStateRef.current;
+          if (current.currentPage?.path === page.path && current.pageState?.editable && current.pageState.source === app.pageState?.source) {
+            app.setProp(layout.id, name, value, true, app.pathFor(layout.id));
+            return;
+          }
+          app.showToast(translate('error.componentRemoval.changedSince', { file: page.name }), 'error');
+        }
+      : undefined;
+
   return (
     <PageSettingsDialog
       page={page}
@@ -54,7 +78,14 @@ export function DesktopPageSettings({ app, page, close }: { readonly app: ShellV
       folders={app.scan.pageFolders}
       host={host}
       allowed={{ rename: can(role, 'page:rename'), create: can(role, 'page:create'), remove: can(role, 'page:delete') }}
-      layoutProps={<LayoutProps app={app} page={page} close={close} />}
+      seo={
+        loaded ? (
+          <PageSeoFields owner={JSON.stringify([page.path, owner?.path, layout?.id])} fields={fields} reason={reason} write={write} />
+        ) : (
+          <SkeletonRows count={2} />
+        )
+      }
+      layoutProps={<LayoutProps app={app} page={page} close={close} hiddenFields={new Set(fields.map((field) => field.name))} />}
       template={page.name.includes('[') ? <TemplateSettings app={app} page={page} projectPath={projectPath} /> : undefined}
       close={close}
     />
@@ -172,11 +203,23 @@ export function orderedLayoutFields(schema: readonly FieldDefinition[]): readonl
   return [...seo, ...schema.filter((field) => !seo.includes(field))];
 }
 
-function LayoutProps({ app, page, close }: { readonly app: ShellView; readonly page: ScanPage; readonly close: () => void }) {
+function LayoutProps({
+  app,
+  page,
+  close,
+  hiddenFields,
+}: {
+  readonly app: ShellView;
+  readonly page: ScanPage;
+  readonly close: () => void;
+  readonly hiddenFields: ReadonlySet<string>;
+}) {
   const translate = useTranslate();
-  const loaded = app.currentScanPage?.path === page.path && app.model !== undefined;
-  if (!loaded) {
+  if (app.currentScanPage?.path !== page.path || app.pageState === undefined) {
     return <SkeletonRows count={3} />;
+  }
+  if (!app.pageState.editable) {
+    return <div className="page-settings-note">{translate('pages.settings.layout.none')}</div>;
   }
   const node = app.layoutNode;
   if (node === undefined || node.kind !== 'component') {
@@ -210,7 +253,7 @@ function LayoutProps({ app, page, close }: { readonly app: ShellView; readonly p
   }
   // The Properties panel's values and handlers, aimed at the layout instance instead of the selection.
   const view: ShellView = { ...app, selectedId: 'layout', selectedNode: node, selectedSchema: schema, selectedComponent: app.layoutComponent };
-  return <InstancePropFields {...settingsValues(view)} {...settingsHandlers(view, translate)} node={node} />;
+  return <InstancePropFields {...settingsValues(view)} {...settingsHandlers(view, translate)} node={node} hiddenFields={hiddenFields} />;
 }
 
 type TemplateState =

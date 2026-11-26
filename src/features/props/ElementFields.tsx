@@ -159,7 +159,7 @@ export function ElementLooseText({ state }: { readonly state: ElementState }) {
   );
 }
 
-export function ElementSchemaFields({ state }: { readonly state: ElementState }) {
+export function ElementSchemaFields({ state, hiddenFields }: { readonly state: ElementState; readonly hiddenFields?: ReadonlySet<string> | undefined }) {
   // Words typed on the canvas into text this instance's prop sets show here as
   // they are typed; the attribute itself is written when typing ends.
   const draft = useCanvasTextDraft(state);
@@ -184,6 +184,7 @@ export function ElementSchemaFields({ state }: { readonly state: ElementState })
   return (
     <>
       {schema
+        .filter((field) => !hiddenFields?.has(field.name))
         .filter(appliesNow)
         .filter((field) => field.name !== 'class' && !(styleField && field.name === 'style'))
         .map((field) => {
