@@ -134,7 +134,8 @@ test('the complete channel inventory matches real main and terminal registration
   // A folder from outside the app adds two (project:inspectFolder for a window drop, project:takeOpenedFolders for
   // the icon and the command line; shared/ipc/folderOpen.ts), 326 in all.
   // The shadcn wizard adds one (project:inspectShadcnPreset) so main can resolve a preset before site creation, 329 including the two shadcn project settings channels.
-  assert.equal(harness.handlers.size, 329);
+  // Existing Astro setup adds a read-only scan and a witnessed apply.
+  assert.equal(harness.handlers.size, 331);
   assert.equal(terminalChannels.length, 4);
   assert.deepEqual([...Object.keys(IPC_PAYLOADS)].sort(), [...harness.handlers.keys(), ...terminalChannels].sort());
   // One-way `send` listeners bypass the invoke registrar, so each must name
@@ -151,6 +152,22 @@ test('the complete channel inventory matches real main and terminal registration
     ['ai:ack'],
   );
   assert.match(ai, /parseSendPayload\('ai:ack'/, 'ai:ack is parsed');
+});
+
+test('setup refuses IPC from outside the main frame even when its path matches the project recorded by scan', async (context) => {
+  const harness = fixture();
+  context.after(harness.dispose);
+  await harness.invoke('project:scan', harness.root);
+
+  for (const request of [{ projectPath: harness.root }, { projectPath: harness.root, permission: 'confirm-open' }]) {
+    const result = toRecord(await harness.invoke('project:setupScan', request));
+    assert.equal(result?.['ok'], false);
+    assert.equal(toRecord(result?.['error'])?.['code'], 'unauthorized');
+  }
+  const result = toRecord(await harness.invoke('project:setupApply', { projectPath: harness.root, revision: 'a'.repeat(64), kinds: ['components'] }));
+  assert.equal(result?.['ok'], false);
+  assert.equal(toRecord(result?.['error'])?.['code'], 'unauthorized');
+  assert.equal(fs.existsSync(path.join(harness.root, '.stacki', 'folders.json')), false);
 });
 
 test('malformed writes fail before altering disk; valid writes still work', async (context) => {

@@ -739,6 +739,30 @@ How the scan reads the disk:
 - A save never replaces a read-only file: `replaceFileAtomic` answers a `filesystem` failure naming
   the file (renaming over it would succeed and quietly override the protection).
 
+## Existing Astro project setup
+
+Desktop offers setup before starting the preview for an Astro project selected in the folder
+picker. An open project can request another setup report in Settings → Folders. The setup scan
+uses a bounded local inventory. It reads Astro configuration as text and never installs
+dependencies or executes project code. The project's ordinary open and preview still follow
+their existing lifecycle when the user continues to the editor.
+
+Only the main app frame can request setup. A native picker selection grants access to that
+directory identity. If a project opened through Recents, a drop or the command line has no
+grant, Settings asks the user to select the same folder before scanning.
+
+The setup report shows page discovery in Desktop and Studio separately. Its folder suggestions
+are limited to settings the editors already understand. The report includes before and after
+counts so a user can see when changing a folder choice would reduce an editor's catalog. A
+partial scan or an unresolved configuration is visible in the report. These counts describe
+source discovery rather than the URLs or metadata a host serves in production.
+
+Saving selected suggestions writes `.stacki/folders.json` through the project's witnessed metadata
+writer. The setup report carries a revision that must still match when the user saves. A stale
+report needs another scan and review. Existing explicit folder choices, CMS settings and
+unknown metadata keys are preserved. Setup does not move files, rewrite Astro configuration,
+build, publish or deploy the site.
+
 ## Other shared contracts
 
 - `brand.ts` constructs `NodeId`, `FilePath`, `ProjectPath`, `Digest`,

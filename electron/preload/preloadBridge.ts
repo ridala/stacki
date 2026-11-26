@@ -168,6 +168,8 @@ function projectBridge() {
     changeShadcnSetting: invoke('project:changeShadcnSetting'),
     inspectShadcnPreset: invoke('project:inspectShadcnPreset'),
     scanProject: invoke('project:scan'),
+    scanProjectSetup: invoke('project:setupScan'),
+    applyProjectSetup: invoke('project:setupApply'),
     listProjectClasses: invoke('project:classes'),
     watchProject: invoke('watch:start'),
 

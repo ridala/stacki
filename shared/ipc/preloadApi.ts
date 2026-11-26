@@ -38,6 +38,8 @@ interface InvokeChannels {
   readonly changeShadcnSetting: 'project:changeShadcnSetting';
   readonly inspectShadcnPreset: 'project:inspectShadcnPreset';
   readonly scanProject: 'project:scan';
+  readonly scanProjectSetup: 'project:setupScan';
+  readonly applyProjectSetup: 'project:setupApply';
   readonly listProjectClasses: 'project:classes';
   readonly watchProject: 'watch:start';
   readonly listAssets: 'assets:list';

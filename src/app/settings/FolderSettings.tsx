@@ -34,6 +34,8 @@ import { pickProjectPath, readFoldersFile, saveFoldersFile, type FoldersFile } f
 import { notifyProjectSourcesChanged } from '../state/projectSources';
 import { CmsSources } from './CmsSourceSettings';
 import { SettingsSaveRow, SettingsSection, useSaveIndicator } from './SettingsLayout';
+import { hasProjectSetupChannels } from '../../ipc/projectSetupBridge';
+import { ProjectSetupDialog } from '../../features/projectSetup/ProjectSetupDialog';
 
 type Load =
   | { readonly kind: 'loading' }
@@ -83,6 +85,33 @@ export interface FolderSettingsProps {
 
 export function FolderSettings(props: FolderSettingsProps) {
   const translate = useTranslate();
+  const [reviewing, setReviewing] = useState(false);
+  const [setupVersion, setSetupVersion] = useState(0);
+  const checkSetup = hasProjectSetupChannels() ? (
+    <button type="button" onClick={() => setReviewing(true)}>
+      {translate('settings.folders.setup.check')}
+    </button>
+  ) : undefined;
+  return (
+    <>
+      <FolderSettingsContent {...props} checkSetup={checkSetup} setupVersion={setupVersion} />
+      {reviewing && (
+        <ProjectSetupDialog
+          mode="settings"
+          projectPath={props.projectPath}
+          onClose={() => setReviewing(false)}
+          onSaved={() => {
+            setSetupVersion((version) => version + 1);
+            notifyProjectSourcesChanged();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function FolderSettingsContent(props: FolderSettingsProps & { readonly checkSetup: ReactNode; readonly setupVersion: number }) {
+  const translate = useTranslate();
   const translateDescribed = useTranslateDescribed();
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [notice, setNotice] = useState<Described | undefined>(undefined);
@@ -105,7 +134,7 @@ export function FolderSettings(props: FolderSettingsProps) {
     return () => {
       active = false;
     };
-  }, [props.projectPath]);
+  }, [props.projectPath, props.setupVersion]);
 
   if (load.kind === 'loading') {
     return (
@@ -115,9 +144,10 @@ export function FolderSettings(props: FolderSettingsProps) {
     );
   }
   if (load.kind === 'failed') {
-    // The tab stays an empty frame (the failure is the toast) so nothing below it moves into its place.
+    // Keep the read-only setup check available even when the folder file could not be read.
     return (
       <section className="app-folders" aria-label={translate('settings.folders.aria')}>
+        {props.checkSetup}
         <ErrorToast message={load.message} />
       </section>
     );
@@ -177,7 +207,7 @@ export function FolderSettings(props: FolderSettingsProps) {
       <SettingsSaveRow saving={indicator.state} />
       <ErrorToast message={file.read.kind === 'invalid' ? translate('settings.folders.unreadable', { message: file.read.message }) : undefined} />
       <ErrorToast message={notice === undefined ? undefined : translateDescribed(notice)} />
-      <SettingsSection title={translate('settings.folders.panels')}>
+      <SettingsSection title={translate('settings.folders.panels')} action={props.checkSetup}>
         {PROJECT_FOLDER_KINDS.map((kind) => (
           <FolderRow
             key={kind}
