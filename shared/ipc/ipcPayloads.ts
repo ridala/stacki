@@ -1,3 +1,4 @@
+import { parseProjectSetupApply, parseProjectSetupScan } from './projectSetup';
 import { parseShadcnSettingsChange, parseShadcnSettingsRequest } from './shadcnSettings';
 import { parseLocaleSet } from './localeChannel';
 import { parseMergeResolution } from './mergeResolution';
@@ -775,6 +776,8 @@ export const IPC_PAYLOADS = {
   'project:pending': nothing,
   'project:resolveImport': object({ ...source }),
   'project:scan': pathText,
+  'project:setupScan': parseProjectSetupScan,
+  'project:setupApply': parseProjectSetupApply,
   'recents:add': pathText,
   'recents:list': nothing,
   'recents:refreshThumb': pathText,

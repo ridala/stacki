@@ -16,6 +16,7 @@ import { ensureToolPath, run } from '../lib/nodeTools';
 import { isAstroProject } from '../project/projectFiles';
 import { detectPackageManager, installArguments } from '../project/packageManager';
 import { packageManagerLabel, type PackageManager } from '../../shared/properties/packageManager';
+import type { IsSetupFrame, ProjectSetupAccess } from './projectSetupHandlers';
 import type { MainHost } from './mainHost';
 import { translateMain } from '../lib/mainLocale';
 import { folderOpenChoice, siteFolderChoice } from '../project/folderOpen';
@@ -28,7 +29,11 @@ import type { IpcResults } from '../../shared/ipc/ipcResults';
 type CreationChannel = 'project:createAstro' | 'project:createStarter' | 'project:createAstroCopy';
 type RegisterCreation = <Channel extends CreationChannel>(channel: Channel, create: (request: IpcPayloads[Channel]) => Promise<IpcResults[Channel]>) => void;
 
-export function registerProjectHandlers(host: Pick<MainHost, 'ipcMain' | 'send' | 'showOpenDialog'>): void {
+export function registerProjectHandlers(
+  host: Pick<MainHost, 'ipcMain' | 'send' | 'showOpenDialog'>,
+  setup: ProjectSetupAccess,
+  isSetupFrame: IsSetupFrame,
+): void {
   // Every creation wizard reads the same log and progress channels. Refuse concurrent runs
   // before they can emit output or touch the chosen folder.
   let creating = false;
@@ -46,14 +51,19 @@ export function registerProjectHandlers(host: Pick<MainHost, 'ipcMain' | 'send' 
       }
     });
   };
-  registerProjectOpenDialogHandlers(host);
+  registerProjectOpenDialogHandlers(host, setup, isSetupFrame);
   registerProjectCreateAstroHandlers(host, registerCreation);
   registerProjectCreateStarterHandlers(host, registerCreation);
-  registerAstroCopyHandlers(host, registerCreation);
+  registerAstroCopyHandlers(host, setup, isSetupFrame, registerCreation);
 }
 
-function registerProjectOpenDialogHandlers({ ipcMain, showOpenDialog }: Pick<MainHost, 'ipcMain' | 'showOpenDialog'>): void {
-  ipcMain.handle('project:openDialog', async () => {
+function registerProjectOpenDialogHandlers(
+  { ipcMain, showOpenDialog }: Pick<MainHost, 'ipcMain' | 'showOpenDialog'>,
+  setup: ProjectSetupAccess,
+  isSetupFrame: IsSetupFrame,
+): void {
+  ipcMain.handle('project:openDialog', async (event) => {
+    const selection = isSetupFrame(event) ? setup.beginPicker() : undefined;
     const result = await showOpenDialog({
       title: translateMain('dialog.open.project.title'),
       properties: ['openDirectory'],
@@ -68,6 +78,9 @@ function registerProjectOpenDialogHandlers({ ipcMain, showOpenDialog }: Pick<Mai
         canceled: false as const,
         error: 'That folder does not look like an Astro project ' + '(no astro dependency or astro.config found).',
       };
+    }
+    if (selection !== undefined && isSetupFrame(event)) {
+      setup.acceptPicker(selection, directory);
     }
     return { canceled: false as const, projectPath: directory };
   });
@@ -169,11 +182,14 @@ function registerProjectCreateStarterHandlers({ ipcMain, send }: Pick<MainHost, 
 
 function registerAstroCopyHandlers(
   { ipcMain, send, showOpenDialog }: Pick<MainHost, 'ipcMain' | 'send' | 'showOpenDialog'>,
+  setup: ProjectSetupAccess,
+  isSetupFrame: IsSetupFrame,
   registerCreation: RegisterCreation,
 ): void {
   // The Welcome screen's "Open from folder": an Astro project opens, a plain website is offered an
   // Astro copy (shared/ipc/astroCopy.ts), and anything else is said to be neither.
-  ipcMain.handle('project:openSiteDialog', async (): Promise<SiteFolderChoice> => {
+  ipcMain.handle('project:openSiteDialog', async (event): Promise<SiteFolderChoice> => {
+    const selection = isSetupFrame(event) ? setup.beginPicker() : undefined;
     const result = await showOpenDialog({
       title: translateMain('dialog.open.project.title'),
       properties: ['openDirectory'],
@@ -182,7 +198,11 @@ function registerAstroCopyHandlers(
     if (result.canceled || directory === undefined) {
       return { kind: 'canceled' };
     }
-    return siteFolderChoice(path.resolve(directory));
+    const choice = siteFolderChoice(path.resolve(directory));
+    if (choice.kind === 'astro' && selection !== undefined && isSetupFrame(event)) {
+      setup.acceptPicker(selection, choice.projectPath);
+    }
+    return choice;
   });
   // A folder dropped on the window: the renderer names it from the drag, and main decides what is there
   // (electron/project/folderOpen.ts) before it is opened, copied or refused like the dialog's choice.

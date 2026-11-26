@@ -15,6 +15,8 @@ import HeroUIStarterWizard from './HeroUIStarterWizard';
 import { ShadcnStarterLogo } from '../../ui/ShadcnStarterLogo';
 import AstroCopyDialog, { announceAstroCopy, type AstroCopySource } from './AstroCopyDialog';
 import { FolderDropHost, useFolderChoiceRoute } from './FolderDropHost';
+import { hasProjectSetupChannels } from '../../ipc/projectSetupBridge';
+import { ProjectSetupDialog } from '../projectSetup/ProjectSetupDialog';
 
 interface WelcomeScreenProps {
   readonly onOpen: (projectPath: string) => void;
@@ -34,10 +36,11 @@ export default function WelcomeScreen({ onOpen, showToast }: WelcomeScreenProps)
   const [error, setError] = useState<string | undefined>(undefined);
   const [creation, setCreation] = useState<ProjectCreation | undefined>(undefined);
   const [copySource, setCopySource] = useState<AstroCopySource | undefined>(undefined);
+  const [setupPath, setSetupPath] = useState<string | undefined>(undefined);
   const recent = useRecentProjects(showToast);
-  const actions = useWelcomeActions(onOpen, setError, setCreation, setCopySource);
+  const actions = useWelcomeActions(hasProjectSetupChannels() ? setSetupPath : onOpen, setError, setCreation, setCopySource);
   const ProjectWizard = PROJECT_WIZARDS[creation?.kind ?? 'lumos'];
-  // A folder dropped on the window or on the app's icon: what "Open from folder" does with the same folder.
+  // Drop and recent paths open first. Only the native picker grants setup access before a project opens.
   const routeFolder = useFolderChoiceRoute({ open: onOpen, offerCopy: setCopySource, showToast });
 
   return (
@@ -51,7 +54,25 @@ export default function WelcomeScreen({ onOpen, showToast }: WelcomeScreenProps)
         cloneRepository={() => setCloning(true)}
       />
       <RecentRail projects={recent.projects} refreshing={recent.refreshing} open={onOpen} remove={(projectPath) => void recent.remove(projectPath)} />
-      <FolderDropHost onChoice={routeFolder} showToast={showToast} />
+      <FolderDropHost
+        onChoice={(choice) => {
+          if (setupPath === undefined) {
+            routeFolder(choice);
+          }
+        }}
+        showToast={showToast}
+      />
+      {setupPath !== undefined && (
+        <ProjectSetupDialog
+          mode="welcome"
+          projectPath={setupPath}
+          onClose={() => setSetupPath(undefined)}
+          onContinue={() => {
+            setSetupPath(undefined);
+            onOpen(setupPath);
+          }}
+        />
+      )}
       {cloning && (
         <CloneRepositoryModal
           onClose={() => setCloning(false)}
@@ -88,13 +109,13 @@ export default function WelcomeScreen({ onOpen, showToast }: WelcomeScreenProps)
 }
 
 function useWelcomeActions(
-  onOpen: WelcomeScreenProps['onOpen'],
+  openPickedAstro: WelcomeScreenProps['onOpen'],
   setError: React.Dispatch<React.SetStateAction<string | undefined>>,
   setCreation: React.Dispatch<React.SetStateAction<ProjectCreation | undefined>>,
   setCopySource: React.Dispatch<React.SetStateAction<AstroCopySource | undefined>>,
 ) {
   const translate = useTranslate();
-  // An Astro project opens; a plain website folder is offered an Astro copy; anything else is a toast.
+  // An Astro project can review its setup; a plain website is offered an Astro copy.
   const openExisting = async (): Promise<void> => {
     setError(undefined);
     const result = await chooseSiteFolder();
@@ -107,7 +128,7 @@ function useWelcomeActions(
       case 'canceled':
         return;
       case 'astro':
-        onOpen(choice.projectPath);
+        openPickedAstro(choice.projectPath);
         return;
       case 'plainWebsite':
         setCopySource({ sourcePath: choice.sourcePath, parentPath: choice.parentPath, name: choice.name, homePath: choice.homePath });

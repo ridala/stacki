@@ -8,6 +8,7 @@ import { err, ok, type Result } from '../../shared/core/result';
 import { METADATA_FILES, metadataSource, validateMetadata, type MetadataFile, type MetadataKind } from '../../shared/properties/projectMetadata';
 import { documentHost, describeWriteReport } from '../documents/documentWrites';
 import { readSource } from '../lib/mainLimits';
+import { errorCode } from './projectWalk';
 import { translateMain } from '../lib/mainLocale';
 
 export function readProjectMetadata(root: string, kind: MetadataKind): Result<MetadataFile> {
@@ -16,18 +17,19 @@ export function readProjectMetadata(root: string, kind: MetadataKind): Result<Me
     return target;
   }
   try {
-    if (!fs.existsSync(target.value)) {
-      return ok({});
+    if (!fs.lstatSync(target.value).isFile()) {
+      return metadataFailure(new Error(translateMain('error.projectSettings.inaccessible')));
     }
     return ok({ source: metadataSource(readSource(target.value)) });
   } catch (error: unknown) {
-    return metadataFailure(error);
+    return errorCode(error) === 'ENOENT' ? ok({}) : metadataFailure(error);
   }
 }
 
 export function writeProjectMetadata(
   root: string,
   input: { readonly kind: MetadataKind; readonly source: string; readonly base?: string },
+  options: { readonly exclusions: 'migrate' | 'preserve' } = { exclusions: 'migrate' },
 ): Result<MetadataFile> {
   try {
     validateMetadata(input.kind, input.source);
@@ -60,11 +62,18 @@ export function writeProjectMetadata(
     const checksum = toDigest(createHash('sha256').update(input.base).digest('hex'));
     const report = host.documents.writeText(target.value, input.source, checksum);
     if (report.tag !== 'applied') {
+      if (options.exclusions === 'preserve' && report.tag === 'rejected') {
+        if (report.reason === 'region-externally-modified' || report.reason === 'write-race') {
+          return err({ code: 'conflict', message: translateMain('error.projectSettings.changed') });
+        }
+      }
       return err({ code: 'write-failed', message: describeWriteReport(target.value, report) });
     }
   }
   // Migrate legacy local exclusions before these project settings are committed.
-  ensureExcluded(root);
+  if (options.exclusions === 'migrate') {
+    ensureExcluded(root);
+  }
   host.noteWrite(target.value);
   const saved = readProjectMetadata(root, input.kind);
   if (saved.ok && saved.value.source !== input.source) {
@@ -82,12 +91,16 @@ function metadataPath(root: string, kind: MetadataKind): Result<string> {
     const directory = path.join(canonical, '.stacki');
     const target = path.join(canonical, METADATA_FILES[kind]);
     for (const candidate of [directory, target]) {
-      if (fs.existsSync(candidate)) {
+      try {
         if (fs.lstatSync(candidate).isSymbolicLink()) {
           return err({
             code: 'invalid-path',
             message: translateMain('error.projectSettings.symlink'),
           });
+        }
+      } catch (error: unknown) {
+        if (errorCode(error) !== 'ENOENT') {
+          return metadataFailure(error);
         }
       }
     }

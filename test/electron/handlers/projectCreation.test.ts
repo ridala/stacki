@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PROGRESS_CLEARED, registerProjectHandlers } from '#dist/electron/handlers/projectHandlers.js';
+import { createProjectSetupAccess } from '#dist/electron/handlers/projectSetupHandlers.js';
 import { createIpcRegistrar } from '#dist/electron/lib/ipcRegistrar.js';
 import nodeTools from '#dist/electron/lib/nodeTools.js';
 import heroUIStarter from '#dist/electron/project/herouiStarter.js';
@@ -15,11 +16,15 @@ test('project creation keeps one owner across generators and releases it after e
   const handlers = new Map<string, Listener>();
   const messages: { readonly channel: string; readonly payload: unknown }[] = [];
   const ipcMain = { handle: createIpcRegistrar({ handle: (channel, listener) => handlers.set(channel, listener) }) };
-  registerProjectHandlers({
-    ipcMain,
-    send: (channel, payload) => messages.push({ channel, payload }),
-    showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
-  });
+  registerProjectHandlers(
+    {
+      ipcMain,
+      send: (channel, payload) => messages.push({ channel, payload }),
+      showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
+    },
+    createProjectSetupAccess(),
+    () => false,
+  );
   const invoke = async (channel: string, input: unknown): Promise<unknown> => {
     const listener = handlers.get(channel);
     assert.ok(listener);

@@ -1,3 +1,4 @@
+import type { ProjectSetupReport } from './projectSetup';
 import type { ShadcnSettingsReply } from './shadcnSettings';
 import type { MessageRef } from '../core/i18n/messageReference';
 import type { BreakpointSyncApplied, BreakpointSyncScan, BreakpointUsage } from '../properties/breakpointSyncPlan';
@@ -173,6 +174,8 @@ export interface IpcResults extends AiResults, AgentResults {
   readonly 'instructions:reveal': { readonly ok: true };
   readonly 'instructions:write': InstructionWriteResult;
   readonly 'project:metadata': Result<MetadataFile>;
+  readonly 'project:setupScan': Result<ProjectSetupReport>;
+  readonly 'project:setupApply': Result<ProjectSetupReport>;
   readonly 'project:writeMetadata': Result<MetadataFile>;
   /** A folder chosen in the system dialog, project-relative; `outside` when it is not in the project. */
   readonly 'project:pickFolder':
