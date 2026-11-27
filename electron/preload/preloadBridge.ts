@@ -133,6 +133,7 @@ function projectBridge() {
     discoverPublishing: invoke('publish:discover'),
     publishingAccount: invoke('publish:account'),
     setUpPublishWorker: invoke('publish:workerSetup'),
+    createNetlifySite: invoke('publish:netlifySite'),
     listInstructions: invoke('instructions:list'),
     readInstruction: invoke('instructions:read'),
     writeInstruction: invoke('instructions:write'),
@@ -163,6 +164,7 @@ function projectBridge() {
     createAstroCopy: invoke('project:createAstroCopy'),
     inspectFolder: invoke('project:inspectFolder'),
     takeOpenedFolders: invoke('project:takeOpenedFolders'),
+    designSession: invoke('design:session'), // Design mode (experimental): docs/design-mode/REMOVE.md
     createStarter: invoke('project:createStarter'),
     readShadcnSettings: invoke('project:readShadcnSettings'),
     changeShadcnSetting: invoke('project:changeShadcnSetting'),
@@ -445,6 +447,8 @@ function aiBridge() {
     aiPrompt: invoke('ai:prompt'),
     aiSteer: invoke('ai:steer'),
     aiCompact: invoke('ai:compact'),
+    aiPinsRead: invoke('ai:pinsRead'),
+    aiPinsWrite: invoke('ai:pinsWrite'),
     aiAutoCompactGet: invoke('ai:autoCompactGet'),
     aiAutoCompactSet: invoke('ai:autoCompactSet'),
     aiChatFork: invoke('ai:chatFork'),
@@ -460,6 +464,12 @@ function aiBridge() {
     aiRemember: invoke('ai:remember'),
     aiReview: invoke('ai:review'),
     aiSetup: invoke('ai:setup'),
+    aiMcpAuth: invoke('ai:mcpAuth'),
+    onAiMcpAuth: (callback: (data: unknown) => void) => {
+      const listener = (_event: unknown, data: unknown): void => callback(data);
+      ipcRenderer.on('ai:mcpAuthState', listener);
+      return () => ipcRenderer.removeListener('ai:mcpAuthState', listener);
+    },
     onAiSetup: (callback: (data: unknown) => void) => {
       const listener = (_event: unknown, data: unknown) => callback(data);
       ipcRenderer.on('ai:setupState', listener);
@@ -603,5 +613,31 @@ function eventBridge() {
     nativePaste: invoke('native:paste'),
     nativeUndo: invoke('native:undo'),
     nativeRedo: invoke('native:redo'),
+    // The Files panel (shared/ipc/fileExplorer.ts).
+    codeIntel: invoke('codeIntel:request'),
+    listFiles: invoke('files:list'),
+    readFile: invoke('files:read'),
+    writeFile: invoke('files:write'),
+    createFileEntry: invoke('files:create'),
+    renameFileEntry: invoke('files:rename'),
+    transferFileEntries: invoke('files:transfer'),
+    trashFileEntries: invoke('files:trash'),
+    importFileEntries: invoke('files:import'),
+    revealFileEntry: invoke('files:reveal'),
+    findFiles: invoke('files:find'),
+    watchFiles: invoke('files:watch'),
+    fileGitStatus: invoke('files:gitStatus'),
+    guardFilesClose: invoke('files:guardClose'),
+    allowFilesClose: invoke('files:allowClose'),
+    onFilesChanged: (callback: (data: unknown) => void) => {
+      const listener = (_event: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('files:changed', listener);
+      return () => ipcRenderer.removeListener('files:changed', listener);
+    },
+    onFilesCloseRequested: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('files:closeRequested', listener);
+      return () => ipcRenderer.removeListener('files:closeRequested', listener);
+    },
   } satisfies Partial<PreloadBridge>;
 }

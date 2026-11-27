@@ -46,6 +46,7 @@ import { usePseudoTarget } from './editorModel';
 import type { LiveSetProp, SetProp } from './EditorBasics';
 import type { InlineBranchView } from './InlineBranchEditor';
 import type { StyleCardProps } from './QueryForms';
+import { inlineDefault } from '../model/inlineDefault'; // Design mode (experimental): docs/design-mode/REMOVE.md
 
 /** The chip as the well draws it. */
 export interface InlineChip {
@@ -62,14 +63,20 @@ export interface InlineChip {
 export type InlineCodeView =
   { readonly kind: 'branches'; readonly view: InlineBranchView } | { readonly kind: 'readonly'; readonly code: string; readonly reason: string };
 
+/** The last word on one node's target: its chip was picked, or left for the rules. */
+export interface InlinePick {
+  readonly nodeId: string;
+  readonly target: 'attribute' | 'rule';
+}
+
 /** The selected element's attribute, and whether its chip is the edit target. */
 export function useInlineState() {
   const node = useSelectedHostNode();
   const attribute = node?.props?.['style'];
   // Read again only when the attribute itself changes, not on every host render.
   const ownStyle = useMemo(() => inlineStyleOf(attribute === undefined ? undefined : { props: { style: attribute } }), [attribute]);
-  // The node the chip was picked on: another selection is never the target.
-  const [pickedFor, setPickedFor] = useState<string | undefined>(undefined);
+  // Whether the chip was picked or left, and on which node: it says nothing about another selection.
+  const [pick, setPick] = useState<InlinePick | undefined>(undefined);
   // The branch edited, by its place in the chain; a missing key falls back to the first.
   const [branchKey, setBranchKey] = useState<string | undefined>(undefined);
   const nodeId = node?.id;
@@ -77,7 +84,12 @@ export function useInlineState() {
   const pseudo = usePseudoTarget() !== undefined;
   // An instance renders its component's element, whose attribute its component writes.
   const instance = node?.kind === 'component';
-  return { ownStyle, nodeId, pickedFor, setPickedFor, branchKey, setBranchKey, writable, pseudo, instance };
+  // Where the attribute is the default (model/inlineDefault.ts), each newly selected element starts on its chip:
+  // what was said about the element before is forgotten, while rendering, so no frame shows it first.
+  if (pick !== undefined && nodeId !== undefined && pick.nodeId !== nodeId && inlineDefault() === 'inline') {
+    setPick(undefined);
+  }
+  return { ownStyle, nodeId, pick, setPick, branchKey, setBranchKey, writable, pseudo, instance };
 }
 
 export type InlineState = ReturnType<typeof useInlineState>;
@@ -99,9 +111,30 @@ export function chipStyleOf(inline: Pick<InlineState, 'ownStyle' | 'instance'>, 
 
 /** Whether the chip is in the well, and whether it is the edit target. */
 export function inlineTargetOf(inline: InlineState, style: InlineStyle): { readonly shown: boolean; readonly active: boolean } {
-  const shown = inlineChipShown(style, { writable: inline.writable, pseudo: inline.pseudo });
-  const active = shown && inline.nodeId !== undefined && inline.pickedFor === inline.nodeId;
+  const shown = inlineChipShown(style, { writable: inline.writable, pseudo: inline.pseudo }) || startsInline(style, inline);
+  const active = shown && inline.nodeId !== undefined && attributePicked(inline, inline.nodeId);
   return { shown, active };
+}
+
+// Decided from what is known while rendering, never in an effect: picked after the commit, the default left the
+// rules' own default (useTokenDefault), which runs when the element's classes arrive, to select a class beside it.
+function attributePicked(inline: Pick<InlineState, 'pick'>, nodeId: string): boolean {
+  if (inline.pick?.nodeId === nodeId) {
+    return inline.pick.target === 'attribute';
+  }
+  return inlineDefault() === 'inline';
+}
+
+// With inline as the default (model/inlineDefault.ts), the chip stands in the well even before the element has
+// a style attribute, so the first edit writes one.
+function startsInline(style: InlineStyle, inline: Pick<InlineState, 'writable' | 'pseudo'>): boolean {
+  return style.kind === 'none' && inline.writable && !inline.pseudo && inlineDefault() === 'inline';
+}
+
+/** Whether the attribute is the edit target now. While it is, the panel's query is Base: a style attribute
+ *  cannot sit inside a query (useEditorContexts.ts useStyleContexts holds that). */
+export function inlineActiveOf(inline: InlineState, snapshot: ElementSnapshot | undefined): boolean {
+  return inlineTargetOf(inline, chipStyleOf(inline, snapshot)).active;
 }
 
 /** What resolveStyle folds in: the attribute's declarations, or the edited branch's. */
@@ -136,12 +169,17 @@ export function inlineResolveInput(input: {
 export function useInlineCard(
   card: StyleCardProps,
   inline: InlineState,
-  panel: { readonly deselect: () => void; readonly setSaveError: (message: string | undefined) => void },
+  panel: {
+    readonly deselect: () => void;
+    readonly setSaveError: (message: string | undefined) => void;
+    /** Picks Base as the breakpoint dropdown does, for the person's own pick of the chip. */
+    readonly showBase: () => void;
+  },
 ): StyleCardProps {
   const translate = useTranslate();
   const translateDescribed = useTranslateDescribed();
-  const { nodeId, setPickedFor, branchKey, setBranchKey } = inline;
-  const { deselect, setSaveError } = panel;
+  const { nodeId, setPick, branchKey, setBranchKey } = inline;
+  const { deselect, setSaveError, showBase } = panel;
   const style = chipStyleOf(inline, card.snapshot);
   const { shown, active } = inlineTargetOf(inline, style);
   const heldRef = useRef<HeldInlineWrite | undefined>(undefined);
@@ -207,20 +245,30 @@ export function useInlineCard(
     }
     // No rule is the target now: the panel shows the attribute's values over the cascade.
     deselect();
-    setPickedFor(nodeId);
+    // In the same update as the pick: a style attribute applies at every width, so the dropdown goes to Base.
+    // Where the attribute is the default, in Design mode, the canvas width is a frame's own and the pick leaves it
+    // and the follow mode alone: the dropdown goes to Base by the target's own rule (useStyleContexts).
+    if (inlineDefault() !== 'inline') {
+      showBase();
+    }
+    setPick({ nodeId, target: 'attribute' });
     // The attribute is shown and edited in the CSS code section, so it opens with the pick.
     if (!card.cssCodeOpen) {
       card.onToggleCssCode();
     }
   };
-  const leave = (): void => setPickedFor(undefined);
+  const leave = (): void => {
+    if (nodeId !== undefined) {
+      setPick({ nodeId, target: 'rule' });
+    }
+  };
   const clear = (): void => {
     const host = getHost();
     if (nodeId === undefined || host.setInlineStyle === undefined) {
       return;
     }
     heldRef.current = { nodeId, base: attributeText(findNode(host.nodes, nodeId), 'string'), next: undefined };
-    setPickedFor(undefined);
+    leave();
     host.setInlineStyle(nodeId, undefined);
   };
   const chip: InlineChip | undefined = shown
@@ -235,6 +283,14 @@ export function useInlineCard(
   const withChip: StyleCardProps = {
     ...card,
     inline: chip,
+    // The dropdown holds its last settled picture while a new element is read: that picture's query is never
+    // shown beside a picked attribute.
+    ...(active ? { context: '' } : {}),
+    // A query asked for is a place for a rule, so it leaves the attribute, which no query can hold.
+    onAddQuery: (query, mode) => {
+      leave();
+      card.onAddQuery(query, mode);
+    },
     // Any rule picked, typed or deselected leaves the attribute.
     onSelectActive: (selector) => {
       leave();
@@ -313,6 +369,10 @@ export function useInlineCard(
       writesTo: undefined,
     };
     return { ...withChip, ...writes, sourceNote: undefined, inlineCode: { kind: 'branches', view: plain } };
+  }
+  if (style.kind === 'none') {
+    // No attribute yet: active only while inline is the default (startsInline), and the first write creates it.
+    return { ...withChip, ...writes, sourceNote: undefined };
   }
   if (style.kind !== 'branched') {
     // No attribute: never active (inlineTargetOf), so there is nothing to edit.

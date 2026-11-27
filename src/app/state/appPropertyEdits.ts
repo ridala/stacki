@@ -1,6 +1,11 @@
 // Editing a node's properties: its comment, classes, asset props, renames,
 // kind and tag, text, branches and content (App.tsx).
 
+import { projectRelativePath } from '../../lib/projectPath';
+import { namesInScope } from '../../editor/dataScope';
+import { assetScopeOf, authoredSourcePaths, noteAddedImports, unusedAddedImports, withAssetImports } from '../../editor/richAssetImports';
+import { canAddComponent } from '../../features/palette/componentVisibility';
+import { currentRole } from '../../lib/currentRole';
 import { useTranslate, useTranslateDescribed } from '../../lib/i18n/useTranslate';
 import type { Translator } from '../../lib/i18n/localeContext';
 import type { ClassOutcome, StyleBlockRequest } from '../../features/style/model/host';
@@ -13,8 +18,9 @@ import { assert } from '../../../shared/core/assert';
 import { ASTRO_ASSETS } from '../../features/palette/astroAssets';
 import { droppedForComponent, droppedForElement, toggledElseBranch, withComponentImport } from '../model/pageModelGestures';
 import {
-  attributeRenameGesture,
+  sequence,
   frontmatterGesture,
+  attributeRenameGesture,
   inlineStyleGesture,
   insertGesture,
   loopRenameGesture,
@@ -22,7 +28,6 @@ import {
   nodeGesture,
   propsGesture,
   removalGesture,
-  sequence,
   withChildren,
 } from '../../editor/editGestures';
 import { readFrontmatter } from '../../../shared/page/frontmatterSource';
@@ -45,7 +50,12 @@ import { checkLoopHead, planVariableRename, type VariableRename } from '../../..
 import type { PropValues } from '../../features/props/propRules';
 import { findEditorNodeById as findNodeById } from '../../editor/pageState';
 import { type EditorModel, type EditorNode } from '../../editor/pageView';
+import { withNode } from '../../editor/insertGestures';
+import { diffCodePatch } from '../../../shared/engine/codePatch';
+import { LIMITS } from '../../../shared/core/limits';
+import { withInnerSource } from '../../features/props/richTextContent';
 import { findImportPath } from '../../ipc/appBridge';
+import { assetBindingName } from '../../../shared/properties/componentDefaultValues';
 import { newId, inlineWithIds, tagChangeGesture, restatedText, statedText, frontmatterOf } from '../model/nodeFactory';
 import { withPrunedImports, chooseImportPath, styleTagNode } from '../model/pageGestures';
 import { useCoreState } from './appLifecycle';
@@ -439,19 +449,7 @@ export function useAssetProp(coreState: ReturnType<typeof useCoreState>, classEd
       let local = (model.imports || []).find((i) => !i.named && i.path === spec)?.name;
       const added = local === undefined;
       if (!local) {
-        const base =
-          withoutRoot
-            .split('/')
-            .pop()
-            ?.replace(/\.[^.]+$/, '') ?? 'asset';
-        let candidate = base.replace(/[^A-Za-z0-9_$]/g, '_').replace(/^(\d)/, '_$1') || 'asset';
-        const taken = new Set((model.imports || []).map((i) => i.name));
-        // Ends within taken.size + 1 passes: each tries a name not yet tried.
-        let suffix = 2;
-        while (taken.has(candidate)) {
-          candidate = `${base}${suffix++}`;
-        }
-        local = candidate;
+        local = assetBindingName(picked.rel, new Set((model.imports || []).map((i) => i.name)));
       }
       const binding = local;
       // Step 6, prop and frontmatter: the prop as a request, then the import
@@ -530,6 +528,10 @@ export function useNodeKind(coreState: ReturnType<typeof useCoreState>, nodeEdit
       if (!already && !comp && !asset) {
         return false;
       } // nothing provides it
+      // A component the role is not offered is not there to change into; one the page already imports is, as for paste.
+      if (comp && !already && !canAddComponent(currentRole(), comp)) {
+        return false;
+      }
       const paths = comp && !already ? await resolveImportPath(comp.path) : undefined;
       const current = pageStateRef.current.pageState;
       const model = current?.editable ? current.model : undefined;
@@ -745,7 +747,7 @@ export function useBranchEdits(coreState: ReturnType<typeof useCoreState>, histo
 
 // A node’s text content and inline children.
 export function useContentEdits(coreState: ReturnType<typeof useCoreState>, history: ReturnType<typeof useHistory>) {
-  const { pageStateRef } = coreState;
+  const { pageStateRef, projectRef } = coreState;
   const { commitEdit } = history;
 
   // Sets the text content of a component (single text child convenience).
@@ -798,21 +800,61 @@ export function useContentEdits(coreState: ReturnType<typeof useCoreState>, hist
   // Replaces a node's inline children wholesale (rich Content field edits).
   // Nodes arrive from the editor without ids — assign fresh ones.
   const setNodeInline = useCallback(
-    (nodeId: string, kids: readonly InlineNode[]) => {
+    (nodeId: string, kids: readonly InlineNode[]): boolean => {
       // Step 9: the node restated with its new inline children.
       const state = pageStateRef.current.pageState;
       const node = state?.editable ? findNodeById(state.model.nodes, nodeId) : undefined;
       if (!node || node.kind === 'text') {
-        return;
+        return false;
       }
-      const next = withChildren(node, inlineWithIds(kids, 0));
+      // An image or video picked from src/ is written as its import (richAssetImports.ts): at its own path it would
+      // not exist in the built site.
+      const project = projectRef.current?.path;
+      const file = pageStateRef.current.currentPage?.path;
+      const model = state?.editable ? state.model : undefined;
+      const imported =
+        model === undefined || project === undefined || file === undefined || !('imports' in model)
+          ? undefined
+          : withAssetImports(kids, assetScopeOf(projectRelativePath(project, file, window.avb.platform), model.imports), {
+              taken: namesInScope(model.extraFrontmatter, model.imports),
+              authored: authoredSourcePaths(node.children ?? []),
+            });
+      const next = withChildren(node, inlineWithIds(imported?.content ?? kids, 0));
       // Content was explicitly edited. The printer's layout-preservation comparison
       // ignores whitespace, so keeping the old inner source could restore a deleted
       // space on save and send a different value back to the focused field.
       Reflect.deleteProperty(next, 'source');
-      commitEdit(nodeGesture(nodeId, next, { coalesceKey: `content:${nodeId}`, urgency: false }));
+      const restated = nodeGesture(nodeId, next, { coalesceKey: `content:${nodeId}`, urgency: false });
+      if (model === undefined || !('imports' in model) || project === undefined || file === undefined) {
+        return commitEdit(restated);
+      }
+      const relative = projectRelativePath(project, file, window.avb.platform);
+      const added = imported?.added ?? [];
+      noteAddedImports(relative, added);
+      // An import these editors added goes again with the last image or video that named it.
+      const unused = unusedAddedImports(relative, {
+        imports: model.imports,
+        nodes: restated.apply(model).nodes,
+        frontmatter: model.extraFrontmatter,
+      });
+      if (added.length === 0 && unused.size === 0) {
+        return commitEdit(restated);
+      }
+      const importing = frontmatterGesture(model, { coalesceKey: undefined, urgency: false }, (current) =>
+        'imports' in current
+          ? {
+              ...current,
+              imports: [
+                ...current.imports.filter((entry) => !unused.has(entry.name)),
+                ...added.filter((entry) => !current.imports.some((known) => known.name === entry.name)),
+              ],
+            }
+          : current,
+      );
+      // A new import is written ahead of the content that names it; one no longer named, after the content let go of it.
+      return commitEdit(added.length > 0 ? sequence(importing, restated) : sequence(restated, importing));
     },
-    [commitEdit, pageStateRef],
+    [commitEdit, pageStateRef, projectRef],
   );
   // A text connected to data or back to words (TextConnectField.tsx): the node
   // restated as its pieces, the nodes beside it left as they are (textPieces.ts).
@@ -829,5 +871,47 @@ export function useContentEdits(coreState: ReturnType<typeof useCoreState>, hist
     },
     [commitEdit, pageStateRef],
   );
-  return { setNodeContent, setNodeInline, setNodeTextPieces };
+  // A node's content written as code (the rich text code view): the bytes between its tags and nothing else, as one
+  // patch of the file, so markup the panel cannot read (a component, an expression) is never reprinted.
+  const setNodeContentSource = useCallback(
+    (nodeId: string, next: string, shown: string) => {
+      const state = pageStateRef.current.pageState;
+      const node = state?.editable ? findNodeById(state.model.nodes, nodeId) : undefined;
+      if (!node || (node.kind !== 'component' && node.kind !== 'element')) {
+        return;
+      }
+      commitEdit(contentSourceGesture(node, { next, shown }));
+    },
+    [commitEdit, pageStateRef],
+  );
+  return { setNodeContent, setNodeInline, setNodeTextPieces, setNodeContentSource };
+}
+
+// `shown` is the code the view was showing: a file whose bytes between the tags changed since is not written over.
+function contentSourceGesture(node: EditorNode, change: { readonly next: string; readonly shown: string }): EditGesture {
+  const { next } = change;
+  assert(next.length <= LIMITS.ipcFieldCharsMax, 'Content code fits one field');
+  return {
+    coalesceKey: `content:${node.id}`,
+    urgency: false,
+    stream: undefined,
+    request: (refOf, origin) => {
+      const ref = refOf(node.id);
+      if (ref === undefined) {
+        return undefined;
+      }
+      const element = origin.source.slice(ref.span.start, ref.span.end);
+      // The view read these bytes from the file: the node's own `source` is only kept for content the printer would
+      // lay out otherwise, so it cannot say what is between the tags.
+      const rewritten = withInnerSource(element, { name: node.name ?? '', inner: change.shown }, next);
+      if (rewritten === undefined) {
+        return undefined;
+      }
+      const target = origin.source.slice(0, ref.span.start) + rewritten + origin.source.slice(ref.span.end);
+      const patch = diffCodePatch(origin.source, target);
+      return patch.ok && patch.value.length > 0 ? [{ tag: 'code-patch', hunks: patch.value }] : undefined;
+    },
+    // The page is parsed again once the patch lands; until then the node shows its new code.
+    apply: (model) => withNode(model, node.id, (current) => ({ ...current, source: next })),
+  };
 }

@@ -24,6 +24,9 @@
 // agent's asking mode; the adapter's environment is the person's shell
 // environment with Stacki's own variables and any host agent session's removed.
 import { spawn, type ChildProcess } from 'node:child_process';
+import { claudeSessionMeta, claudeSubscriptionEnvironment } from '../../lib/claudeSubscriptionOnly';
+import type { SessionPermit, SessionVerdict } from './agentSetup';
+import { CLAUDE_RAW_MESSAGE_METHOD, parseClaudeSessionSignal, type ClaudeBillingSignal } from '../../../shared/properties/ai/claudeBilling';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -95,8 +98,13 @@ import { ChangeLedger, parseLedgerTurns, serializeLedger, type LedgerDiff, type 
 import { chatOption, CompactionCalls, eventsForUpdate, toolPaths } from './chatEvents';
 import { withAgentTitle, type ChatRecord, type ChatStore } from './chatStore';
 import { EventPump } from './eventPump';
+import { ParallelWrites, type TurnWrites } from './parallelWrites';
 import { cancelled, PermissionBroker } from './permissionBroker';
 import { buildPrompt, inside, type BuiltPrompt } from './promptBlocks';
+import { segmentsOfSent, sentTypedText } from '../../../shared/properties/ai/sentMessage';
+import { PinPictures, type PinPictureFiles } from './pinPictures';
+import { PIN_LIMITS, pinQuestionsOf } from '../../../shared/properties/ai/commentPinBrief';
+import type { PinBrief } from '../../../shared/properties/ai/commentPinBrief';
 import {
   idleTimeoutMs,
   oldestIdle,
@@ -159,6 +167,15 @@ export interface AgentHostDeps {
   readonly snapshots: TreeSnapshots;
   /** The person's shell environment (lib/shellEnvironment.ts), read at each start. */
   readonly environment: () => Readonly<Record<string, string | undefined>>;
+  /**
+   * The environment one agent's adapter (and so its CLI) starts in: `environment` plus the sign-in settings the
+   * person's login shell sets (lib/loginShellSettings.ts). Nothing else gets these. Absent: `environment`.
+   */
+  readonly agentEnvironment?: (agent: AgentId) => Promise<Readonly<Record<string, string | undefined>>>;
+  /** Asked before an agent's process starts or takes a message (agentSetup.ts `permit`). Absent: always allowed. */
+  readonly permit?: (agent: AgentId) => Promise<SessionPermit>;
+  /** What a running Claude session says about who pays (agentSetup.ts `sessionSignal`). Absent: nothing is watched. */
+  readonly sessionSignal?: (agent: AgentId, signal: ClaudeBillingSignal) => Promise<SessionVerdict>;
   readonly now: () => number;
   /** The person's home folder, where user skills live (`~/.claude/skills`); the operating system's by default. */
   readonly home?: () => string;
@@ -261,6 +278,42 @@ class ChatRuntime {
 
   /** Whether a turn has started in this runtime: an agent title before that is the adapter re-announcing a stored one. */
   hasPrompted = false;
+
+  /** Whether every message of this chat in this run was a send of pins: such a chat's session is closed after each reply. */
+  pinsOnly: boolean | undefined = undefined;
+  /** A close of the chat's last session still on its way: the next message waits for it before resuming. */
+  closing: Promise<unknown> | undefined = undefined;
+
+  /** `history` says whether the chat had a conversation before this run's first message: if so it is not one made for pins. */
+  notePromptKind(kind: 'pins' | 'other', history: 'none' | 'earlier'): void {
+    this.pinsOnly = kind === 'pins' && (this.pinsOnly ?? history === 'none');
+  }
+
+  noteClosing(closing: Promise<unknown>): void {
+    this.closing = closing;
+  }
+
+  /** The reply joined the project's running replies (parallelWrites.ts). */
+  joinWrites(writes: TurnWrites): void {
+    this.writes = writes;
+  }
+
+  /** The reply's writes, once: its ledger is closed, and later calls are no longer this reply's. */
+  takeWrites(): TurnWrites | undefined {
+    const writes = this.writes;
+    this.writes = undefined;
+    this.writingCalls.clear();
+    return writes;
+  }
+
+  unbind(): void {
+    this.sessionId = undefined;
+  }
+
+  /** The running reply's writes and those of replies beside it (parallelWrites.ts); undefined between replies. */
+  writes: TurnWrites | undefined = undefined;
+  /** An update named one of these calls without saying it writes: what it said when it began. Bounded. */
+  readonly writingCalls = new Set<string>();
 
   /** The branch when the running turn began; undefined when unknown (no repository, no commits, or the read failed). */
   branchAtStart: string | undefined = undefined;
@@ -412,17 +465,13 @@ class ChatRuntime {
   }
 }
 
-/** Hands the ledger what a tool call names, and whether the call changes files (an untracked turn only needs that much). */
-function noteCall(ledger: ChangeLedger, call: AcpToolCall): void {
-  for (const file of toolPaths(call)) {
-    ledger.noteTouch(file);
-  }
+/** Whether a tool call changes files: its kind says so, or it carries a diff. */
+function writesFiles(call: AcpToolCall): boolean {
   const kind = call.toolKind;
   if (kind === 'edit' || kind === 'delete' || kind === 'move') {
-    ledger.noteEdit();
-  } else if (call.content?.some((content) => content.kind === 'diff') === true) {
-    ledger.noteEdit();
+    return true;
   }
+  return call.content?.some((content) => content.kind === 'diff') === true;
 }
 
 function remember(set: Set<string>, value: string, max: number): void {
@@ -447,8 +496,12 @@ export class AgentHost {
   private readonly crashes = new Map<string, Crashes>();
   private readonly installing = new Set<AgentId>();
   private readonly signIn = new Set<AgentId>();
+  /** How many times everything was stopped: a start that was waiting across one is given up. */
+  private stops = 0;
   private readonly installFailures = new Map<AgentId, string>();
   private readonly permissions = new PermissionBroker();
+  /** What the replies running now write, so those that run at the same time keep their reviews apart. */
+  private readonly parallel = new ParallelWrites();
   private readonly pump: EventPump;
   /** What each agent last reported it offers, so a new chat can be set up before its session exists. */
   private knownOptions: Partial<Record<AgentId, readonly ChatOption[]>> | undefined;
@@ -463,7 +516,11 @@ export class AgentHost {
   private warmQueued: WarmTarget | undefined = undefined;
   private warmTimer: ReturnType<typeof setTimeout> | undefined = undefined;
 
+  private readonly pictures: PinPictures;
+
   constructor(private readonly deps: AgentHostDeps) {
+    this.pictures = new PinPictures(deps.userData);
+    this.pictures.sweep(Date.now());
     this.pump = new EventPump({
       store: (projectPath, chat, events) => this.deps.store.append(projectPath, chat, events),
       send: (channel, payload) => this.deps.send(channel, payload),
@@ -613,6 +670,9 @@ export class AgentHost {
     const turn = toTurnId(`t${randomBytes(8).toString('hex')}`);
     // Claimed before any await, so a second prompt in the same moment is refused, not interleaved.
     runtime.claim(turn, 'message');
+    // A chat that had no session before its first message here, and was sent pins, is a chat made for them.
+    const history = record.sessionId === undefined && record.forkOf === undefined ? 'none' : 'earlier';
+    runtime.notePromptKind(options.pins === undefined ? 'other' : 'pins', history);
     // The clock for the first-token timing starts at the send, so a cold start is inside it.
     this.timings.noteSend(chat, this.deps.now());
     const started = await this.startTurn(runtime, record);
@@ -621,20 +681,25 @@ export class AgentHost {
       return started;
     }
     const process = started.value;
-    const built = await this.promptOf(process, runtime, { text, attachments, parts: options.parts });
+    const built = await this.promptOf(process, runtime, { text, attachments, parts: options.parts, pins: options.pins });
     if (!built.ok) {
       runtime.release();
       return built;
     }
     runtime.branchAtStart = await this.readBranch(runtime.root);
-    await runtime.ledger.begin(turn, this.trackingMode());
+    // Joined before the snapshot is taken, so a reply that writes while it is being taken is already heard.
+    const writes = this.parallel.join(runtime.root);
+    runtime.joinWrites(writes);
+    await runtime.ledger.begin(turn, this.trackingMode(), writes);
     const now = this.deps.now();
     this.emit(runtime, [
       { kind: 'turn-start', turn, at: now },
-      userEvent(turn, now, { text, attachments, sent: built.value.sent, mode: undefined }, this.deps.thumbnail),
+      userEvent(turn, now, { text, attachments: built.value.shown ?? attachments, sent: built.value.sent, mode: undefined }, this.deps.thumbnail),
     ]);
     if (record.title === NEW_CHAT_TITLE) {
-      this.retitle(runtime, titleFrom(text, attachments));
+      // The title is made of what the person typed: selected code and its place would only name the file.
+      const typed = sentTypedText(segmentsOfSent(text, built.value.sent)).trim();
+      this.retitle(runtime, titleFrom(typed === '' ? text : typed, attachments));
     }
     void this.runTurn(process, runtime, turn, built.value.blocks, 'message');
     assert(runtime.turn === turn, 'prompt: the turn is running');
@@ -667,6 +732,7 @@ export class AgentHost {
     if (runtime.purpose === 'compaction') {
       return err({ code: 'busy', ...described('ai.error.compacting') });
     }
+    runtime.notePromptKind('other', 'earlier');
     const process = this.processes.get(processKey(runtime.agent, root));
     const ready = process === undefined ? undefined : await process.ready;
     if (process === undefined || ready === undefined || !ready.ok || runtime.sessionId === undefined) {
@@ -760,6 +826,12 @@ export class AgentHost {
     return ok({ started: true });
   }
 
+  /** The turn running in `chat` now, or undefined when none is. */
+  runningTurn(root: string, chat: ChatId): TurnId | undefined {
+    const runtime = this.chats.get(chat);
+    return runtime === undefined || runtime.root !== root ? undefined : runtime.turn;
+  }
+
   cancel(root: string, chat: ChatId): void {
     const runtime = this.chats.get(chat);
     if (runtime === undefined || runtime.root !== root) {
@@ -847,9 +919,28 @@ export class AgentHost {
     assert(!this.signIn.has(agent), 'noteSignedIn: the agent is no longer waiting');
   }
 
+  /**
+   * What the agent can reach changed (a server was signed in to or out of): an idle adapter read the old state when
+   * its sessions started, so it is let go and the next message starts a fresh one, which resumes the chat's session.
+   * An adapter with a turn running is left to finish.
+   */
+  reloadTools(agent: AgentId): void {
+    this.dropWarm(agent);
+    for (const process of [...this.processes.values()]) {
+      if (process.agent === agent && !this.isBusy(process)) {
+        this.stop(process);
+      }
+    }
+  }
+
   /** A chat being deleted: its turn is stopped and its runtime forgotten. */
   forget(root: string, chat: ChatId): void {
     this.cancel(root, chat);
+    const runtime = this.chats.get(chat);
+    if (runtime !== undefined) {
+      this.leaveParallel(runtime);
+    }
+    this.pictures.drop(root, chat);
     this.timings.forget(chat);
     this.chats.delete(chat);
   }
@@ -860,13 +951,18 @@ export class AgentHost {
 
   /** Stops every agent: the project closed, or the app is quitting. */
   stopAll(): void {
+    this.stops += 1;
     this.permissions.cancel(undefined);
     this.pump.flush();
     this.releaseWarm();
     for (const process of [...this.processes.values()]) {
       this.stop(process);
     }
+    for (const runtime of this.chats.values()) {
+      this.leaveParallel(runtime);
+    }
     this.chats.clear();
+    this.pictures.dropAll();
     assert(this.processes.size === 0, 'stopAll: no agent is left running');
   }
 
@@ -898,11 +994,25 @@ export class AgentHost {
   private async promptOf(
     process: AgentProcess,
     runtime: ChatRuntime,
-    content: { readonly text: string; readonly attachments: readonly PromptAttachment[]; readonly parts: readonly PromptPart[] | undefined },
+    content: {
+      readonly text: string;
+      readonly attachments: readonly PromptAttachment[];
+      readonly parts: readonly PromptPart[] | undefined;
+      readonly pins?: PinBrief | undefined;
+    },
   ): Promise<Result<BuiltPrompt, AiFailure>> {
     const ready = await process.ready;
     if (!ready.ok) {
       return ready;
+    }
+    // Pins that run each in a subagent need their pictures as files: a subagent never sees the message's images.
+    let pinPictures: PinPictureFiles | undefined;
+    if (content.pins?.mode === 'subagents') {
+      const kept = this.pictures.keep(runtime.root, runtime.chat, content.pins, content.attachments);
+      if (!kept.ok) {
+        return kept;
+      }
+      pinPictures = kept.value;
     }
     return buildPrompt(
       {
@@ -913,8 +1023,25 @@ export class AgentHost {
         commands: runtime.commands,
         read: (file) => this.deps.files.read(file),
       },
-      content,
+      { ...content, ...(pinPictures === undefined ? {} : { pinPictures }) },
     );
+  }
+
+  // The settings of a session: for Claude, the subscription ones and reading this project's pin pictures without asking.
+  private sessionMeta(agent: AgentId, root: string): ReturnType<typeof claudeSessionMeta> {
+    return claudeSessionMeta(agent, agent === 'claude' ? [this.pictures.readRule(root)] : []);
+  }
+
+  // A turn's end removes the pictures its pins had, unless a pin asked the person something: the answer may start
+  // that pin again, which opens the same files.
+  private releasePinPictures(runtime: ChatRuntime, turn: TurnId): void {
+    const said = this.deps.store
+      .read(runtime.root, runtime.chat)
+      .events.flatMap((event) => (event.kind === 'text' && event.turn === turn ? [event.text] : []))
+      .join('\n');
+    if (pinQuestionsOf(said).length === 0) {
+      this.pictures.drop(runtime.root, runtime.chat);
+    }
   }
 
   /** The Settings toggle as it stands now. Asked once per turn, when it begins: the ledger keeps the answer on the turn. */
@@ -937,7 +1064,27 @@ export class AgentHost {
   }
 
   private async ensureProcess(agent: AgentId, root: string): Promise<Result<AgentProcess, AiFailure>> {
+    // Waited for first, so everything from "is one running?" to registering the new one stays in one step.
+    const stops = this.stops;
+    const permit = this.deps.permit === undefined ? 'allowed' : await this.deps.permit(agent);
+    if (permit !== 'allowed') {
+      return err(
+        permit === 'sign-in'
+          ? { code: 'sign-in', ...described('ai.error.signIn', { agent: AGENTS[agent].label }) }
+          : { code: 'agent-failed', ...described('ai.error.signInUnchecked', { agent: AGENTS[agent].label }) },
+      );
+    }
+    const agentEnvironment = this.deps.agentEnvironment === undefined ? this.deps.environment() : await this.deps.agentEnvironment(agent);
+    if (this.stops !== stops) {
+      // The project closed or the app is quitting while the first read of the shell's settings was under way.
+      return err({ code: 'agent-failed', ...described('ai.error.stopped', { agent: AGENTS[agent].label, detail: '.' }) });
+    }
     const key = processKey(agent, root);
+    const crashed = this.crashes.get(key);
+    if (!this.processes.has(key) && crashed !== undefined && crashed.count > 0 && crashed.count <= AI_LIMITS.restartsMax) {
+      // Waited out before the look below, so replies starting together after a crash still share one new process.
+      await delay(AI_LIMITS.restartDelayMsMin * 2 ** (crashed.count - 1));
+    }
     const running = this.processes.get(key);
     if (running !== undefined) {
       const ready = await running.ready;
@@ -955,13 +1102,10 @@ export class AgentHost {
     if (crashes !== undefined && crashes.count > AI_LIMITS.restartsMax) {
       return err({ code: 'agent-failed', message: crashes.lastMessage });
     }
-    if (crashes !== undefined && crashes.count > 0) {
-      await delay(AI_LIMITS.restartDelayMsMin * 2 ** (crashes.count - 1));
-    }
     if (this.processes.size >= AI_LIMITS.processesMax) {
       this.stopIdlest();
     }
-    const process = this.spawnProcess(agent, root, entry, cli);
+    const process = this.spawnProcess({ agent, root, entry, cli, agentEnvironment });
     this.processes.set(key, process);
     assert(this.processes.size <= AI_LIMITS.processesMax, 'ensureProcess: adapter processes are bounded');
     this.crowdIdleTimers();
@@ -973,10 +1117,22 @@ export class AgentHost {
     return ok(process);
   }
 
-  private spawnProcess(agent: AgentId, root: string, entry: string, cli: string): AgentProcess {
+  private spawnProcess({
+    agent,
+    root,
+    entry,
+    cli,
+    agentEnvironment,
+  }: {
+    readonly agent: AgentId;
+    readonly root: string;
+    readonly entry: string;
+    readonly cli: string;
+    readonly agentEnvironment: Readonly<Record<string, string | undefined>>;
+  }): AgentProcess {
     const runnable = runnableAdapterCli(cli, this.deps.environment());
     const environment = {
-      ...adapterEnvironment(this.deps.environment(), ADAPTERS[agent].cliVariable, runnable),
+      ...adapterEnvironment(pinsEnvironment(agent, claudeSubscriptionEnvironment(agent, agentEnvironment)), ADAPTERS[agent].cliVariable, runnable),
       ...autoCompactEnvironment(agent, this.deps.autoCompactPercent?.()),
     };
     const spawnedAt = this.deps.now();
@@ -1056,13 +1212,14 @@ export class AgentHost {
     if (runtime.sessionId !== undefined && process.sessions.get(runtime.sessionId) === runtime.chat) {
       return ok(undefined);
     }
+    await runtime.closing;
     const ready = await process.ready;
     if (!ready.ok) {
       return ready;
     }
     const init = ready.value;
     const stored = record.sessionId;
-    const base = { cwd: runtime.root, mcpServers: [] };
+    const base = { cwd: runtime.root, mcpServers: [], ...this.sessionMeta(runtime.agent, runtime.root) };
     if (stored !== undefined && init.resumeSession) {
       const resumedAt = this.deps.now();
       const resumed = await this.openSession(process, runtime, 'session/resume', { ...base, sessionId: stored }, stored);
@@ -1244,6 +1401,7 @@ export class AgentHost {
     events.push(...this.closeCompactions(runtime, { turn, stop, purpose, at }));
     if (purpose === 'message') {
       const changes = await runtime.ledger.finish(turn);
+      this.leaveParallel(runtime);
       // Durations and the mode only: no prompt text, no file paths, so the log can be shared.
       console.debug(
         `[ai] turn ledger: tracking=${changes.tracking} snapshotBeforeMs=${changes.snapshotBeforeMs ?? 'none'} snapshotAfterMs=${changes.snapshotAfterMs ?? 'none'}`,
@@ -1271,8 +1429,35 @@ export class AgentHost {
     }));
     this.emit(runtime, events);
     this.pump.flush();
+    if (purpose === 'message') {
+      this.releasePinPictures(runtime, turn);
+    }
     runtime.release();
+    this.closeFinishedPinSession(process, runtime);
     this.releaseAwake(process);
+  }
+
+  /**
+   * Lets go of the session of a chat made for pins once its reply ends. Why: every open Claude session keeps a CLI
+   * process of its own (about 200 MB, measured with the shipped adapter), and sends made while another reply runs
+   * each get a chat. A later message to the chat resumes the session, so only an adapter that can do both is asked.
+   * Left open while a command it started in the background is still running.
+   */
+  private closeFinishedPinSession(process: AgentProcess, runtime: ChatRuntime): void {
+    const sessionId = runtime.sessionId;
+    if (runtime.pinsOnly !== true || sessionId === undefined || process.stopping || runtime.hasBackground()) {
+      return;
+    }
+    const closing = process.ready.then((ready) => {
+      // A message that arrived meanwhile has the session: it stays.
+      if (!ready.ok || !ready.value.close || !ready.value.resumeSession || runtime.turn !== undefined || process.stopping) {
+        return undefined;
+      }
+      runtime.unbind();
+      process.sessions.delete(sessionId);
+      return process.connection.request('session/close', { sessionId }, AI_LIMITS.requestMsMax);
+    });
+    runtime.noteClosing(closing);
   }
 
   /** The branch now, or undefined when none is known. A slow or failing git is no branch: it must never hold a turn's end. */
@@ -1329,7 +1514,62 @@ export class AgentHost {
     return events;
   }
 
+  // Hands the ledger what a tool call names, and whether the call changes files (an untracked turn only needs that
+  // much). A call that changes files is told to the replies running beside this one before the ledger reads them.
+  private noteCall(runtime: ChatRuntime, call: AcpToolCall): void {
+    const writing = writesFiles(call);
+    if (writing) {
+      remember(runtime.writingCalls, call.id, TOOL_CALLS_TRACKED_MAX);
+    }
+    for (const file of toolPaths(call)) {
+      if (writing || runtime.writingCalls.has(call.id)) {
+        this.noteWrite(runtime, file);
+      }
+      runtime.ledger.noteTouch(file);
+    }
+    if (writing) {
+      runtime.ledger.noteEdit();
+    }
+  }
+
+  private noteWrite(runtime: ChatRuntime, file: string): void {
+    const relative = runtime.ledger.pathOf(file);
+    if (runtime.writes !== undefined && relative !== undefined) {
+      this.parallel.wrote(runtime.writes, relative);
+    }
+  }
+
+  private leaveParallel(runtime: ChatRuntime): void {
+    const writes = runtime.takeWrites();
+    if (writes !== undefined) {
+      this.parallel.leave(writes);
+    }
+  }
+
+  // What Claude's session says about who pays. A stopped turn is cancelled the way "Stop agent" cancels it.
+  private watchBilling(process: AgentProcess, params: unknown): void {
+    const watch = this.deps.sessionSignal;
+    const parsed = parseClaudeSessionSignal(params);
+    if (process.agent !== 'claude' || watch === undefined || parsed === undefined) {
+      return;
+    }
+    void watch(process.agent, parsed.signal).then((verdict) => {
+      if (verdict !== 'stop') {
+        return;
+      }
+      const runtime = this.runtimeOfSession(process, parsed.sessionId);
+      if (runtime !== undefined) {
+        this.permissions.cancel(runtime.chat);
+      }
+      process.connection.notify('session/cancel', { sessionId: parsed.sessionId });
+    });
+  }
+
   private handleNotification(process: AgentProcess, method: string, params: unknown): void {
+    if (method === CLAUDE_RAW_MESSAGE_METHOD) {
+      this.watchBilling(process, params);
+      return;
+    }
     if (method !== 'session/update') {
       return; // Auth status and other extensions: the turn's own answer says what matters.
     }
@@ -1358,7 +1598,7 @@ export class AgentHost {
       }
     }
     if (update.kind === 'tool-call' || update.kind === 'tool-call-update') {
-      noteCall(runtime.ledger, update.call);
+      this.noteCall(runtime, update.call);
     }
     if (update.kind === 'commands') {
       runtime.noteCommands(update.commands.map((command) => command.name));
@@ -1429,7 +1669,7 @@ export class AgentHost {
       return Promise.resolve(cancelled());
     }
     const request = parsed.value;
-    noteCall(runtime.ledger, request.call);
+    this.noteCall(runtime, request.call);
     const turn = runtime.turn;
     // The broker settles a request only after `ask` returns, so the id is known by then.
     let asking: PermissionRequestId | undefined;
@@ -1501,6 +1741,7 @@ export class AgentHost {
       // i18n-ignore: a JSON-RPC answer read by the agent, not by a person.
       return err({ code: -32602, message: 'Stacki writes files inside the project only.' });
     }
+    this.noteWrite(runtime, file);
     runtime.ledger.noteTouch(file);
     runtime.ledger.noteEdit();
     try {
@@ -1771,7 +2012,8 @@ export class AgentHost {
         return;
       }
       const startedAt = this.deps.now();
-      const answer = await process.value.connection.request('session/new', { cwd: root, mcpServers: [] }, AI_LIMITS.requestMsMax);
+      const params = { cwd: root, mcpServers: [], ...this.sessionMeta(agent, root) };
+      const answer = await process.value.connection.request('session/new', params, AI_LIMITS.requestMsMax);
       const session = answer.ok ? parseSessionResult(answer.value, undefined) : undefined;
       if (session?.ok === true) {
         const options = session.value.options.map(chatOption);
@@ -2027,6 +2269,20 @@ function spawnAdapter(entry: string, root: string, environment: Readonly<Record<
 const HOST_SESSION_VARIABLES =
   /^(CLAUDECODE|CLAUDE_CODE_(ENTRYPOINT|SESSION_ID|CHILD_SESSION|MESSAGING_.*|HOST_.*|SSE_PORT|EXECPATH)|CLAUDE_PID|CODEX_THREAD_ID|CODEX_SANDBOX.*)$/;
 
+/** The CLI's own setting for how many subagents may run at once in a session (Claude Code 2.1.332; its default is 20). */
+const SUBAGENT_CAP_VARIABLE = 'CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS';
+
+/**
+ * Claude's environment with room for every pin of a full board to run at once: without it the CLI refuses the 21st
+ * subagent, so that pin would never run. A value the person set themselves is theirs and is kept.
+ */
+export function pinsEnvironment(agent: AgentId, environment: Readonly<Record<string, string | undefined>>): Readonly<Record<string, string | undefined>> {
+  if (agent !== 'claude' || (environment[SUBAGENT_CAP_VARIABLE] ?? '') !== '') {
+    return environment;
+  }
+  return { ...environment, [SUBAGENT_CAP_VARIABLE]: String(PIN_LIMITS.subagentsAtOnceMax) };
+}
+
 /** The adapter's environment: the person's shell's, without Stacki's own variables, plus where their CLI is. */
 export function adapterEnvironment(
   shell: Readonly<Record<string, string | undefined>>,
@@ -2091,6 +2347,8 @@ function endsUnread(stop: TurnStop): boolean {
 export interface PromptOptions {
   /** The mentions and text the person composed; absent: the message is its text. */
   readonly parts?: readonly PromptPart[] | undefined;
+  /** Comment pins sent with "Send all" (commentPinBrief.ts); absent for any other message. */
+  readonly pins?: PinBrief | undefined;
 }
 
 function userEvent(

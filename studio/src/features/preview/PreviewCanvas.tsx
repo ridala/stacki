@@ -17,7 +17,7 @@ import { useLiveValue } from '../../../vendor/stacki/src/ui/liveValue';
 import { PreviewOverlays } from '../../../vendor/stacki/src/features/preview/PreviewOverlays';
 import { StudioAppOverlays } from '../apps/StudioApps';
 import { GuideOverlay } from '../../../vendor/stacki/src/features/preview/GuideOverlay';
-import { useColumnGuide, type ShownGuide } from '../../../vendor/stacki/src/features/preview/guideSettings';
+import { studioGuideSubject, useColumnGuide, type ShownGuide } from '../../../vendor/stacki/src/features/preview/guideSettings';
 import { outlineInfo, outlineNode } from './outlineInfo';
 import { useMemo, useRef, type CSSProperties } from 'react';
 import { PreviewToolbar, type PreviewDevice, type PreviewInspectorActions } from '../../../vendor/stacki/src/features/preview/PreviewToolbar';
@@ -25,7 +25,6 @@ import CanvasView from '../../../vendor/stacki/src/features/preview/CanvasView';
 import { useProjectBreakpoints } from '../../../vendor/stacki/src/ipc/useProjectBreakpoints';
 import { usePreviewSizing } from '../../../vendor/stacki/src/features/preview/usePreviewSizing';
 import type { usePreviewDimensions } from '../../../vendor/stacki/src/features/preview/usePreviewSizing';
-import { FLUID_FRAME_WIDTH } from '../../../vendor/stacki/src/features/preview/previewViewport';
 import '../../../vendor/stacki/src/features/preview/previewViewport.css';
 import { SizedFrame } from '../../../vendor/stacki/src/features/preview/SizedFrame';
 import { CollectionEditor } from '../collections/CollectionEditor';
@@ -71,8 +70,9 @@ export function PreviewCanvas(props: Props) {
     offSite: { clearOverlays: props.preview.clearOverlays },
     pages: props.sitePages,
   });
-  const { resolved: breakpoints } = useProjectBreakpoints(props.projectName);
-  const sizing = usePreviewSizing(props.device, props.dimensions, breakpoints, { deviceShortcuts: true }, props.onDevice);
+  const { resolved: breakpoints, desktopFramePx } = useProjectBreakpoints(props.projectName);
+  const viewKey = `${props.projectName}\n${props.file}`;
+  const sizing = usePreviewSizing(props.device, props.dimensions, breakpoints, { deviceShortcuts: true, desktopFramePx, viewKey }, props.onDevice);
   useCursorScale(props.preview, sizing.viewport.scale);
   useCursorChatShortcut({
     preview: props.preview,
@@ -84,6 +84,7 @@ export function PreviewCanvas(props: Props) {
     metrics: props.preview.guide,
     available: props.device !== 'canvas' && !props.collection,
     frame: { post: props.preview.send, subscribeLoad: props.preview.subscribeLoad },
+    subject: studioGuideSubject(props.file),
   });
   return (
     <main className="studio-center" data-canvas-interactive={interaction.active}>
@@ -93,7 +94,7 @@ export function PreviewCanvas(props: Props) {
           crumbs={[...(props.pageLabel ? [{ id: undefined, label: props.pageLabel }] : []), ...crumbsFor(props.nodes, props.selected)]}
           onCrumb={(id) => props.select(id ?? 'layout')}
           activeDevice={sizing.activeDevice}
-          onDevice={props.onDevice}
+          onDevice={sizing.pickDevice}
           {...(props.device === 'canvas'
             ? {}
             : {
@@ -101,7 +102,7 @@ export function PreviewCanvas(props: Props) {
                   width: sizing.viewport.width,
                   scale: sizing.viewport.scale,
                   onWidth: sizing.setWidth,
-                  onFit: () => props.onDevice('desktop'),
+                  onFit: () => sizing.pickDevice('desktop'),
                 },
               })}
           guide={columnGuide.menu}
@@ -253,7 +254,7 @@ function CanvasOverlays({
         height: sizing.viewport.height * sizing.viewport.scale,
         borderRadius: 10 * sizing.viewport.scale,
       }
-    : { width: FLUID_FRAME_WIDTH, height: '100%', borderRadius: 0 };
+    : { ...sizing.fillStyle, height: '100%', borderRadius: 0 };
   // The overlays are drawn in the page's own coordinates over the user's site, which never mirrors, so they stay left to right.
   return (
     <div dir="ltr" className={`preview-overlay-layer ${sizing.width ? '' : 'full'}`} style={style}>

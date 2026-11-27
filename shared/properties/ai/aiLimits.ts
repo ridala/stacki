@@ -6,8 +6,11 @@
 export const AI_LIMITS = {
   /** One JSON-RPC line from an adapter. A diff of a large file arrives whole in one line. */
   lineBytesMax: 8 * 1024 * 1024,
-  /** Requests Stacki has sent to one adapter and not yet heard back about. */
-  pendingRequestsMax: 64,
+  /**
+   * Requests Stacki has sent to one adapter and not yet heard back about. Each running reply is one. 128: every pin of
+   * a full board (40) may run in a chat of its own beside the person's chats, with room for control requests.
+   */
+  pendingRequestsMax: 128,
   /** How long an adapter may take to answer a control request (initialize, session/new, set_mode). */
   requestMsMax: 60_000,
   /** How long one prompt turn may run before Stacki cancels it. */
@@ -66,8 +69,11 @@ export const AI_LIMITS = {
   configChoicesMax: 256,
   /** Permission choices offered for one request. */
   permissionOptionsMax: 16,
-  /** Permission requests waiting on the person at once, across chats. */
-  permissionsPendingMax: 32,
+  /**
+   * Permission requests waiting on the person at once, across chats. One past the bound is answered "no" unseen, so it
+   * is far above what a full board of pins asking at the same moment (40) needs.
+   */
+  permissionsPendingMax: 128,
   /** Chats per project. */
   chatsMax: 500,
   /** Events stored per chat; a chat past it is read only. */
@@ -114,6 +120,13 @@ export const AI_LIMITS = {
   sectionNameCharsMax: 60,
   /** Mention chips on one prompt; past it the prompt is refused at the parser. */
   mentionsMax: 16,
+  /**
+   * "Add to chat" code chips (mentions.ts): one selection's characters, the selections on one message, and all of
+   * their code together. Code past a bound is refused with the reason, never cut: a cut snapshot would not be the code selected.
+   */
+  codeChipCharsMax: 20_000,
+  codeChipsMax: 8,
+  codeChipsCharsMax: 60_000,
   /** One mentioned file embedded in a prompt, and all of them together; past either the file travels as a link. */
   mentionFileCharsMax: 100_000,
   mentionTotalCharsMax: 400_000,
@@ -139,8 +152,8 @@ export const AI_LIMITS = {
   composerSegmentsMax: 256,
   /** Drafts kept in browser storage per project. */
   draftsStoredMax: 50,
-  /** Parts (text runs and chips) in one prompt. */
-  promptPartsMax: 64,
+  /** Parts (text runs and chips) in one prompt: each segment of a draft is at most one part. */
+  promptPartsMax: 256,
   /** Blocks beyond the parts and attachments that mention expansion may add (links, wrappers). */
   promptBlocksExtraMax: 8,
   /** Background tasks the transcript tracks at once. */

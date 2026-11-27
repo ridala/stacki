@@ -53,6 +53,8 @@ export type PreviewMessage =
       /** Where the pointer was and the box of the copy it hit, for an app capturing clicks; undefined from an older frame. */
       readonly x: number | undefined;
       readonly y: number | undefined;
+      /** When the press was made, on the frame's epoch clock; undefined from a frame that does not stamp it. */
+      readonly pressedAtMs: number | undefined;
       readonly box: CanvasClickBox | undefined;
       /** The editor's click query this answers (`avb:click-query`), or undefined for a click the person made. */
       readonly replay: number | undefined;
@@ -143,6 +145,10 @@ export function describePreviewReload(reason: PreviewReloadReason, translate: Tr
 export type ShortcutMessage =
   | { readonly name: 'insert' }
   | { readonly name: 'preview' }
+  /** The pull chord, ⌥⇧G. */
+  | { readonly name: 'pull' }
+  /** A rail panel chord, Option and the key `code` (src/app/railShortcuts.ts). */
+  | { readonly name: 'panel'; readonly code: string }
   | { readonly name: 'arrow'; readonly key: string }
   | { readonly name: 'key'; readonly key: string; readonly meta: boolean }
   /** A key in the app command range (shared/properties/appShortcuts.ts), which runs an app's command. */
@@ -174,6 +180,12 @@ export function parseShortcutMessage(input: unknown): ShortcutMessage | undefine
         return { name: 'insert' };
       case 'preview':
         return { name: 'preview' };
+      case 'pull':
+        return { name: 'pull' };
+      case 'panel': {
+        const code = shortcutKey(value['code']);
+        return /^Key[A-Z]$/.test(code) ? { name: 'panel', code } : undefined;
+      }
       case 'arrow':
         return { name: 'arrow', key: shortcutKey(value['key']) };
       case 'key':
@@ -248,6 +260,7 @@ function parseKnownMessage(value: Readonly<Record<string, unknown>>): PreviewMes
         pseudo: parseLocatedPseudo(value),
         x: coordinateOf(value['x']),
         y: coordinateOf(value['y']),
+        pressedAtMs: pressStamp(value['pressedAtMs']),
         box: canvasClickBox(value['box']),
         replay: optional(parseReplayId)(value['replay']),
         boxes: parseSentBoxes(value['boxes']),
@@ -478,7 +491,13 @@ function parseBox(input: unknown): Box {
   if (width < 0 || height < 0) {
     throw new Error('Preview rectangle: expected nonnegative size');
   }
-  return { x: finite(value['x']), y: finite(value['y']), w: width, h: height };
+  const box = { x: finite(value['x']), y: finite(value['y']), w: width, h: height };
+  return value['hidden'] === true ? { ...box, hidden: true } : box;
+}
+
+// The stamp only decides whether the press also closed a popup, so a bad one is dropped, never the click.
+function pressStamp(input: unknown): number | undefined {
+  return typeof input === 'number' && Number.isFinite(input) ? input : undefined;
 }
 
 function parseTextMarkBox(input: unknown): TextMarkBox {

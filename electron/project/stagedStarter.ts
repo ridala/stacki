@@ -15,9 +15,10 @@ export const STAGED_COMMAND_OPTIONS = { waitForStop: true, outputBytesMax: MAIN_
 export const STARTER_LOCKFILES = {
   npm: 'package-lock.json',
   pnpm: 'pnpm-lock.yaml',
+  bun: 'bun.lock',
 } as const satisfies Record<CreatePackageManager, string>;
 
-const FOREIGN_LOCKFILES = ['yarn.lock', 'bun.lock', 'bun.lockb', 'npm-shrinkwrap.json'] as const;
+const FOREIGN_LOCKFILES = ['yarn.lock', 'bun.lockb', 'npm-shrinkwrap.json'] as const;
 const GENERATED_ROOT_ENTRIES_MAX = 64;
 const GENERATED_CONFIG_BYTES_MAX = 16_384;
 const MANAGER_VERSION_TIMEOUT_MS = 60_000;
@@ -104,6 +105,10 @@ function confirmDirectoryClaim(destination: string, claim: fs.Stats): void {
 }
 
 export function managerCommand(manager: CreatePackageManager): string {
+  // Bun's Windows installer ships bun.exe rather than bun.cmd; cmd.exe resolves either via PATHEXT.
+  if (manager === 'bun') {
+    return 'bun';
+  }
   return process.platform === 'win32' ? `${manager}.cmd` : manager;
 }
 

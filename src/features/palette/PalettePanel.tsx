@@ -7,7 +7,7 @@ import { cleanError } from '../../lib/cleanError';
 import { allowDragEffect, clearDrag, setDrag } from '../../editor/dragState';
 import { rankInsertItems } from '../../lib/insertRank';
 import { ComponentPreviewPopup } from './ComponentPreviewPopup';
-import { useAddableComponents } from './componentVisibility';
+import { searchHidden, useOfferedComponents } from './componentVisibility';
 import type { PaletteRoleRules } from './componentRolesMenu';
 import type { ManagedItem, PaletteManagement, RenameHost } from './paletteManagement';
 import { PaletteRowMenu } from './PaletteRowMenu';
@@ -16,6 +16,7 @@ import { rolesSubmenu } from './componentRolesMenu';
 import { componentRuleFile } from '../../../shared/properties/componentAccess';
 import { groupPaletteComponents, parseComponentUsage, prettyComponentName } from './paletteModel';
 import {
+  CanvasIcon,
   CopyIcon,
   ElementComponentIcon,
   GearIcon,
@@ -35,6 +36,7 @@ import { DEFAULT_PROJECT_FOLDERS } from '../../../shared/properties/projectFolde
 import { CreateComponentModal, InstancesPopup } from './PaletteDialogs';
 import { currentDesktopPlatform, shortcutLabel } from '../../lib/shortcutLabel';
 import { useDelayedTooltip } from '../../ui/delayedTooltip';
+import FittedTooltip from '../../ui/FittedTooltip';
 import { can } from '../../../shared/properties/projectRoles';
 import { useCurrentRole } from '../../lib/useCurrentRole';
 import { currentRole } from '../../lib/currentRole';
@@ -69,6 +71,14 @@ interface PalettePanelProps {
   readonly createFrom: ComponentCreationSource;
   readonly createRequest?: number;
   readonly buildComponent?: BuildComponentAction;
+  /** The component canvas, for the "…" menu's Open canvas. Absent (Studio, for now): the row is left out. */
+  readonly canvas?: PaletteCanvas | undefined;
+}
+
+/** What the "…" menu needs of the component canvas: whether it can open on a component, and opening it. */
+export interface PaletteCanvas {
+  readonly canOpen: (component: ScanComponent) => boolean;
+  readonly open: (component: ScanComponent) => void;
 }
 
 interface Point {
@@ -85,9 +95,10 @@ export default function PalettePanel(props: PalettePanelProps) {
   const usage = useUsagePopup(props.onUsage, preview.cancel);
   const usageRef = useRef<HTMLDivElement>(null);
   useCreateRequest(props.createRequest ?? 0, props.createFrom, setCreating);
-  // The list shows what this role may add; a new component's name is still checked against every component (PalettePopups).
-  const addable = useAddableComponents(props.components);
-  const list = useMemo(() => rankInsertItems(addable, query), [addable, query]);
+  // The panel is the manual way to add, so it lists what this role may add by hand, an admin's search-hidden ones too, and
+  // its own box only narrows that list. A new component's name is still checked against every component (PalettePopups).
+  const listed = useOfferedComponents('browse', props.components);
+  const list = useMemo(() => rankInsertItems(listed, query), [listed, query]);
   const groups = useMemo(() => groupPaletteComponents(list), [list]);
   return (
     <div className="panel-section grow">
@@ -96,9 +107,10 @@ export default function PalettePanel(props: PalettePanelProps) {
       <PaletteList
         groups={groups}
         query={query}
-        componentCount={addable.length}
+        componentCount={listed.length}
         roleRules={props.roleRules}
         management={props.management}
+        canvas={props.canvas}
         allComponents={props.components}
         onInsert={props.onInsert}
         {...(props.onDragBegin === undefined ? {} : { onDragBegin: props.onDragBegin })}
@@ -331,6 +343,7 @@ interface PaletteListProps {
   readonly componentCount: number;
   readonly roleRules: PaletteRoleRules | undefined;
   readonly management: PaletteManagement | undefined;
+  readonly canvas: PaletteCanvas | undefined;
   /** Every component of the project, hidden ones too, for a folder's counts in the Roles submenu. */
   readonly allComponents: readonly ScanComponent[];
   readonly onInsert: (name: string) => void;
@@ -370,9 +383,13 @@ function PaletteList(props: PaletteListProps) {
 
 function PaletteItem({ component, props }: { readonly component: ScanComponent; readonly props: PaletteListProps }) {
   const translate = useTranslate();
+  // Dimmed, with its reason on the icon: this admin's rules keep the component out of search.
+  const unsearched = searchHidden(useCurrentRole(), component);
+  const tooltip = useDelayedTooltip();
+  const why = unsearched ? translate('palette.panel.searchHidden') : undefined;
   return (
     <div
-      className="palette-item"
+      className={unsearched ? 'palette-item is-search-hidden' : 'palette-item'}
       draggable
       title={translate('palette.panel.itemHint')}
       onMouseEnter={(event) => props.preview.show(component, event.currentTarget)}
@@ -380,7 +397,14 @@ function PaletteItem({ component, props }: { readonly component: ScanComponent; 
       onDragEnd={clearDrag}
       onDoubleClick={() => props.onInsert(component.path)}
     >
-      <span className="icon">{component.isLayout ? <LayoutIcon size={14} /> : <ElementComponentIcon size={14} />}</span>
+      <span
+        className="icon"
+        // An empty title keeps the row's own hint from covering the tip that says why the row is dimmed.
+        {...(why === undefined ? {} : { title: '', role: 'img', 'aria-label': why, onMouseEnter: tooltip.show, onMouseLeave: tooltip.hide })}
+      >
+        {component.isLayout ? <LayoutIcon size={14} /> : <ElementComponentIcon size={14} />}
+      </span>
+      {why !== undefined && tooltip.value !== undefined && <FittedTooltip anchor={tooltip.value}>{why}</FittedTooltip>}
       <ItemRoles component={component} props={props} />
       <span className="label">
         {prettyComponentName(component.name)}
@@ -409,7 +433,7 @@ function PaletteItem({ component, props }: { readonly component: ScanComponent; 
   );
 }
 
-// The "…" for one component: Edit settings, Show instances, Roles (when the project has roles), then Duplicate and Delete. Rows the
+// The "…" for one component: Edit settings, Open canvas, Show instances, Roles (when the project has roles), then Duplicate and Delete. Rows the
 // viewer's role may not use, or the host cannot do, are left out; Delete is shown disabled, with why, while the component is used.
 function ItemRoles({ component, props }: { readonly component: ScanComponent; readonly props: PaletteListProps }) {
   const translate = useTranslate();
@@ -430,6 +454,19 @@ function ItemRoles({ component, props }: { readonly component: ScanComponent; re
             },
           ]
         : [];
+    const canvas = props.canvas;
+    const canvasEntry: readonly MenuEntry[] =
+      canvas !== undefined && canvas.canOpen(component) && can(role, 'component:edit')
+        ? [
+            {
+              kind: 'item',
+              id: 'canvas',
+              label: translate('componentCanvas.menu.open'),
+              icon: <CanvasIcon size={14} />,
+              onSelect: () => canvas.open(component),
+            },
+          ]
+        : [];
     const instances: MenuEntry = {
       kind: 'item',
       id: 'instances',
@@ -446,7 +483,7 @@ function ItemRoles({ component, props }: { readonly component: ScanComponent; re
       rules === undefined || file === undefined
         ? []
         : [{ ...rolesSubmenu(rules, { kind: 'component', path: file }, [file], translate), icon: <UsersIcon size={14} /> }];
-    return [...settings, instances, ...roles, ...componentChanges(component, file, props, role, translate)];
+    return [...settings, ...canvasEntry, instances, ...roles, ...componentChanges(component, file, props, role, translate)];
   };
   return <PaletteRowMenu entries={entries} name={prettyComponentName(component.name)} onOpenChange={props.preview.block} />;
 }
@@ -656,7 +693,7 @@ function RenameDialogHost(props: {
       onClose={props.onClose}
       onApply={(request, change) => {
         props.onClose();
-        props.rename.apply(component, request, change);
+        void props.rename.apply(component, request, change);
       }}
     />
   );

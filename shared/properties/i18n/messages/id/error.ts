@@ -86,6 +86,8 @@ export const messages = {
   'error.project.chooseInside': 'Pilih sesuatu di dalam proyek, bukan proyek itu sendiri.',
   'error.project.creationBusy': 'Situs lain sedang dibuat. Tunggu hingga selesai.',
   'error.project.gone': 'Itu sudah tidak ada.',
+  'error.project.managerMissing': '{manager} belum terinstal. Instal atau pilih npm.',
+  'error.project.npmMissing': 'npm tidak ditemukan. Instal Node.js (sudah termasuk npm) lalu coba lagi.',
   'error.project.outside': 'Itu berada di luar proyek.',
   'error.projectSettings.changed': 'Pengaturan proyek berubah. Muat ulang sebelum menyimpan.',
   'error.projectSettings.changedDuringSave': 'Pengaturan proyek berubah saat menyimpan. Muat ulang untuk memeriksanya.',

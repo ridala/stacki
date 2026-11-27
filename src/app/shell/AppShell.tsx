@@ -1,10 +1,22 @@
 import { ErrorToast } from '../../ui/ErrorToast';
+import { useCodeIntel } from '../../features/codeIntel/useCodeIntel';
+import { PREVIEW_SHORTCUT, railShortcutLabel } from '../railShortcuts';
+import { FilesTab, useGitChangesHost } from './DesktopFiles';
+import { FilesKeeper } from '../../features/files/FilesKeeper';
 import { DesktopPageSettings } from './PageSettingsDesktop';
 import { CanvasTextFormatBar } from './CanvasTextFormatBar';
 import { CanvasTextSourceCue } from './CanvasTextSourceCue';
 import { ResizablePanel } from './ResizablePanel';
 import { desktopElementActions } from './desktopElementActions';
 import { DefaultsCanvasBar } from '../../features/componentDefaults/DefaultsCanvasBar';
+import { desktopDefaultsHost, relativeComponentPath } from '../../features/componentDefaults/defaultsHost';
+import { FieldEditingContext, type FieldEditingHost } from '../../features/componentProperties/PropertyEditingSettings';
+import { editingOffered, withEditingFieldMoved, withFieldEditing } from '../../../shared/properties/componentDefaults';
+import { useDesktopComponentCanvas } from '../state/useDesktopComponentCanvas';
+import { ComponentCanvasContext, useComponentCanvas, type ComponentCanvasControl } from '../../features/preview/componentCanvas/componentCanvasSession';
+import { ComponentCanvasFramePopup } from '../../features/preview/componentCanvas/ComponentCanvasFramePopup';
+import { canvasNavigatorView } from './canvasFrameSettings';
+import { ComponentCanvasBack, ComponentCanvasZoom } from '../../features/preview/componentCanvas/ComponentCanvasControls';
 import { DesktopPublishButton } from './DesktopPublishButton';
 import { ToastStack } from '../../features/notifications/ToastStack';
 import { ProjectFolderDrop } from './ProjectFolderDrop';
@@ -25,6 +37,8 @@ import { useComponentRoleRules } from '../roles/componentRoleRules';
 import StructurePanel from '../../features/structure/StructurePanel';
 import PanelBoundary from '../../ui/PanelBoundary';
 import GitChip from '../../features/git/GitChip';
+import { GitSessionDialogs } from '../../features/git/GitSessionDialogs';
+import { DesktopGitContext, TitleBarPull, useDesktopGit, useDesktopGitControls } from './DesktopGitPull';
 import HistoryPanel from '../../features/history/HistoryPanel';
 import { ConfirmHost, confirmDialog } from '../../ui/ConfirmDialog';
 import { UpdatePopupHost } from '../../features/update/UpdatePopup';
@@ -61,7 +75,9 @@ import { prewarmSecretsListing } from '../../features/projectSettings/secretsCac
 import { prewarmProjectRoles } from '../roles/rolesCache';
 import { prewarmInstalledApps } from '../../features/apps/installedAppsCache';
 import { prewarmPageOrder } from '../../features/pages/pageOrderPersistence';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
+import { rootSwatchScope, SwatchScopeContext } from '../../features/style/model/computedColor';
+import { useSharedVars } from '../../features/style/sharedVars';
 import { PreviewModeStage } from '../../features/preview/SizedFrame';
 import { usePreviewSizing } from '../../features/preview/usePreviewSizing';
 import { useProjectBreakpoints } from '../../ipc/useProjectBreakpoints';
@@ -79,12 +95,15 @@ import { ViewAsChip } from '../roles/ViewAsChip';
 import { AppsTab, DesktopAppsHost } from './DesktopApps';
 import { AuditsHost, AuditsTab } from './DesktopAudits';
 import { AiCover, AiHost, AiTab, useAiAvailable, useAiRailButton } from './DesktopAi';
+import { addCodeToChat } from './aiAddToChat';
+import { PinsHost } from './DesktopPins';
 import { selectFromPanel } from './panelSelection';
 import { useTranslate } from '../../lib/i18n/useTranslate';
 import { SettingsButton } from './WelcomeView';
 import { SettingsBackScope } from '../SettingsBackScope';
 import { PageLoadLine } from '../../features/preview/PageLoadLine';
 import { useCodeChips } from '../../features/style/codeChips/CodeChips';
+import { DesignModeHost } from '../designMode/DesignModeHost'; // Design mode (experimental): docs/design-mode/REMOVE.md
 
 // The editor around an open project.
 export function AppShell({ app }: { readonly app: ShellView }) {
@@ -106,69 +125,106 @@ export function AppShell({ app }: { readonly app: ShellView }) {
   const role = useCurrentRole();
   const leftTab = app.leftTab !== undefined && canRailTab(role, app.leftTab) ? app.leftTab : undefined;
   const aiButton = useAiRailButton(app);
+  // The component canvas (useDesktopComponentCanvas.ts): the title bar, the Components panel and the right panel read it.
+  const componentCanvas = useDesktopComponentCanvas(app);
+  // The window's one git session: the title bar's pull button, ⌥⇧G and the Git panel share it (DesktopGitPull.tsx).
+  const git = useDesktopGit(app, componentCanvas);
   return (
-    <div className="app">
-      {app.propertySave.phase === 'saving' && (
-        <div className="property-saving-overlay" role="status">
-          {translate('shell.saving.properties')}
-        </div>
-      )}
-      <TitleBar app={app} />
-      <DefaultsCanvasBar canvas={app.defaultsCanvas} />
-      <div className="main">
-        <LeftRail
-          active={leftTab === 'ai' ? undefined : leftTab}
-          componentOpen={app.componentPropertiesOpen}
-          projectPath={projectPath}
-          onSelect={(id) => app.setLeftTab((tab) => (tab === id ? undefined : id))}
-          onOpenSettings={(target) => {
-            // Opens, never toggles: the shortcut for a section must not close Settings that is already showing it.
-            requestSettingsSection(target);
-            app.setLeftTab('projectSettings');
-          }}
-          aiButton={aiButton}
-        />
-        {leftTab && <LeftPanel app={app} tab={leftTab} />}
-        <div className="center">
-          {/* Each pane is its own boundary, so one that throws names itself and the rest of the window keeps working. */}
-          <PanelBoundary name="The canvas" label={translate('recovery.pane.canvas')} resetKey={app.pageUrlPath}>
-            <CanvasPane app={app} />
-          </PanelBoundary>
-          <PanelBoundary name="The canvas cover" label={translate('recovery.pane.canvas')} resetKey={app.leftTab}>
-            <CanvasCovers app={app} />
-            {/* Last, so an expanded chat is on top of any other cover: it is the mode the person just chose. */}
-            <AiCover app={app} />
-          </PanelBoundary>
-        </div>
-        {app.assetPick?.presentation === 'overlay' && (
-          <AssetPickOverlay mediaKind={app.assetPick.mediaKind} onClose={() => app.endAssetPick(false)}>
-            <AssetsPanel
-              project={app.project}
-              showToast={app.showToast}
-              pick={app.assetPick}
-              onPickCancel={() => app.endAssetPick(false)}
-              onRecordUndo={app.pushCommand}
+    <DesktopGitContext.Provider value={git}>
+      <ComponentCanvasContext.Provider value={componentCanvas}>
+        <div className="app" data-component-canvas={componentCanvas.state.kind === 'idle' ? undefined : ''}>
+          {app.propertySave.phase === 'saving' && (
+            <div className="property-saving-overlay" role="status">
+              {translate('shell.saving.properties')}
+            </div>
+          )}
+          <TitleBar app={app} />
+          <DefaultsCanvasBar canvas={app.defaultsCanvas} />
+          <div className="main">
+            <LeftRail
+              active={leftTab === 'ai' ? undefined : leftTab}
+              componentOpen={app.componentPropertiesOpen}
+              projectPath={projectPath}
+              onSelect={(id) => app.setLeftTab((tab) => (tab === id ? undefined : id))}
+              onOpenSettings={(target) => {
+                // Opens, never toggles: the shortcut for a section must not close Settings that is already showing it.
+                requestSettingsSection(target);
+                app.setLeftTab('projectSettings');
+              }}
+              aiButton={aiButton}
             />
-          </AssetPickOverlay>
-        )}
-        {app.inPreview && app.previewSource && <PreviewModeView app={app} source={app.previewSource} />}
-        <OldVersionCover app={app} />
-        {app.pageState?.editable && !app.previewRef && (
-          // An open CMS item has nothing to style, so the CMS takes the Style and
-          // Settings panel's width too. Hidden, not unmounted: closing the CMS
-          // returns the panel as it was, on the same tab and scroll.
-          <div style={{ display: cmsCovering(app) ? 'none' : 'contents' }}>
-            <PanelBoundary name="The right panel" label={translate('recovery.pane.rightPanel')} resetKey={app.selectedId}>
-              <RightPanel app={app} />
-            </PanelBoundary>
+            {leftTab && <LeftPanel app={app} tab={leftTab} />}
+            <div className="center">
+              {/* Each pane is its own boundary, so one that throws names itself and the rest of the window keeps working. */}
+              <PanelBoundary name="The canvas" label={translate('recovery.pane.canvas')} resetKey={app.pageUrlPath}>
+                <CanvasPane app={app} />
+              </PanelBoundary>
+              <PanelBoundary name="The canvas cover" label={translate('recovery.pane.canvas')} resetKey={app.leftTab}>
+                <CanvasCovers app={app} />
+                {/* Last, so an expanded chat is on top of any other cover: it is the mode the person just chose. */}
+                <AiCover app={app} />
+              </PanelBoundary>
+              <ComponentCanvasZoom canvas={componentCanvas} />
+              <CanvasFramePopup canvas={componentCanvas} />
+            </div>
+            {app.assetPick?.presentation === 'overlay' && (
+              <AssetPickOverlay mediaKind={app.assetPick.mediaKind} onClose={() => app.endAssetPick(false)}>
+                <AssetsPanel
+                  project={app.project}
+                  showToast={app.showToast}
+                  pick={app.assetPick}
+                  onPickCancel={() => app.endAssetPick(false)}
+                  onRecordUndo={app.pushCommand}
+                />
+              </AssetPickOverlay>
+            )}
+            {app.inPreview && app.previewSource && <PreviewModeView app={app} source={app.previewSource} />}
+            <OldVersionCover app={app} />
+            {app.pageState?.editable && !app.previewRef && (
+              // An open CMS item has nothing to style, so the CMS takes the Style and
+              // Settings panel's width too. Hidden, not unmounted: closing the CMS
+              // returns the panel as it was, on the same tab and scroll.
+              <div style={{ display: cmsCovering(app) ? 'none' : 'contents' }}>
+                <PanelBoundary name="The right panel" label={translate('recovery.pane.rightPanel')} resetKey={app.selectedId}>
+                  <RightPanel app={app} />
+                </PanelBoundary>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      <AppOverlays app={app} />
-      <AuditsHost app={app} />
-      <AiHost app={app} />
-    </div>
+          {/* Reads the project's files ahead and keeps them current, so the Files panel opens on its tree. */}
+          {canRailTab(role, 'files') && <FilesKeeper key={projectPath} projectPath={projectPath} gitSignal={app.gitInfo} />}
+          <AppOverlays app={app} />
+          <AuditsHost app={app} />
+          <AiHost app={app} />
+          <PinsHost app={app} />
+          <DesignModeHost app={app} /> {/* Design mode (experimental): docs/design-mode/REMOVE.md */}
+          {/* The merge review of a pull, here so it opens with the Git panel closed. */}
+          <GitSessionDialogs session={git.session} />
+        </div>
+      </ComponentCanvasContext.Provider>
+    </DesktopGitContext.Provider>
   );
+}
+
+// The selected frame's settings, over the canvas, while the frame is selected and no element in it is. The right panel
+// stays the ordinary Style and Settings panel throughout; drilling into a component inside a frame hides this too.
+function CanvasFramePopup({ canvas }: { readonly canvas: ComponentCanvasControl }) {
+  const state = canvas.state;
+  // Frame settings speak of the selected frame (the instance selected on the canvas page, or the one opened inside), so
+  // they show at any depth; minimized, their header stays, and expands them again.
+  if (state.kind !== 'open') {
+    return undefined;
+  }
+  return <CanvasSwatches>{<ComponentCanvasFramePopup canvas={canvas} state={state} />}</CanvasSwatches>;
+}
+
+// The popover's swatches are not an element's styles: a frame background is drawn on the canvas page, so a
+// `var(--background)` in it is resolved on that page's root element (where a site declares its theme), with or
+// without a selection, instead of against a selected element, which painted a checkerboard while none was.
+function CanvasSwatches({ children }: { readonly children: ReactNode }) {
+  const { vars } = useSharedVars({ active: true });
+  const scope = useMemo(() => rootSwatchScope(vars), [vars]);
+  return <SwatchScopeContext.Provider value={scope}>{children}</SwatchScopeContext.Provider>;
 }
 
 // The site with no editing, over the panels, at the canvas's own size: the width and height
@@ -176,8 +232,8 @@ export function AppShell({ app }: { readonly app: ShellView }) {
 // preview keeps the size picked in it. The canvas below keeps listening for the device keys.
 function PreviewModeView({ app, source }: { readonly app: ShellView; readonly source: string }) {
   const translate = useTranslate();
-  const { resolved: breakpoints } = useProjectBreakpoints(app.project.path);
-  const sizing = usePreviewSizing(app.device, app.previewDimensions, breakpoints, { deviceShortcuts: false }, app.setDevice);
+  const { resolved: breakpoints, desktopFramePx } = useProjectBreakpoints(app.project.path);
+  const sizing = usePreviewSizing(app.device, app.previewDimensions, breakpoints, { deviceShortcuts: false, desktopFramePx }, app.setDevice);
   return (
     <PreviewModeStage sizing={sizing}>
       <iframe ref={app.previewIframeRef} src={source} title={translate('shell.preview.interactiveTitle')} />
@@ -249,6 +305,11 @@ export function AppOverlays({ app }: { readonly app: ShellView }) {
 export function TitleBar({ app }: { readonly app: ShellView }) {
   const translate = useTranslate();
   const canPublish = can(useCurrentRole(), 'publish');
+  const componentCanvas = useComponentCanvas();
+  // On the canvas page the way back leaves the canvas; inside an instance, back steps out one level as anywhere, and
+  // Close canvas beside it leaves from any depth.
+  const canvasOpen = componentCanvas !== undefined && componentCanvas.state.kind !== 'idle';
+  const atCanvas = canvasOpen && app.editStack.length <= 1;
   return (
     <div className="titlebar">
       <button
@@ -277,20 +338,25 @@ export function TitleBar({ app }: { readonly app: ShellView }) {
           <ChevronLeftIcon size={13} />
           <span>{translate('shell.titleBar.closeDefaults')}</span>
         </button>
+      ) : atCanvas ? (
+        <ComponentCanvasBack canvas={componentCanvas} />
       ) : app.editStack.length > 1 ? (
-        <button
-          className="page-switch-btn comp-back"
-          title={translate('shell.titleBar.back')}
-          onClick={() => {
-            // Opening the parent file reports its own failures.
-            void app.closeComponent();
-          }}
-        >
-          <ChevronLeftIcon size={13} />
-          <span className="comp-back-sep" />
-          <ElementComponentIcon size={13} />
-          <span className="page-switch-label">{app.currentPage?.name}</span>
-        </button>
+        <>
+          {canvasOpen && <ComponentCanvasBack canvas={componentCanvas} />}
+          <button
+            className="page-switch-btn comp-back"
+            title={translate('shell.titleBar.back')}
+            onClick={() => {
+              // Opening the parent file reports its own failures.
+              void app.closeComponent();
+            }}
+          >
+            <ChevronLeftIcon size={13} />
+            <span className="comp-back-sep" />
+            <ElementComponentIcon size={13} />
+            <span className="page-switch-label">{app.currentPage?.name}</span>
+          </button>
+        </>
       ) : (
         <PageSwitcher pages={app.scan.pages} currentPage={app.currentScanPage} onSelect={app.onSelectPage} />
       )}
@@ -313,8 +379,11 @@ export function TitleBar({ app }: { readonly app: ShellView }) {
           onOpenBranches={() => app.setLeftTab('history')}
           withBranchChange={app.withBranchChange}
           onBranchSwitched={app.reloadFromDisk}
+          beforeBranch={<TitleBarPull />}
         />
       )}
+      {/* A role that may pull but not publish has no branch chip; the button stands in its place. */}
+      {!canPublish && <TitleBarPull />}
     </div>
   );
 }
@@ -458,7 +527,7 @@ export function TitleActions({ app }: { readonly app: ShellView }) {
 }
 
 // Lit for either kind of looking-not-working (see TitleActions). Its tip waits for
-// a resting pointer and names ⌥P, the key that does the same from anywhere.
+// a resting pointer and names ⌥⇧P, the key that does the same from anywhere.
 function PreviewButton({ app }: { readonly app: ShellView }) {
   const translate = useTranslate();
   const tooltip = useDelayedTooltip();
@@ -486,7 +555,7 @@ function PreviewButton({ app }: { readonly app: ShellView }) {
 
 // What the preview button does now, with the key for it.
 function previewButtonLabel(app: Pick<ShellView, 'inPreview' | 'previewRef'>, platform: NodeJS.Platform, translate: Translator): string {
-  const key = platform === 'darwin' ? '⌥P' : 'Alt+P';
+  const key = platform === 'darwin' ? railShortcutLabel(PREVIEW_SHORTCUT) : 'Alt+Shift+P';
   if (app.previewRef) {
     return translate('shell.preview.backToNow', { shortcut: key });
   }
@@ -554,6 +623,7 @@ function LeftPanelBody({ app, tab }: { readonly app: ShellView; readonly tab: Le
       {tab === 'variables' && <VariablesPanel project={app.project} place={variablePlace(app)} selected={app.varsGroup} onSelect={app.setVarsGroup} />}
       {tab === 'selectors' && <SelectorsPanel project={app.project} showToast={app.showToast} onRecordUndo={app.pushCommand} />}
       {tab === 'code' && <CodeTab app={app} />}
+      {tab === 'files' && <FilesTab app={app} />}
       {tab === 'history' && <HistoryTab app={app} />}
       {tab === 'apps' && <AppsTab app={app} />}
       {tab === 'audits' && <AuditsTab app={app} />}
@@ -588,21 +658,65 @@ export function PropertiesTab({ app }: { readonly app: ShellView }) {
     return undefined;
   }
   return (
-    <ComponentPropertiesPanel
-      key={page.path}
-      projectPath={app.project.path}
-      file={page.path}
-      name={page.name}
-      flushSave={app.flushSave}
-      onSavePhase={app.propertySave.changePhase}
-      onSaved={app.completePropertySave}
-      onRecordUndo={app.recordPropertyUndo}
-      nodes={app.model?.nodes}
-      onSelectNode={app.setSelectedId}
-      onReplaceProps={app.replaceProps}
-      onOpenFile={(rel) => void app.openProjectFile(rel)}
-    />
+    <FieldEditingContext.Provider value={desktopFieldEditing(app, page.path)}>
+      <ComponentPropertiesPanel
+        key={page.path}
+        projectPath={app.project.path}
+        file={page.path}
+        name={page.name}
+        flushSave={app.flushSave}
+        onSavePhase={app.propertySave.changePhase}
+        onSaved={app.completePropertySave}
+        onRecordUndo={app.recordPropertyUndo}
+        nodes={app.model?.nodes}
+        onSelectNode={app.setSelectedId}
+        onReplaceProps={app.replaceProps}
+        onOpenFile={(rel) => void app.openProjectFile(rel)}
+        onFieldMoved={(from, to) => moveFieldEditing(app, page.path, { from, to })}
+      />
+    </FieldEditingContext.Provider>
   );
+}
+
+// The open component's fields as the Properties panel's editing rows read and write them (.stacki/components.json).
+function desktopFieldEditing(app: ShellView, componentPath: string): FieldEditingHost | undefined {
+  const component = app.scan.components.find((entry) => entry.path === componentPath);
+  if (component === undefined) {
+    return undefined;
+  }
+  const catalogEntry = {
+    slots: component.slots ?? [],
+    slotText: component.slotText ?? false,
+    ...(component.htmlProps === undefined ? {} : { htmlProps: component.htmlProps }),
+  };
+  return {
+    slots: catalogEntry.slots,
+    offered: (field) => editingOffered(catalogEntry, field),
+    settings: (field) => app.componentEditing(componentPath, field),
+    change: (field, setting, state) => {
+      const host = desktopDefaultsHost(app.project.path);
+      void host
+        .load()
+        .then((snapshot) => {
+          const file = component.file ?? relativeComponentPath(app.project.path, componentPath);
+          return host.save({ ...snapshot, config: withFieldEditing(snapshot.config, { file, field }, { setting, state }) });
+        })
+        .catch(app.reportFailure);
+    },
+  };
+}
+
+// A renamed or deleted prop's editing settings go with it; a file with none for it is not written.
+function moveFieldEditing(app: ShellView, componentPath: string, move: { readonly from: string; readonly to: string | undefined }): void {
+  const host = desktopDefaultsHost(app.project.path);
+  const file = app.scan.components.find((entry) => entry.path === componentPath)?.file ?? relativeComponentPath(app.project.path, componentPath);
+  void host
+    .load()
+    .then((snapshot) => {
+      const config = withEditingFieldMoved(snapshot.config, file, move.from, move.to);
+      return config === snapshot.config ? snapshot : host.save({ ...snapshot, config });
+    })
+    .catch(app.reportFailure);
 }
 
 export function PagesTab({ app }: { readonly app: ShellView }) {
@@ -641,6 +755,8 @@ export function PagesTab({ app }: { readonly app: ShellView }) {
 
 export function NavigatorTab({ app }: { readonly app: ShellView }) {
   const translate = useTranslate();
+  const intelligence = useCodeIntel(app.project.path, app.openRel);
+  const componentCanvas = useComponentCanvas();
   const page = app.currentPage;
   const selectNavigatorNode = (id: string | undefined): void => selectFromPanel(app, id);
   // A ::before or ::after row selects its element, and asks the Style panel
@@ -657,11 +773,17 @@ export function NavigatorTab({ app }: { readonly app: ShellView }) {
       app.setPseudoPick(undefined);
     }
   };
+  // On the component canvas's page the tree is its boxes, as divs, and in each frame its closed instance
+  // (canvasFrameSettings.tsx). The page is generated, so nothing on it can be changed from here.
+  const canvasView = canvasNavigatorView(app, componentCanvas);
+  const pseudoNodeIds = canvasView === undefined ? { before: app.stateIds.before, after: app.stateIds.after } : withoutBoxes(app.stateIds, canvasView.boxIds);
   return (
     <PanelBoundary name="The Navigator" label={translate('shell.navigator.panelName')} resetKey={page?.path}>
       <StructurePanel
         key={page?.path}
-        pageState={app.pageState}
+        codeExtensions={intelligence}
+        pageState={canvasView?.pageState ?? app.pageState}
+        {...(canvasView === undefined ? {} : { rowLabels: canvasView.rowLabels })}
         currentPage={page?.kind === 'route' ? { kind: 'route', route: page.route } : page}
         layouts={app.scan.layouts}
         insertables={app.insertables}
@@ -670,7 +792,7 @@ export function NavigatorTab({ app }: { readonly app: ShellView }) {
         emptyNodeIds={app.emptyNodeIds ?? new Set<string>()}
         hiddenNodeIds={app.stateIds.hidden}
         inertNodeIds={app.stateIds.inert}
-        pseudoNodeIds={{ before: app.stateIds.before, after: app.stateIds.after }}
+        pseudoNodeIds={pseudoNodeIds}
         selectedPseudo={selectedPseudo(app.selectedId, app.pseudoPick)}
         onSelectPseudo={selectPseudo}
         liveClassesById={app.liveClassesById ?? new Map<string, readonly string[]>()}
@@ -687,15 +809,34 @@ export function NavigatorTab({ app }: { readonly app: ShellView }) {
         {...desktopElementActions(app)}
         onOpenCode={app.openCodeWindowById}
         onChangeLayout={app.onChangeLayout}
-        onDropComponent={app.onDropComponent}
-        onDropInsert={app.insertItemAt}
-        onMoveNode={app.moveNode}
+        {...(canvasView === undefined ? { onDropInsert: app.insertItemAt, onDropComponent: app.onDropComponent, onMoveNode: app.moveNode } : CANVAS_READ_ONLY)}
         onCodeChange={app.onCodeChange}
         onOpenCodePanel={() => app.setLeftTab('code')}
         devLog={app.devLog}
       />
     </PanelBoundary>
   );
+}
+
+// What the Navigator may do on the component canvas's page, which is generated and never edited: nothing that would
+// change it. Delete, Cut, Copy, Duplicate and Wrap are greyed out (canChangeStructure), Paste and drops land nowhere.
+const CANVAS_READ_ONLY = {
+  canChangeStructure: () => false,
+  onPasteNode: () => undefined,
+  hasClipboard: false,
+  onMoveNode: () => undefined,
+  onDropComponent: () => undefined,
+} as const;
+
+// The page's ::before and ::after rows without the canvas boxes': a box's caption is its ::before, drawn by the canvas.
+function withoutBoxes(
+  states: { readonly before: ReadonlySet<string>; readonly after: ReadonlySet<string> },
+  boxIds: ReadonlySet<string>,
+): { readonly before: ReadonlySet<string>; readonly after: ReadonlySet<string> } {
+  return {
+    before: new Set([...states.before].filter((id) => !boxIds.has(id))),
+    after: new Set([...states.after].filter((id) => !boxIds.has(id))),
+  };
 }
 
 // The Add elements panel. A click inserts at the selection through the palette's insert; a tile dragged out shows
@@ -734,8 +875,10 @@ export function PaletteTab({ app }: { readonly app: ShellView }) {
   const management = useComponentManagement(app);
   // Counts that follow the open tree: an instance deleted on the page is gone from the count in the same frame.
   const components = useLiveInsertables(app);
+  const canvas = useComponentCanvas();
   return (
     <PalettePanel
+      canvas={canvas}
       components={components}
       roleRules={roleRules}
       management={management}
@@ -845,6 +988,9 @@ export function CodeTab({ app }: { readonly app: ShellView }) {
   const state = app.pageState;
   // The page's `<style>` blocks draw CSS chips; the markup around them is left as it is.
   const codeChips = useCodeChips('markup');
+  const intelligence = useCodeIntel(app.project.path, app.openRel);
+  const aiAvailable = useAiAvailable();
+  const translate = useTranslate();
   if (!page || page.kind === 'route' || !state) {
     return undefined;
   }
@@ -860,8 +1006,9 @@ export function CodeTab({ app }: { readonly app: ShellView }) {
       onOpenComponent={(name, id) => {
         void app.openComponent(name, app.pathFor(id)).catch(app.reportFailure);
       }}
-      extensions={codeChips.extension}
+      extensions={[codeChips.extension ?? [], intelligence]}
       overlay={codeChips.overlay}
+      onAddToChat={aiAvailable ? (request) => addCodeToChat(app, request, translate) : undefined}
     />
   );
 }
@@ -898,23 +1045,17 @@ export function HistoryTab({ app }: { readonly app: ShellView }) {
 }
 
 function HistoryGitControls({ app }: { readonly app: ShellView }) {
+  const { session, shortcut } = useDesktopGitControls();
+  const changes = useGitChangesHost(app);
   return (
     <GitChip
       key={app.project.path}
-      project={app.project}
-      info={app.gitInfo}
-      refresh={app.refreshGit}
-      busy={app.busy}
-      showToast={app.showToast}
-      flushSave={app.flushSave}
+      session={session}
       incoming={app.gitIncoming}
       withBranchChange={app.withBranchChange}
-      onWorktreeChanged={async () => {
-        if (app.previewRef) {
-          await app.exitCommitPreview();
-        }
-        await app.reloadFromDisk();
-      }}
+      pullShortcut={shortcut}
+      changesSignal={changes.changesSignal}
+      onOpenFile={changes.onOpenFile}
     />
   );
 }

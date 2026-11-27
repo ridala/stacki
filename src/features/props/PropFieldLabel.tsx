@@ -1,6 +1,10 @@
 // A prop field's label row: its pill, its menu, the picker it opens, and the
 // reset menu (PropField.tsx).
 
+import { createPortal } from 'react-dom';
+import { provenanceResets, usePropFieldExtra } from './propFieldExtras';
+import FittedTooltip from '../../ui/FittedTooltip';
+import { useDelayedTooltip } from '../../ui/delayedTooltip';
 import { useTranslate } from '../../lib/i18n/useTranslate';
 import React, { useRef, useState } from 'react';
 import { dataPickerPosition } from './dataPickerPosition';
@@ -18,6 +22,7 @@ import { arrayItems } from './arrayValue';
 import { itemShapeOf } from './listItemShape';
 import { ConditionalEditor, useConditionCatalog } from './ConditionalValue';
 import { startingConditional, valueLanguageOf } from './conditionalModel';
+import { CAPTION_LABEL_FOR } from '../../ui/captionLabel';
 
 export const noLabelActivation = (event: React.MouseEvent<HTMLLabelElement>) => event.preventDefault();
 export function PropFieldPill({ state }: { readonly state: PropState }) {
@@ -25,14 +30,20 @@ export function PropFieldPill({ state }: { readonly state: PropState }) {
   const { name, type, isSet, showExpr, onLabelClick, onLabelContextMenu, required, missingRequired, deprecated } = state;
   // Set is the overridden state: the label takes the accent, as a value the
   // instance gives rather than the component's default.
-  const classes = ['prop-label', ...(isSet ? ['set'] : []), ...(deprecated === undefined ? [] : ['deprecated'])];
+  const extra = usePropFieldExtra(state.field.name);
+  const provenance = extra?.provenance;
+  const inherited = provenance?.tone === 'inherited';
+  const classes = ['prop-label', ...(inherited ? ['inherited'] : isSet ? ['set'] : []), ...(deprecated === undefined ? [] : ['deprecated'])];
+  const ownTitle = isSet ? translate('props.field.overridden') : showExpr ? translate('props.field.clickForOptions') : undefined;
+  // A value given from elsewhere has nothing here to reset: the label only says where it is set.
+  const resets = provenanceResets(provenance) || extra?.reset !== undefined;
 
   return (
     <span
       className={classes.join(' ')}
-      title={isSet ? translate('props.field.overridden') : showExpr ? translate('props.field.clickForOptions') : undefined}
-      onClick={onLabelClick}
-      onContextMenu={onLabelContextMenu}
+      title={provenance?.tip ?? ownTitle}
+      onClick={resets ? onLabelClick : undefined}
+      onContextMenu={resets ? onLabelContextMenu : undefined}
     >
       <FieldTypeIcon type={type} name={name} />
       {name}
@@ -66,6 +77,7 @@ export function PropFieldMenu({ state }: { readonly state: PropState }) {
 }
 export function PropFieldLabelRow({ state }: { readonly state: PropState }) {
   const translate = useTranslate();
+  const hasExtra = usePropFieldExtra(state.field.name)?.action !== undefined;
   const {
     field,
 
@@ -81,7 +93,7 @@ export function PropFieldLabelRow({ state }: { readonly state: PropState }) {
   const pill = <PropFieldPill state={state} />;
   const menu = <PropFieldMenu state={state} />;
   return (
-    <label onClick={noLabelActivation}>
+    <label htmlFor={CAPTION_LABEL_FOR} onClick={noLabelActivation}>
       {pill}
       {/* The prop's own documentation — the comment above it in the
           component's `interface Props`. */}
@@ -104,19 +116,21 @@ export function PropFieldLabelRow({ state }: { readonly state: PropState }) {
           cannot hold — `href={page.url}` is not a link setting — and until this
           existed the only way in was to pick data, which is a value rather than
           the code somebody had in mind. */}
-      {bindable && (
-        <button
-          type="button"
-          className={`prop-expr-toggle${showExpr ? ' on' : ''}`}
-          title={showExpr ? (normalBlockedText ?? controlLabel(field, translate)) : translate('props.field.writeExpression')}
-          aria-disabled={showExpr && normalBlockedText !== undefined}
-          aria-pressed={showExpr}
-          aria-label={translate('props.field.writeExpression')}
-          onClick={() => (showExpr ? fromCustom() : setCustom(true))}
-        >
-          <BracesIcon size={12} />
-        </button>
-      )}
+      <PropFieldActions extra={<PropFieldExtraAction name={field.name} />} hasExtra={hasExtra}>
+        {bindable && (
+          <button
+            type="button"
+            className={`prop-expr-toggle${showExpr ? ' on' : ''}`}
+            title={showExpr ? (normalBlockedText ?? controlLabel(field, translate)) : translate('props.field.writeExpression')}
+            aria-disabled={showExpr && normalBlockedText !== undefined}
+            aria-pressed={showExpr}
+            aria-label={translate('props.field.writeExpression')}
+            onClick={() => (showExpr ? fromCustom() : setCustom(true))}
+          >
+            <BracesIcon size={12} />
+          </button>
+        )}
+      </PropFieldActions>
       {bindable && (
         <BindHandle
           active={!!insertAt}
@@ -137,6 +151,58 @@ export function PropFieldLabelRow({ state }: { readonly state: PropState }) {
     </label>
   );
 }
+// The {} button and the host's toggle beside it. With a toggle the two are one unbreakable group, so a long prop name
+// wraps before the {} and the toggle never drops to a line of its own; without one the {} stands alone as it always has.
+function PropFieldActions({ hasExtra, extra, children }: { readonly hasExtra: boolean; readonly extra: React.ReactNode; readonly children: React.ReactNode }) {
+  if (!hasExtra) {
+    return children;
+  }
+  return (
+    <span className="prop-field-actions">
+      {children}
+      {extra}
+    </span>
+  );
+}
+
+// The host's toggle for this prop (propFieldExtras.ts), beside the {} button and drawn as it is: the same element,
+// classes and place in the label, so its box, centre and hover are the {}'s in every state. Its tooltip is the app's.
+function PropFieldExtraAction({ name }: { readonly name: string }) {
+  const action = usePropFieldExtra(name)?.action;
+  const tip = useDelayedTooltip();
+  if (action === undefined) {
+    return undefined;
+  }
+  return (
+    <>
+      <button
+        type="button"
+        className={`prop-expr-toggle prop-field-extra${action.pressed ? ' on' : ''}`}
+        aria-pressed={action.pressed}
+        aria-disabled={action.refused}
+        aria-label={action.label}
+        onMouseEnter={tip.show}
+        onMouseLeave={tip.hide}
+        onBlur={tip.hide}
+        onClick={(event) => {
+          event.preventDefault();
+          tip.hide();
+          action.onPress();
+        }}
+      >
+        {action.icon}
+      </button>
+      {tip.value !== undefined &&
+        createPortal(
+          <FittedTooltip anchor={tip.value} role="tooltip">
+            {action.label}
+          </FittedTooltip>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 export function PropFieldPicker({ state }: { readonly state: PropState }) {
   const { field, value, bindContext, onChange, type, setCustom, insertAt, setInsertAt, bindApiRef } = state;
   // The Value conditions editor, opened from the picker's "Create conditional"

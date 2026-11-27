@@ -5,7 +5,7 @@ import { toRecord } from '../../shared/core/record';
 import * as path from 'path';
 import { PAGE_MD_RE } from '../documents/pageRequests';
 import * as fs from 'fs';
-import { isWin, toPosix, readJson, parseRecord, parseOptionalString } from '../lib/mainHelpers';
+import { toPosix, readJson, parseRecord, parseOptionalString } from '../lib/mainHelpers';
 import { ASTRO_CONFIG_FILES } from '../../shared/properties/astroSourceDirectory';
 import { walkFolderSliced, type WalkProblem } from './projectWalk';
 import { runSync, type SlicedWork } from '../lib/slicedWork';
@@ -126,13 +126,24 @@ export function isAstroProject(directory: string): boolean {
   return false;
 }
 
+// The project's own `astro` command in node_modules/.bin. On Windows npm, pnpm and Yarn leave `astro.cmd` while Bun
+// leaves only `astro.exe`; when neither is there the answer is the first name, which does not exist.
+export function localAstroBin(projectPath: string, platform: NodeJS.Platform = process.platform): string {
+  const folder = path.join(projectPath, 'node_modules', '.bin');
+  const shim = path.join(folder, platform === 'win32' ? 'astro.cmd' : 'astro');
+  if (platform !== 'win32') {
+    return shim;
+  }
+  const executable = path.join(folder, 'astro.exe');
+  return !fs.existsSync(shim) && fs.existsSync(executable) ? executable : shim;
+}
+
 // Astro has to be installed for a page to be rendered at all; without it the
 // card can only offer to open the project. A workspace hoists node_modules to its root, so each parent counts.
 export function hasDependencies(projectPath: string): boolean {
-  const binName = isWin ? 'astro.cmd' : 'astro';
   return ancestorsOf(projectPath).some(
     (directory) =>
-      fs.existsSync(path.join(directory, 'node_modules', '.bin', binName)) ||
+      fs.existsSync(localAstroBin(directory)) ||
       fs.existsSync(path.join(directory, 'node_modules', 'astro', 'package.json')) ||
       // Yarn Plug'n'Play keeps packages in a cache and no node_modules at all.
       fs.existsSync(path.join(directory, '.pnp.cjs')),

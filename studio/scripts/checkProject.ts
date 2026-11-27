@@ -1,9 +1,13 @@
 // Check tracked editor metadata before CI or an external component refactor is considered done.
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { checkAuthProvider } from './checkAuth';
 import { loadInsertionDefaults } from '../src/features/settings/loadDefaults';
 import { readMetadataSource } from '../src/features/settings/projectMetadata';
 import { defaultsIssues } from '../vendor/stacki/shared/properties/componentDefaults';
+import { defaultAssetUses } from '../vendor/stacki/shared/properties/componentDefaultValues';
 import { validateMetadata } from '../vendor/stacki/shared/properties/projectMetadata';
+import { canvasAssetUses, canvasIssues, parseComponentCanvasSource } from '../vendor/stacki/shared/properties/componentCanvas';
 import { EMPTY_KEEP_LIST, parseStyleKeepList } from '../vendor/stacki/shared/properties/styleKeepList';
 import { checkSelectorUsage } from '../vendor/stacki/electron/properties/selectorUsageFiles';
 import { configOf, foldersFor, readProjectFoldersSource } from '../vendor/stacki/shared/properties/projectFolders';
@@ -14,7 +18,13 @@ export async function checkProject(root: string): Promise<void> {
     validateMetadata('componentSources', sources.source);
   }
   const settings = await loadInsertionDefaults(root);
-  const issues = defaultsIssues(settings.config, settings.catalog);
+  const gone = new Set(settings.missingAssets);
+  const issues = [
+    ...defaultsIssues(settings.config, settings.catalog),
+    ...defaultAssetUses(settings.config)
+      .filter((use) => gone.has(use.file))
+      .map((use) => `.stacki/components.json: ${use.owner} default ${use.prop} imports ${use.file}, which is not in the project.`),
+  ];
   const guide = await readMetadataSource(root, 'guide');
   if (guide.source !== undefined) {
     validateMetadata('guide', guide.source);
@@ -35,10 +45,29 @@ export async function checkProject(root: string): Promise<void> {
   if (folders.source !== undefined) {
     validateMetadata('folders', folders.source);
   }
-  if (issues.length > 0) {
-    throw new Error(issues.join('\n'));
+  const canvas = await readMetadataSource(root, 'componentCanvas');
+  const canvasProblems: string[] = [];
+  if (canvas.source !== undefined) {
+    const parsed = parseComponentCanvasSource(canvas.source);
+    if (!parsed.ok) {
+      throw new Error(`.stacki/component-canvas.json: ${parsed.error.message}`);
+    }
+    canvasProblems.push(
+      ...canvasIssues(
+        parsed.value,
+        settings.catalog.map((component) => component.file),
+      ),
+    );
+    for (const use of canvasAssetUses(parsed.value)) {
+      if (!existsSync(join(root, use.file))) {
+        canvasProblems.push(`.stacki/component-canvas.json: ${use.owner} preview value ${use.prop} imports ${use.file}, which is not in the project.`);
+      }
+    }
   }
-  console.log('Project component defaults, guide, page order, publish, styles and folder settings are valid.');
+  if (issues.length + canvasProblems.length > 0) {
+    throw new Error([...issues, ...canvasProblems].join('\n'));
+  }
+  console.log('Project component defaults, component canvas, guide, page order, publish, styles and folder settings are valid.');
   await checkAuthProvider(root);
   await reportUnusedSelectors(root, styles.source, foldersFor('styles', configOf(readProjectFoldersSource(folders.source))));
 }

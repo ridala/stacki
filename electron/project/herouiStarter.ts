@@ -55,10 +55,7 @@ export async function createHeroUIStarter(
       throw new Error(defaults.reason);
     }
 
-    const install = [
-      ...installArguments(manager),
-      ...(manager === 'npm' ? ['--workspaces=false', '--include=dev', '--package-lock=true'] : ['--prod=false', '--config.node-linker=hoisted']),
-    ];
+    const install = heroUIInstallArguments(manager);
     onLog(`\n> ${manager} ${install.join(' ')}\n`);
     try {
       await run(managerCommand(manager), install, directory, onLog, options);
@@ -74,6 +71,21 @@ export async function createHeroUIStarter(
     publishGeneratedSite(directory, destination);
     return { projectPath: destination };
   });
+}
+
+function heroUIInstallArguments(manager: CreatePackageManager): readonly string[] {
+  switch (manager) {
+    case 'npm':
+      return [...installArguments(manager), '--workspaces=false', '--include=dev', '--package-lock=true'];
+    case 'pnpm':
+      return [...installArguments(manager), '--prod=false', '--config.node-linker=hoisted'];
+    case 'bun':
+      return [...installArguments(manager)];
+    default: {
+      const exhaustive: never = manager;
+      return exhaustive;
+    }
+  }
 }
 
 async function verifyManifest(file: string, expected: ReturnType<typeof heroUISiteManifest>): Promise<void> {

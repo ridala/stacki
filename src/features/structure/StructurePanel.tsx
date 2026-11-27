@@ -1,4 +1,5 @@
 import { TreeDragRow, useTreeDragCleanup } from '../../ui/TreeDragDrop';
+import type { Extension } from '@codemirror/state';
 import { ErrorToast } from '../../ui/ErrorToast';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { PanelSearch } from '../../ui/PanelSearch';
@@ -40,7 +41,10 @@ import { dropPlacement, type DropPlacement } from './dropPlacement';
 import { documentOfPath, type PlacementEnvironment, type PlacementInsertable } from '../../editor/placementCheck';
 import { getDrag } from '../../editor/dragState';
 import type { PlacementMessage } from '../../../shared/page/placement';
-import { type LiveValue } from '../../ui/liveValue';
+import { useLiveValue, type LiveValue } from '../../ui/liveValue';
+import { liveContent } from '../../ui/liveContent';
+import { canvasTextDraft } from '../../ui/canvasTextDraft';
+import { isLiveRowId, navigatorLiveTree } from './navigatorLive';
 import { assert } from '../../../shared/core/assert';
 import { useTranslate, useTranslateRich } from '../../lib/i18n/useTranslate';
 import type { Translator } from '../../lib/i18n/localeContext';
@@ -50,6 +54,8 @@ import { PanelHeader } from '../../ui/PanelHeader';
 import { TOOLTIP_DELAY_MS } from '../../ui/delayedTooltip';
 
 interface StructurePanelProps {
+  /** More editor behaviour for the source shown when a page does not parse: the project's code intelligence. */
+  readonly codeExtensions?: Extension | undefined;
   readonly clientMode?: boolean;
   readonly editRootId?: string | undefined;
   readonly onSetDefaults?: (name: string, id: string) => void;
@@ -74,6 +80,11 @@ interface StructurePanelProps {
   readonly selectedPseudo?: PseudoKind | undefined;
   readonly onSelectPseudo?: (id: string, pseudo: PseudoKind) => void;
   readonly liveClassesById?: ReadonlyMap<string, readonly string[]>;
+  /**
+   * Labels that stand in for rows' own, by node id. Given, the tree is a list of named rows rather than a file (the
+   * component canvas's frames), so the file's frontmatter row is left out.
+   */
+  readonly rowLabels?: ReadonlyMap<string, string>;
   readonly revealTick?: number;
   readonly onSelect: (id: string) => void;
   readonly onHoverNode?: (id: string | undefined) => void;
@@ -147,7 +158,8 @@ function ParseErrorPage({
   projection,
   onCodeChange,
   onOpenCodePanel,
-}: Pick<StructurePanelProps, 'devLog' | 'onCodeChange' | 'onOpenCodePanel'> & {
+  codeExtensions,
+}: Pick<StructurePanelProps, 'devLog' | 'onCodeChange' | 'onOpenCodePanel' | 'codeExtensions'> & {
   readonly projection: Extract<StructureProjection, { readonly tag: 'parse-error' }>;
 }) {
   const translate = useTranslate();
@@ -167,7 +179,7 @@ function ParseErrorPage({
           recovery={[{ label: translate('structure.error.openCode'), run: onOpenCodePanel }]}
         />
         <div className="code-panel-editor">
-          <CodeEditor language="astro" value={projection.state.source} onChange={onCodeChange} />
+          <CodeEditor language="astro" value={projection.state.source} onChange={onCodeChange} extensions={codeExtensions} />
         </div>
       </div>
     </div>
@@ -178,7 +190,8 @@ type EditableProps = StructurePanelProps & {
   readonly pageState: Extract<StructurePageState, { readonly editable: true }>;
 };
 
-function EditableStructurePanel(props: EditableProps) {
+function EditableStructurePanel(given: EditableProps) {
+  const props = useTypedTree(given);
   const state = useTreeState(props);
   // A drag on the canvas is drawn here too, from the same decision, in the same commit (canvasDragSession.ts).
   const canvasDrag = useSyncExternalStore(subscribeCanvasDrag, navigatorDragView);
@@ -196,6 +209,24 @@ function EditableStructurePanel(props: EditableProps) {
       )}
     </div>
   );
+}
+
+// The page as it is being typed (navigatorLive.ts): while an editor holds content the file does not have yet, the
+// rows are the editor's blocks and words, and the highlighted row is the caret's block. Only the tree drawn here
+// changes; the selection the rest of the app works on stays where it was.
+function useTypedTree(given: EditableProps): EditableProps {
+  const content = useLiveValue(liveContent);
+  const draft = useLiveValue(canvasTextDraft);
+  const model = given.pageState.model;
+  const tree = useMemo(() => navigatorLiveTree(model.nodes, { content, draft }, document), [model.nodes, content, draft]);
+  if (tree.nodes === model.nodes && tree.caretId === undefined) {
+    return given;
+  }
+  return {
+    ...given,
+    pageState: { ...given.pageState, model: { ...model, nodes: tree.nodes } },
+    ...(tree.caretId === undefined ? {} : { selectedId: tree.caretId, selectedPseudo: undefined }),
+  };
 }
 
 /** What the Navigator says about the drop in flight (the placement rule): why a place refuses, where it lands instead, or a caution. */
@@ -450,7 +481,14 @@ function revealRow(bodyElement: HTMLDivElement | undefined, selectedId: string, 
 function treeContextOf(props: EditableProps, state: TreeState, canvasDrag: NavigatorDragView | undefined, translate: Translator): StructureTreeContext {
   // A canvas drag opens the rows its mark sits in for as long as it lasts, without touching what the person
   // opened or closed: when the drag ends the set is empty and every row is as it was.
-  const isCollapsed = (node: NavigatorNode): boolean => (canvasDrag?.expand.has(node.id) === true ? false : collapsedState(node, state.toggled));
+  // A list of named rows (rowLabels) is open until the person closes a row: its rows are regenerated with new ids, and
+  // a default that closed them would fold the list up each time.
+  const isCollapsed = (node: NavigatorNode): boolean =>
+    canvasDrag?.expand.has(node.id) === true
+      ? false
+      : props.rowLabels === undefined
+        ? collapsedState(node, state.toggled)
+        : (state.toggled.get(node.id) ?? false);
   return {
     clientMode: props.clientMode === true,
     selectedId: props.selectedId,
@@ -463,6 +501,7 @@ function treeContextOf(props: EditableProps, state: TreeState, canvasDrag: Navig
     selectedPseudo: props.selectedPseudo,
     ...(props.onSelectPseudo === undefined ? {} : { onSelectPseudo: props.onSelectPseudo }),
     ...(props.liveClassesById === undefined ? {} : { liveClassesById: props.liveClassesById }),
+    ...(props.rowLabels === undefined ? {} : { rowLabels: props.rowLabels }),
     currentLayoutName: props.currentLayoutName,
     dropTarget: canvasDrag === undefined ? state.dropTarget : canvasDrag.navigator,
     setDropTarget: state.setDropTarget,
@@ -474,7 +513,7 @@ function treeContextOf(props: EditableProps, state: TreeState, canvasDrag: Navig
     noteDrop: (placement) => state.setDropNote((previous) => noteOf(placement, previous)),
     nodeById: (id) => findNavigatorNode(props.pageState.model.nodes, id) ?? undefined,
     onSelect: (id) => {
-      if (canEditNode(props, id)) {
+      if (!isLiveRowId(id) && canEditNode(props, id)) {
         props.onSelect(id);
         endSearch(props, state, id);
       }
@@ -484,10 +523,12 @@ function treeContextOf(props: EditableProps, state: TreeState, canvasDrag: Navig
     ...(props.onOpenComponent === undefined ? {} : { onOpenComponent: props.onOpenComponent }),
     ...(props.onOpenCode === undefined ? {} : { onOpenCode: props.onOpenCode }),
     toggleCollapse: (node) => {
-      state.setToggled((previous) => new Map(previous).set(node.id, !collapsedState(node, previous)));
+      state.setToggled((previous) =>
+        new Map(previous).set(node.id, !(props.rowLabels === undefined ? collapsedState(node, previous) : (previous.get(node.id) ?? false))),
+      );
     },
     openContextMenu: (left, top, nodeId) => {
-      if (!canEditNode(props, nodeId)) {
+      if (isLiveRowId(nodeId) || !canEditNode(props, nodeId)) {
         return;
       }
       props.onSelect(nodeId);
@@ -711,7 +752,7 @@ function NavigatorBody({
   // they catch the pointer only while a drag is over the navigator. Otherwise
   // a click on a row's edge would land on a gap and select nothing.
   const [bodyDrag, setBodyDrag] = useState<BodyDrag>('idle');
-  const search = useNavigatorSearch(nodes, state.query, { idle: canvasDrag === undefined && bodyDrag === 'idle' });
+  const search = useNavigatorSearch(nodes, state.query, { idle: canvasDrag === undefined && bodyDrag === 'idle', rowLabels: props.rowLabels });
   // Searched, the tree is a copy holding the matches, drawn open so no match hides in a folded row; the user's own folds are untouched.
   useClearWhenSelectionHidden(props.selectedId, search, state);
   const context = search.filtering ? { ...treeContext, isCollapsed: () => false, highlightWords: search.words, searchSnippets: search.snippets } : treeContext;
@@ -736,7 +777,7 @@ function NavigatorBody({
       {/* One box as wide as the widest row: every row, and the tinted block under a selected one, fill it, so a
           selected row and its subtree share both edges however long a label runs (styles.css, .structure-tree). */}
       <div className="structure-tree">
-        {!props.clientMode && !props.editRootId && !search.filtering && <FrontmatterRow props={props} />}
+        {!props.clientMode && !props.editRootId && props.rowLabels === undefined && !search.filtering && <FrontmatterRow props={props} />}
         <NodeList nodes={search.filtering ? search.nodes : nodes} parentId={undefined} depth={0} {...context} />
       </div>
       {!props.clientMode && nodes.length === 0 && <EmptyDropTarget props={props} state={state} />}
@@ -777,9 +818,13 @@ interface NavigatorSearch {
 // The index is built once per tree and only once a query exists; each keystroke is then one walk of it.
 const NO_SNIPPETS: ReadonlyMap<string, string> = new Map();
 
-function useNavigatorSearch(nodes: readonly NavigatorNode[], query: string, { idle }: { readonly idle: boolean }): NavigatorSearch {
+function useNavigatorSearch(
+  nodes: readonly NavigatorNode[],
+  query: string,
+  { idle, rowLabels }: { readonly idle: boolean; readonly rowLabels: ReadonlyMap<string, string> | undefined },
+): NavigatorSearch {
   const searching = isSearching(query);
-  const index = useMemo(() => (searching ? buildNavigatorIndex(nodes) : undefined), [nodes, searching]);
+  const index = useMemo(() => (searching ? buildNavigatorIndex(nodes, rowLabels) : undefined), [nodes, rowLabels, searching]);
   const filtering = searching && idle;
   const result = useMemo(() => (filtering && index !== undefined ? searchNavigator(nodes, index, query) : undefined), [filtering, index, nodes, query]);
   const words = useMemo(() => navigatorHighlightWords(query), [query]);

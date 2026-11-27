@@ -20,6 +20,9 @@ import type { CrashRecord } from './app/crashLog';
 import { keepPreviewsOnSite } from './app/previewNavigation';
 import { registerStudioHandlers } from './handlers/studioHandlers';
 import { registerDictationHandlers } from './handlers/dictationHandlers';
+import { registerFileExplorerHandlers } from './handlers/fileExplorerHandlers';
+import { registerCodeIntelHandlers } from './handlers/codeIntelHandlers';
+import { intelligenceProcess } from './lib/codeIntel/utilityChild';
 import { MODEL_SCHEME, MODEL_SCHEME_PRIVILEGES, serveModelRequest } from './app/dictationProtocol';
 import { whisperRoot } from './app/dictationStore';
 import { createIpcRegistrar } from './lib/ipcRegistrar';
@@ -32,6 +35,7 @@ import { isPathDescendant, sameFilesystemPath } from './lib/platform';
 import type { BrowserWindow as Window, MessageBoxOptions, OpenDialogOptions } from 'electron';
 import { toRecord } from '../shared/core/record';
 import { parseOptionalString, parseRecents, parseSettings } from './app/mainValidation';
+import { HTTP_CACHE_CLEANUP_WAIT_MS_MAX, cleanUpHttpCacheOnce } from './app/httpCacheCleanup';
 import type { AppSettings } from './app/mainValidation';
 import { sendUsageCount, shouldCountUsage, usageDay, USAGE_NOTICE_VERSION } from './app/usageCounts';
 import type { RecentProject } from './lib/mainTypes';
@@ -50,6 +54,7 @@ import {
   session,
   safeStorage,
   systemPreferences,
+  utilityProcess,
 } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -100,6 +105,8 @@ import { registerCssVariableHandlers } from './handlers/cssVariableHandlers';
 import { registerBreakpointSyncHandlers } from './handlers/breakpointSyncHandlers';
 import { registerGitHandlers } from './handlers/gitHandlers';
 import { registerPageHandlers } from './handlers/pageHandlers';
+import { registerDesignModeHandlers } from './handlers/designMode/designModeHandlers'; // Design mode (experimental): docs/design-mode/REMOVE.md
+import { designFenceState } from './lib/designMode/designFence'; // Design mode (experimental): docs/design-mode/REMOVE.md
 import { allowLoopbackFraming } from './app/previewFraming';
 import { registerPageTemplateHandlers } from './handlers/pageTemplateHandlers';
 import { registerPreviewHandlers } from './handlers/previewHandlers';
@@ -188,7 +195,8 @@ function relaunchApp() {
   try {
     // openProjectRoot is set whenever a project's watcher starts, i.e. on open.
     if (openProjectRoot) {
-      fs.writeFileSync(reopenFile(), JSON.stringify({ path: openProjectRoot }), 'utf8');
+      const fence = designFenceState(); // Design mode (experimental): docs/design-mode/REMOVE.md
+      fs.writeFileSync(reopenFile(), JSON.stringify({ path: fence.kind === 'on' ? fence.realRoot : openProjectRoot }), 'utf8'); // Design mode (experimental): docs/design-mode/REMOVE.md
     }
   } catch {
     /* worst case the reload lands on the welcome screen */
@@ -485,13 +493,22 @@ function createWindow() {
   // fresh start and belongs on the welcome screen, not back in the project this
   // one had. (A reload doesn't come through here, which is the difference the
   // reopen above is asking about.)
-  mainWindow.on('close', () => bootStore?.flush());
+  mainWindow.on('close', (event) => {
+    // The Files editor's unsaved text is settled first (save, discard or stay); the renderer answers files:allowClose.
+    if (fileExplorer.holdClose()) {
+      event.preventDefault();
+      return;
+    }
+    bootStore?.flush();
+  });
   mainWindow.on('closed', () => {
     projectSetupAccess.activate(undefined);
     projectSetupAccess.resetView();
     openProjectRoot = undefined;
     folderQueue.hold();
     stopWatchingProject();
+    fileExplorer.stopWatching();
+    codeIntel.stop();
     devServers.stop();
     stopAllServices();
     stopAllPreviews();
@@ -499,10 +516,30 @@ function createWindow() {
   });
 }
 
+// Settled once the one-time cache cleanup has finished or been given up on; the first load waits for
+// it, so no preview is drawn from what it removes. The window itself is not held back.
+let httpCacheCleanup: Promise<unknown> = Promise.resolve();
+
 // The app's own page, in `window`.
-function loadApp(window: Window): Promise<void> {
+async function loadApp(window: Window): Promise<void> {
+  await httpCacheCleanup;
   const devServerUrl = process.env['VITE_DEV_SERVER_URL'];
-  return devServerUrl ? window.loadURL(devServerUrl) : window.loadFile(RUNTIME_PATHS.rendererIndex);
+  await (devServerUrl ? window.loadURL(devServerUrl) : window.loadFile(RUNTIME_PATHS.rendererIndex));
+}
+
+// Images older versions let into the disk cache for a year are still there (electron/app/httpCacheCleanup.ts).
+function startHttpCacheCleanup(): Promise<unknown> {
+  return cleanUpHttpCacheOnce({
+    doneVersion: settings.httpCacheCleanupVersion,
+    clearCache: () => session.defaultSession.clearCache(),
+    waitMsMax: HTTP_CACHE_CLEANUP_WAIT_MS_MAX,
+    remember: (version) => {
+      settings = { ...settings, httpCacheCleanupVersion: version };
+      if (!writeSettings()) {
+        console.warn('[startup] the HTTP cache cleanup was not remembered; it runs again next launch');
+      }
+    },
+  });
 }
 
 // Errors from before the window exists, and ones that arrive while it is being made, wait here until the recovery
@@ -633,15 +670,22 @@ function buildMenu() {
 }
 
 // ⌘R and ⇧⌘R refresh the site, the same function as the toolbar's refresh button (the renderer owns it), wherever focus is and
-// only while a project is open. The View menu's "Reload Stacki" reloads Stacki itself: a relaunch in dev, where the main side is
-// bound in at require time and a window reload would keep running old code, and a window reload in a packaged build.
-// electron/app/reloadRouting.ts holds the refresh decision.
+// only while a project is open. ⇧⌘R clears the HTTP cache first. The View menu's "Reload Stacki" reloads Stacki itself: a relaunch in
+// dev, where the main side is bound in at require time and a window reload would keep running old code, and a window reload in a
+// packaged build. electron/app/reloadRouting.ts holds the refresh decision.
 function runReload(command: ReloadCommand): void {
   switch (command) {
-    case 'refreshSite': {
-      const action = routeReload({ previewOpen: openProjectRoot !== undefined });
+    case 'refreshSite':
+    case 'hardRefreshSite': {
+      const action = routeReload({ previewOpen: openProjectRoot !== undefined, hard: command === 'hardRefreshSite' });
       if (action === 'refreshPreview') {
         send('menu:refreshPreview');
+      } else if (action === 'clearCacheAndRefreshPreview') {
+        // A failed clear still refreshes: the person asked for the site, and a soft refresh is the closest thing to it.
+        void session.defaultSession
+          .clearCache()
+          .catch((error: unknown) => console.error('[reload] could not clear the HTTP cache:', error))
+          .finally(() => send('menu:refreshPreview'));
       }
       return;
     }
@@ -804,6 +848,7 @@ app.whenReady().then(
     }
     // The window first: it starts the renderer loading while this process does the rest of its
     // start (language, icon, menu), instead of the renderer waiting for all of it.
+    httpCacheCleanup = startHttpCacheCleanup();
     createWindow();
     await refreshMainLocale();
     setApplicationIcon();
@@ -854,6 +899,7 @@ app.whenReady().then(
 // it, and the dev server outlives everything.
 ipcMain.handle('project:close', async (event, next) => {
   pendingProject = typeof next === 'string' && next ? next : undefined;
+  codeIntel.stop();
   projectSetupAccess.activate(isSetupFrame(event) ? pendingProject : undefined);
   projectSetupAccess.resetView();
   devServers.stop();
@@ -890,20 +936,22 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  // A quit waits for the Files editor's unsaved text like a close does; nothing is stopped until it may go on.
+  if (fileExplorer.holdClose()) {
+    quitAfterSettle = true;
+    event.preventDefault();
+    return;
+  }
   stopWatchingProject();
   devServers.stop();
+  stopAllServices();
+  stopAllPreviews();
+  cleanupTerminals();
+  aiServices.stopAll();
+  fileExplorer.stopWatching();
+  codeIntel.stop();
 });
-// Reading a project's content config leaves a process behind holding its
-// schemas; they go when the app does.
-app.on('before-quit', () => stopAllServices());
-// The preview checkouts live inside the user's projects, so leaving one behind
-// leaves a stray folder in a place they will notice.
-app.on('before-quit', () => stopAllPreviews());
-// A pty outlives the window that opened it unless it is killed.
-app.on('before-quit', () => cleanupTerminals());
-// An agent and the tools it started outlive the app unless they are stopped.
-app.on('before-quit', () => aiServices.stopAll());
 
 // ---------------------------------------------------------------------------
 // The renderer's window: what the main process tells it, and its dialogs
@@ -1000,6 +1048,7 @@ const SETTINGS_DEFAULTS: AppSettings = {
   // On: CSS in code editors shows variables, easings, shadows, gradients and clip-paths as chips that open their editors.
   codeChips: true,
   localePreference: LOCALE_PREFERENCE_DEFAULT,
+  httpCacheCleanupVersion: 0,
 };
 let settings: AppSettings = { ...SETTINGS_DEFAULTS };
 let usageCountInFlight: AbortController | undefined;
@@ -1397,6 +1446,7 @@ registerGitHandlers(host);
 registerGitRepositoryHandlers(host);
 registerImageConversionHandler(host);
 registerPageHandlers(host, { current: () => devServers.current(), restart: (projectPath) => devServers.restartForNewIntegration(projectPath) });
+registerDesignModeHandlers(host, { appDataRoot: app.getPath('userData'), onQuit: (listener) => app.on('will-quit', listener), platform: process.platform }); // Design mode (experimental): docs/design-mode/REMOVE.md
 registerPageTemplateHandlers(
   host,
   {
@@ -1448,4 +1498,21 @@ registerAppDataHandlers(host, {
 registerDevServerHandlers({ ipcMain, devServers, thumbnails });
 registerThumbnailHandlers({ ipcMain, thumbnails, userDataPath: () => app.getPath('userData') });
 // Dictation's model lives in the app data folder, never in a project; the download runs only when the person agreed to it.
+// The Files panel. Its guard holds a close or quit while the editor has unsaved text; once the renderer settles it,
+// the window closes, or the app quits when a quit asked.
+let quitAfterSettle = false;
+const fileExplorer = registerFileExplorerHandlers(host, {
+  closeAfterSettle: () => {
+    if (quitAfterSettle) {
+      app.quit();
+      return;
+    }
+    mainWindow?.close();
+  },
+  keepOpen: () => {
+    quitAfterSettle = false;
+  },
+});
+// The code editor's intelligence: a separate process, started by the first question about a code file.
+const codeIntel = registerCodeIntelHandlers(host, { spawn: () => intelligenceProcess(utilityProcess) });
 registerDictationHandlers(host, { root: () => whisperRoot(app.getPath('userData')), fetch: (url, init) => fetch(url, init) });

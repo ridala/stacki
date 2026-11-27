@@ -87,6 +87,8 @@ export const messages = {
   'error.project.chooseInside': 'Kies iets binnen het project, niet het project zelf.',
   'error.project.creationBusy': 'Er wordt al een site gemaakt. Wacht tot die klaar is.',
   'error.project.gone': 'Dat is er niet meer.',
+  'error.project.managerMissing': '{manager} is niet geïnstalleerd. Installeer het of kies npm.',
+  'error.project.npmMissing': 'npm is niet gevonden. Installeer Node.js (inclusief npm) en probeer het opnieuw.',
   'error.project.outside': 'Dat staat buiten het project.',
   'error.projectSettings.changed': 'De projectinstellingen zijn gewijzigd. Laad opnieuw voordat je opslaat.',
   'error.projectSettings.changedDuringSave': 'De projectinstellingen zijn tijdens het opslaan gewijzigd. Laad opnieuw om ze te bekijken.',

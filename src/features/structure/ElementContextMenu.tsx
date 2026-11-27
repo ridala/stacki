@@ -2,6 +2,7 @@ import { ContextMenu, type ContextAction, type ContextPosition } from './Structu
 import { findNavigatorNode, type NavigatorNode } from './structureModel';
 import { canConvertText, canWrapNode, type TextTag, type WrapperTag } from '../../editor/wrapRules';
 import { isFragmentNode } from '../../editor/liveClasses';
+import { currentUnlinkMenu } from './unlinkMenu';
 
 /** Shared by navigator and canvas so action availability cannot drift between them. */
 export interface ElementActionProps {
@@ -10,6 +11,10 @@ export interface ElementActionProps {
   readonly editRootId?: string | undefined;
   readonly onSetDefaults?: (name: string, id: string) => void;
   readonly onOpenComponent?: (name: string, id: string) => void;
+  /** Opens the component canvas for the instance's component; left out where there is no canvas (Studio). */
+  readonly onOpenCanvas?: (name: string, id: string) => void;
+  /** Puts the element's code in the AI panel's message box; left out where there is no AI panel (Studio). */
+  readonly onAddToChat?: (id: string) => void;
   readonly onWrapNode?: (id: string, tag: WrapperTag) => void;
   /** Gives bare text a tag. Left out where a page cannot write one, and the menu then offers none. */
   readonly onConvertText?: (id: string, tag: TextTag) => void;
@@ -50,10 +55,22 @@ export function ElementContextMenu(
 
 function runContextAction(action: ContextAction, props: ElementActionProps, menu: ContextPosition): void {
   const capabilities = contextCapabilities(props, menu);
-  if (capabilities.protectedNode && action !== 'paste' && action !== 'open' && action !== 'defaults') {
+  // Adding to the chat changes nothing, so a protected node allows it.
+  if (action === 'add-to-chat') {
+    props.onAddToChat?.(menu.nodeId);
+    return;
+  }
+  if (capabilities.protectedNode && action !== 'paste' && action !== 'open' && action !== 'canvas' && action !== 'defaults') {
     return;
   }
   switch (action) {
+    case 'canvas': {
+      const node = findNavigatorNode(props.nodes, menu.nodeId);
+      if (capabilities.openCanvas === 'enabled' && node?.kind === 'component') {
+        props.onOpenCanvas?.(node.name, node.id);
+      }
+      return;
+    }
     case 'defaults':
     case 'open': {
       const node = findNavigatorNode(props.nodes, menu.nodeId);
@@ -65,6 +82,13 @@ function runContextAction(action: ContextAction, props: ElementActionProps, menu
       }
       if (capabilities.canOpen && node?.kind === 'component') {
         props.onOpenComponent?.(node.name, node.id);
+      }
+      return;
+    }
+    case 'unlink': {
+      const offer = currentUnlinkMenu();
+      if (capabilities.component && capabilities.canChange && offer !== undefined) {
+        offer.unlink(menu.nodeId);
       }
       return;
     }
@@ -133,15 +157,32 @@ function contextCapabilities(props: ElementActionProps, position: ContextPositio
   const convert = props.onConvertText !== undefined && canChange;
   return {
     component,
+    addToChat: addToChatState({ offered: props.onAddToChat !== undefined, hasCode: node !== undefined && node.kind !== 'chunk-group' }),
     plainText: node?.kind === 'text' && props.onConvertText !== undefined,
     protectedNode,
     canChange,
     canSetDefaults: component && !props.clientMode && props.onSetDefaults !== undefined,
     canCut: props.onCutNode !== undefined && canChange,
     canOpen: component && !node.astroAsset && props.onOpenComponent !== undefined,
+    // The same rule as Open component: an Astro component of the project, not an asset or a dynamic tag.
+    openCanvas: openCanvasState({ offered: props.onOpenCanvas !== undefined, opens: component && !node.astroAsset }),
     canWrapBox: wrap && canWrapNode(nodes, position.nodeId, 'div'),
     canWrapLink: wrap && canWrapNode(nodes, position.nodeId, 'a'),
     canConvertDiv: convert && canConvertText(nodes, position.nodeId, 'div'),
     canConvertSpan: convert && canConvertText(nodes, position.nodeId, 'span'),
   };
+}
+
+function addToChatState(state: { readonly offered: boolean; readonly hasCode: boolean }): 'enabled' | 'disabled' | 'absent' {
+  if (!state.offered) {
+    return 'absent';
+  }
+  return state.hasCode ? 'enabled' : 'disabled';
+}
+
+function openCanvasState(state: { readonly offered: boolean; readonly opens: boolean }): 'enabled' | 'disabled' | 'absent' {
+  if (!state.offered) {
+    return 'absent';
+  }
+  return state.opens ? 'enabled' : 'disabled';
 }

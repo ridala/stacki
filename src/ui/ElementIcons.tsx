@@ -1,6 +1,8 @@
-// Element icons shared by the Navigator, canvas labels and insert palette.
+// Element icons shared by the Navigator, canvas labels and insert palette, and (at the end) the file-type icons the
+// Files panel and the Git panel's list of changes share.
 import { centralIcon, centralIconSize } from './central/CentralIcon';
 import {
+  braces as centralBraces,
   bulletList as centralBulletList,
   code as centralCode,
   headingOne as centralH1,
@@ -9,9 +11,11 @@ import {
   home as centralHome,
   homeRoundDoor as centralHomeRoundDoor,
   image as centralImage,
+  fileText as centralFileText,
   input as centralInput,
   info as centralInfo,
   link as centralLink,
+  lock as centralLock,
   search as centralSearch,
   select as centralSelect,
   slot as centralSlot,
@@ -67,11 +71,36 @@ import {
   underline as centralUnderline,
   variables as centralVariables,
   vector as centralVector,
+  brandBun as centralBun,
+  brandGit as centralGit,
+  brandJavascript as centralJavascript,
+  brandJson as centralJson,
+  brandNetlify as centralNetlify,
+  brandNpm as centralNpm,
+  brandPhp as centralPhp,
+  brandPython as centralPython,
+  brandReact as centralReact,
+  brandSvelte as centralSvelte,
+  brandTypescript as centralTypescript,
+  brandVercel as centralVercel,
+  brandVue as centralVue,
+  filePdf as centralFilePdf,
+  fileZip as centralFileZip,
+  fontStyle as centralFontStyle,
+  law as centralLaw,
+  markdown as centralMarkdown,
+  table as centralTable,
+  vectorLogo as centralVectorLogo,
 } from './central/centralGeometry';
 
 import type { ReactElement } from 'react';
+import { assert } from '../../shared/core/assert';
 import type { HTML_TAGS } from '../editor/elementSchemas';
 import { type IconProps, I } from './IconBase';
+import { mediaKindOf, type ExplorerEntryKind } from '../../shared/ipc/fileExplorer';
+// Icons.tsx re-exports this module's icons, so the two import each other: what comes from it is only ever read while
+// drawing, never while this module loads (test/renderer/app/builtRendererBoots.test.js starts the built app).
+import { AstroIcon, ExternalIcon, FolderIcon, FolderOpenIcon, UnlinkIcon } from './Icons';
 import { elementHeading4IconPath1, elementHeading5IconPath1, elementHeading6IconPath1 } from './iconPaths';
 
 // Astro components keep their cube so they stand apart from HTML elements.
@@ -361,4 +390,183 @@ export function elementIcon(tag: unknown, size = 12, className?: string) {
   const name = typeof tag === 'string' ? tag.slice(0, TAG_NAME_LENGTH_MAX + 1).toLowerCase() : '';
   const Icon = TAG_ICONS.get(name) ?? CustomElementIcon;
   return <Icon size={size} className={className} />;
+}
+
+// ---------------------------------------------------------------------------
+// File-type icons
+// ---------------------------------------------------------------------------
+//
+// The one table of what a listed file looks like, by its name: the Files tree and its search, the open file's header,
+// the Git panel's changes and conflicts, `@` rows and chips, and the file lists in pickers and assets all read it, so
+// a file looks the same everywhere. Every drawing is from the Central icon system (src/ui/central/centralGeometry.tsx,
+// docs/central-icons.md), language and tool marks included, with one exception the owner asked for: an .astro file
+// wears Astro's own mark, the app's `AstroIcon` (the supplied brand paths in src/ui/iconPaths.ts). Nothing new is
+// drawn. A type Central has no mark for (CSS, Sass, Less, HTML, YAML, TOML, XML) keeps the plain code icon with no
+// colour of its own, so it never passes for a mark it is not.
+
+const FILE_GLYPHS = {
+  bun: centralIcon(centralBun),
+  git: centralIcon(centralGit),
+  javascript: centralIcon(centralJavascript),
+  json: centralIcon(centralJson),
+  netlify: centralIcon(centralNetlify),
+  npm: centralIcon(centralNpm),
+  php: centralIcon(centralPhp),
+  python: centralIcon(centralPython),
+  react: centralIcon(centralReact),
+  svelte: centralIcon(centralSvelte),
+  typescript: centralIcon(centralTypescript),
+  vercel: centralIcon(centralVercel),
+  vue: centralIcon(centralVue),
+  archive: centralIcon(centralFileZip),
+  audio: centralIcon(centralAudio),
+  braces: centralIcon(centralBraces),
+  code: centralIcon(centralCode),
+  file: centralIcon(centralFile),
+  font: centralIcon(centralFontStyle),
+  image: centralIcon(centralImage),
+  info: centralIcon(centralInfo),
+  license: centralIcon(centralLaw),
+  lock: centralIcon(centralLock),
+  markdown: centralIcon(centralMarkdown),
+  pdf: centralIcon(centralFilePdf),
+  table: centralIcon(centralTable),
+  terminal: centralIcon(centralTerminal),
+  text: centralIcon(centralFileText),
+  vector: centralIcon(centralVectorLogo),
+  video: centralIcon(centralVideo),
+} as const;
+
+export type FileGlyph = keyof typeof FILE_GLYPHS | 'astro';
+/** The colour a type wears, a theme token each (styles.css, `data-file-hue`). */
+export type FileHue = 'astro' | 'blue' | 'cyan' | 'green' | 'grey' | 'orange' | 'purple' | 'red' | 'yellow';
+
+export interface FileLook {
+  readonly glyph: FileGlyph;
+  /** Absent: the icon takes the colour of the row it is in. */
+  readonly hue: FileHue | undefined;
+}
+
+type FileRule = readonly [RegExp, FileGlyph, FileHue?];
+
+// The first rule that matches wins, so whole names come before the extensions they end in.
+const NAMED_RULES: readonly FileRule[] = [
+  // Files that by convention hold secrets: drawn with a lock, so a person sees what they are opening.
+  [/^\.env(\..+)?$|\.(pem|key)$/, 'lock', 'yellow'],
+  [/^astro\.config\.[cm]?[jt]s$/, 'astro', 'astro'],
+  [/^tsconfig(\..+)?\.json$/, 'typescript', 'blue'],
+  [/^jsconfig(\..+)?\.json$/, 'javascript', 'yellow'],
+  [/^(package(-lock)?\.json|npm-shrinkwrap\.json|\.npmrc|\.npmignore)$/, 'npm', 'red'],
+  [/^(bun\.lockb?|bunfig\.toml)$/, 'bun'],
+  [/^\.git(ignore|attributes|modules|keep|config)$/, 'git', 'orange'],
+  [/^vercel\.json$/, 'vercel'],
+  [/^netlify\.toml$/, 'netlify', 'cyan'],
+  [/^readme(\.(md|mdx|markdown|txt))?$/, 'info', 'blue'],
+  [/^(licen[cs]e|copying)(\.(md|markdown|txt))?$/, 'license', 'yellow'],
+];
+
+const EXTENSION_RULES: readonly FileRule[] = [
+  [/\.astro$/, 'astro', 'astro'],
+  [/\.[cm]?ts$/, 'typescript', 'blue'],
+  [/\.[jt]sx$/, 'react', 'cyan'],
+  [/\.[cm]?js$/, 'javascript', 'yellow'],
+  [/\.(json|jsonc|json5)$/, 'json', 'yellow'],
+  [/\.(md|markdown)$/, 'markdown', 'blue'],
+  [/\.mdx$/, 'markdown', 'yellow'],
+  [/\.vue$/, 'vue', 'green'],
+  [/\.svelte$/, 'svelte', 'orange'],
+  [/\.py$/, 'python', 'blue'],
+  [/\.php$/, 'php', 'purple'],
+  [/\.(sh|zsh|bash|fish)$/, 'terminal', 'green'],
+  [/\.svg$/, 'vector', 'orange'],
+  [/\.(woff2?|ttf|otf|eot)$/, 'font', 'red'],
+  [/\.pdf$/, 'pdf', 'red'],
+  [/\.(zip|tar|gz|tgz|bz2|xz|rar|7z)$/, 'archive', 'grey'],
+  [/\.(csv|tsv)$/, 'table', 'green'],
+];
+
+// Asked after pictures, video and audio: the types that keep a plain icon.
+const PLAIN_RULES: readonly FileRule[] = [
+  [/\.lock$/, 'braces'],
+  [/\.(css|scss|sass|less|html?|toml|ya?ml|xml)$/, 'code'],
+  [/\.(txt|log)$/, 'text'],
+];
+
+const MEDIA_LOOKS = {
+  image: { glyph: 'image', hue: 'purple' },
+  video: { glyph: 'video', hue: 'orange' },
+  audio: { glyph: 'audio', hue: 'purple' },
+} as const satisfies Record<string, FileLook>;
+
+/** Longer names are read from their end, where the extension is. */
+const FILE_NAME_LENGTH_MAX = 255;
+
+/** What a file looks like, by its name or its path (only the last segment counts). */
+export function fileLookOf(path: string): FileLook {
+  const name = path
+    .slice(path.lastIndexOf('/') + 1)
+    .slice(-FILE_NAME_LENGTH_MAX)
+    .toLowerCase();
+  const named = matchingRule(NAMED_RULES, name) ?? matchingRule(EXTENSION_RULES, name);
+  if (named !== undefined) {
+    return named;
+  }
+  const media = mediaKindOf(name);
+  if (media !== undefined) {
+    return MEDIA_LOOKS[media];
+  }
+  return matchingRule(PLAIN_RULES, name) ?? { glyph: 'file', hue: undefined };
+}
+
+function matchingRule(rules: readonly FileRule[], name: string): FileLook | undefined {
+  const rule = rules.find(([pattern]) => pattern.test(name));
+  return rule === undefined ? undefined : { glyph: rule[1], hue: rule[2] };
+}
+
+/** Astro's mark runs to the edges of its drawing, so it is drawn at this share of the box to look the others' size. */
+const ASTRO_BOX_SHARE = 0.75;
+
+/** A file's icon in a square box of the Central size at or above `size`, in its type's colour. */
+export function FileTypeIcon(props: { readonly name: string; readonly size?: number; readonly className?: string | undefined }) {
+  const box = centralIconSize(props.size ?? 14);
+  const look = fileLookOf(props.name);
+  assert(look.glyph === 'astro' || look.glyph in FILE_GLYPHS, 'FileTypeIcon: every look has a drawing');
+  return (
+    <span
+      className={props.className === undefined ? 'file-type-icon' : `file-type-icon ${props.className}`}
+      style={{ width: box, height: box }}
+      data-file-type={look.glyph}
+      data-file-hue={look.hue}
+    >
+      <FileGlyphDrawing glyph={look.glyph} box={box} />
+    </span>
+  );
+}
+
+function FileGlyphDrawing({ glyph, box }: { readonly glyph: FileGlyph; readonly box: number }) {
+  if (glyph === 'astro') {
+    return <AstroIcon size={Math.round(box * ASTRO_BOX_SHARE)} />;
+  }
+  const Icon = FILE_GLYPHS[glyph];
+  return <Icon size={box} />;
+}
+
+export function FileEntryIcon(props: { readonly name: string; readonly kind: ExplorerEntryKind; readonly open: boolean | undefined }) {
+  switch (props.kind) {
+    case 'directory':
+    case 'link-directory':
+      return props.open === true ? <FolderOpenIcon size={14} /> : <FolderIcon size={14} />;
+    case 'link-outside':
+      return <ExternalIcon size={14} />;
+    case 'link-broken':
+      return <UnlinkIcon size={14} />;
+    case 'file':
+    case 'link-file':
+    case 'other':
+      return <FileTypeIcon name={props.name} />;
+    default: {
+      const exhaustive: never = props.kind;
+      return exhaustive;
+    }
+  }
 }

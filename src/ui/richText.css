@@ -366,3 +366,74 @@
 .html-content * + h6 {
   margin-top: 1.1em;
 }
+
+/* The `+` beside an empty block of rich text a component holds: it sits in the content's start padding, so the words
+   never move when it appears. A fill shows it, never a border. */
+.html-field-blocks .html-content {
+  padding-inline-start: 34px;
+}
+/* The placeholder starts where the words and the caret do, clear of the `+`'s gutter. */
+.html-field-blocks .html-content[data-empty='true']::before {
+  inset-inline-start: 34px;
+}
+.html-block-plus {
+  position: absolute;
+  inset-inline-start: 6px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  /* Opaque, with its own shadow: on the canvas it sits over the page, which may be any colour, so a see-through fill
+     leaves a bare cross. */
+  background: #2a2a2a;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  cursor: pointer;
+}
+/* Written on the element so they outweigh the base button's see-through hover and pressed fills. */
+button.html-block-plus:hover:not(:disabled) {
+  background: #363636;
+}
+button.html-block-plus:active:not(:disabled),
+button.html-block-plus[aria-expanded='true']:not(:disabled) {
+  background: #444444;
+}
+
+/* Rich text a component's content holds, in the Properties panel: the button fills the field's width as an input
+   does, and the dialog is as wide as a page's text column. */
+.props-rich-text-code.expr-input {
+  max-height: 320px;
+  user-select: text;
+}
+.props-rich-text-code.expr-input .cm-content {
+  padding: 6px 8px;
+}
+.props-rich-text-code.expr-input .cm-line {
+  padding: 0;
+}
+.props-rich-text-code.expr-input .cm-editor.cm-focused {
+  outline: none;
+}
+.props-rich-text-edit {
+  width: 100%;
+}
+.props-rich-text-dialog {
+  width: min(720px, calc(100vw - 48px));
+}
+.props-rich-text-dialog .html-content {
+  min-height: 240px;
+}
+
+/* The canvas `+` and the address field it opens, placed over the page: the box is wide enough for the field (the
+   bubble sizes itself against it) and lets every press it does not draw through to the canvas. */
+.canvas-rich-plus {
+  width: 400px;
+  pointer-events: none;
+}
+.canvas-rich-plus > * {
+  pointer-events: auto;
+}

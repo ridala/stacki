@@ -204,7 +204,7 @@ function useEditorElement(editorFoundation: ReturnType<typeof useEditorFoundatio
   const tokenDefault = useTokenDefault(scanState, selectionState, elementTokens);
   const cachedNative = useCachedNative(nativeState);
   useNativeRead(editorRefs, nativeState, tokenDefault, cachedNative);
-  const activeSelectorHook = useActiveSelector(scanState, selectionState, nativeState, elementTokens);
+  const activeSelectorHook = useActiveSelector(scanState, selectionState, nativeState, elementTokens, editorFoundation.inlineState);
   const selectorPick = useSelectorPick(editorRefs, selectionState, elementTokens);
   const typedSelector = useTypedSelector(editorRefs, selectionState, applyEditHook, selectorPick);
   const focusPropHook = useFocusProp(editorRefs, selectorPick);
@@ -235,7 +235,15 @@ function useEditorContexts(
   const querySuggestionsHook = useQuerySuggestions(pendingWrites);
   const embedContexts = useEmbedContexts(selectionState, elementTokens, sourceDocumentHook, contextKeys);
   const wrapperReachHook = useWrapperReach(editorRefs, elementTokens, contextKeys);
-  const styleContextsHook = useStyleContexts(selectionState, nativeState, contextKeys, embedContexts, wrapperReachHook);
+  const styleContextsHook = useStyleContexts(
+    selectionState,
+    nativeState,
+    contextKeys,
+    embedContexts,
+    wrapperReachHook,
+    editorFoundation.inlineState,
+    elementTokens,
+  );
   const nativeTarget = useNativeTarget(selectionState, nativeState, pendingWrites);
   const componentSource = useComponentSource(scanState, nativeState, nativeTarget);
   return {
@@ -279,7 +287,7 @@ function useEditorResolution(
     pendingWrites,
     selectorPick,
   );
-  const contextChange = useContextChange(selectionState, nativeState, elementTokens, activeSelectorHook, selectorPick, styleContextsHook);
+  const contextChange = useContextChange(selectionState, nativeState, elementTokens, activeSelectorHook, selectorPick, styleContextsHook, inlineState);
   useDefaultUpgrade(selectionState, nativeState, elementTokens, tokenDefault, selectorPick, styleContextsHook);
   return { contextChange, resolvedHook, selectorChipsHook };
 }
@@ -399,7 +407,7 @@ function useEditorSources(
   editorContexts: ReturnType<typeof useEditorContexts>,
   editorResolution: ReturnType<typeof useEditorResolution>,
 ) {
-  const { nativeState, selectionState } = editorFoundation;
+  const { nativeState } = editorFoundation;
   const { openEmbed } = editorRuleEdits;
   const { activeSelectorHook, elementTokens, focusPropHook, selectorPick, typedSelector } = editorElement;
   const { nativeTarget, styleContextsHook } = editorContexts;
@@ -407,7 +415,7 @@ function useEditorSources(
 
   const sourceOptionsHook = useSourceOptions(nativeState, elementTokens, styleContextsHook, nativeTarget, resolvedHook);
   const embedNavHook = useEmbedNav(nativeState, openEmbed, sourceOptionsHook);
-  const selectionCard = useSelectionCard(selectionState, elementTokens, activeSelectorHook, selectorPick, typedSelector, focusPropHook, selectorChipsHook);
+  const selectionCard = useSelectionCard(elementTokens, activeSelectorHook, selectorPick, typedSelector, focusPropHook, selectorChipsHook);
   return { embedNavHook, selectionCard, sourceOptionsHook };
 }
 
@@ -462,7 +470,11 @@ function useEditorCardView(
     sourceOptionsHook,
   );
   const editorView = useEditorView(editorRefs, busyState, scanState, nativeState, elementTokens, embedNavHook, selectionCard, contextCard, sourceCard);
-  const card = useInlineCard(editorView.view.card, editorFoundation.inlineState, { deselect: typedSelector.deselect, setSaveError: busyState.setSaveError });
+  const card = useInlineCard(editorView.view.card, editorFoundation.inlineState, {
+    deselect: typedSelector.deselect,
+    setSaveError: busyState.setSaveError,
+    showBase: contextChange.showBaseForAttribute,
+  });
   return { editorView: { view: { ...editorView.view, card } } };
 }
 

@@ -4,7 +4,9 @@
 import { assert } from '../../shared/core/assert';
 import { CODE_INDENT_UNIT } from '../../shared/core/indent';
 import { BOUNDARY_LIMITS } from '../../shared/core/boundary';
-import { safeHTMLLink } from './htmlFieldModel';
+import { safeHTMLLink } from '../../shared/page/richPaste';
+
+export { cleanPastedHTML } from '../../shared/page/richPaste';
 
 export const RICH_TEXT_LIMITS = {
   /** The longest run of text an inline shortcut (`**bold**`) wraps. */
@@ -106,68 +108,6 @@ export function escapeHTML(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// What a paste may keep, and what other tags become. Anything else is unwrapped
-// to its text, so a page's styles, scripts and tracking never come along.
-const PASTE_TAGS = new Set('p br strong em u s a h1 h2 h3 h4 h5 h6 ul ol li blockquote pre code hr sub sup'.split(' '));
-const PASTE_RENAMES: Readonly<Record<string, string>> = {
-  b: 'strong',
-  i: 'em',
-  strike: 's',
-  del: 's',
-  div: 'p',
-};
-const PASTE_DROPS = new Set('script style meta link title head template iframe object svg'.split(' '));
-
-/**
- * Pasted HTML reduced to the document structure the editor writes: headings,
- * lists, quotes, emphasis and safe links keep their shape; classes, styles and
- * every other tag are dropped, keeping their text.
- */
-export function cleanPastedHTML(html: string, document: Document): string {
-  assert(html.length <= BOUNDARY_LIMITS.textLengthMax, 'Rich text: paste limit exceeded');
-  const template = document.createElement('template');
-  template.innerHTML = html;
-  const elements = [...template.content.querySelectorAll('*')].reverse();
-  assert(elements.length <= BOUNDARY_LIMITS.itemsMax, 'Rich text: paste element limit exceeded');
-  // Innermost first, so an element is cleaned before the one around it moves it.
-  for (const element of elements) {
-    cleanPastedElement(element, document);
-  }
-  const cleaned = template.innerHTML.replace(/<p>\s*<\/p>/g, '');
-  assert(!/<script/i.test(cleaned), 'A cleaned paste holds no script');
-  return cleaned;
-}
-
-function cleanPastedElement(element: Element, document: Document): void {
-  const tag = element.localName;
-  if (PASTE_DROPS.has(tag)) {
-    element.remove();
-    return;
-  }
-  const renamed = PASTE_RENAMES[tag] ?? tag;
-  if (!PASTE_TAGS.has(renamed)) {
-    element.replaceWith(...element.childNodes);
-    return;
-  }
-  const href = element.getAttribute('href')?.trim() ?? '';
-  // A link that could act (javascript:) or goes nowhere keeps only its text.
-  if (tag === 'a' && !safeHTMLLink(href)) {
-    element.replaceWith(...element.childNodes);
-    return;
-  }
-  const target = renamed === tag ? element : document.createElement(renamed);
-  for (const attribute of [...element.attributes]) {
-    element.removeAttribute(attribute.name);
-  }
-  if (tag === 'a') {
-    target.setAttribute('href', href);
-  }
-  if (target !== element) {
-    target.append(...element.childNodes);
-    element.replaceWith(target);
-  }
-}
-
 /**
  * The address a typed link stands for: a safe address as it is, an email as a
  * `mailto:` link, and a bare domain (`example.com/about`) as https. Anything
@@ -236,10 +176,24 @@ function formatBlock(element: Element, depth: number): string[] {
   const indent = CODE_INDENT_UNIT.repeat(depth);
   const nested = [...element.children].some((child) => LINE_TAGS.has(child.localName));
   if (!nested || element.localName === 'pre' || depth >= RICH_TEXT_LIMITS.formatDepthMax) {
-    return [indent + element.outerHTML];
+    return [indent + hangingLines(element, indent)];
   }
   const open = element.outerHTML.slice(0, element.outerHTML.indexOf('>') + 1);
   return [indent + open, ...formatChildren(element, depth + 1), `${indent}</${element.localName}>`];
+}
+
+// A block's markup with its further lines indented under it, not by wherever the file nested them. Whitespace that
+// shows on the page (a <pre>, a <textarea>) is kept exactly.
+function hangingLines(element: Element, indent: string): string {
+  const markup = element.outerHTML;
+  if (element.localName === 'pre' || element.localName === 'textarea' || element.querySelector('pre, textarea') !== null) {
+    return markup;
+  }
+  const closing = `</${element.localName}>`;
+  return markup
+    .split(/\n[ \t]*/)
+    .map((line, index) => (index === 0 ? line : `${indent}${line === closing ? '' : CODE_INDENT_UNIT}${line}`))
+    .join('\n');
 }
 
 function serializeInline(node: ChildNode): string {

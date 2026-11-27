@@ -13,14 +13,14 @@ import { useAppsRuntime } from '../features/apps/appsRuntime';
 import { RailMore, type RailMoreItem } from './RailMore';
 import { useRailOverflow, type RailOverflowItem } from './railOverflow';
 import { useTranslate } from '../lib/i18n/useTranslate';
-import { TOOLTIP_DELAY_MS, tooltipAnchor, type TooltipAnchor } from '../ui/delayedTooltip';
+import { tooltipAnchor, useTipTimer, type TooltipAnchor } from '../ui/delayedTooltip';
 import FittedTooltip from '../ui/FittedTooltip';
 import { crossRailItem, isRailFixedId, railPosition, sameRailOrder, shiftRailItem, visibleRailOrder, type RailGroup, type RailOrder } from './railOrder';
 import { useRailOrder } from './railOrderStore';
 import { DEFAULT_RAIL_ORDER } from './railDefaults';
 import { useRailDrag } from './railDrag';
 import { orderAfterDrop } from './railDragModel';
-import { RAIL_PANEL_TABS, RAIL_SETTINGS_VIEWS, movedKey, railItemSpec, type RailPanelId } from './railItems';
+import { RAIL_PANEL_TABS, RAIL_SETTINGS_VIEWS, isRailSettingsViewId, movedKey, railItemSpec, type RailPanelId } from './railItems';
 import { animateRailReflow, readRailRows } from './railReflow';
 
 // Each panel button's label, icon and chord are railItems.ts's, read by the Settings panel's root rows too, so a
@@ -83,25 +83,23 @@ export default function LeftRail({
   const [tip, setTip] = useState<{ readonly label: string; readonly anchor: TooltipAnchor } | undefined>(undefined);
   const [announcement, setAnnouncement] = useState('');
   const translate = useTranslate();
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const tipTimer = useTipTimer();
   const railRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const reflowRef = useRef<ReadonlyMap<string, number> | undefined>(undefined);
   const focusAfterRef = useRef<string | undefined>(undefined);
   const { order, change } = useRailOrder(DEFAULT_RAIL_ORDER);
 
-  const showSoon = (label: string) => (event: MouseEvent<HTMLButtonElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setTip({ label, anchor: tooltipAnchor(rect) }), TOOLTIP_DELAY_MS);
-  };
-
   const hide = () => {
-    clearTimeout(timerRef.current);
+    tipTimer.cancel();
     setTip(undefined);
   };
 
-  useEffect(() => () => clearTimeout(timerRef.current), []);
+  const showSoon = (label: string) => (event: MouseEvent<HTMLButtonElement>) => {
+    const button = event.currentTarget;
+    const rect = button.getBoundingClientRect();
+    tipTimer.wait(button, () => setTip({ label, anchor: tooltipAnchor(rect) }), hide);
+  };
 
   // A panel the project's role hides has no button and no shortcut (roles/roleAccess.ts).
   const role = useCurrentRole();
@@ -109,10 +107,9 @@ export default function LeftRail({
     if (action === 'ai') {
       // The AI chat toggles like a panel; a role without it has no button, so no key.
       aiButton?.onSelect();
-    } else if (action === 'secrets' || action === 'mcp' || action === 'instructions') {
+    } else if (isRailSettingsViewId(action)) {
       // A view of Settings: opens Settings at it, or, when that view is already showing, toggles the panel closed.
-      const access = action === 'instructions' ? canPanel(role, 'instructions') : canPanel(role, 'projectSettings');
-      if (access) {
+      if (settingsViewsOf(role).includes(action)) {
         if (active === 'projectSettings' && shownSettingsView() === action) {
           onSelect('projectSettings');
         } else {
@@ -157,7 +154,7 @@ export default function LeftRail({
         label,
         shortcut: spec.shortcut,
         Icon: spec.Icon,
-        tooltip: spec.shortcut === undefined ? label : translate('rail.withShortcut', { label, shortcut: spec.shortcut }),
+        tooltip: translate('rail.withShortcut', { label, shortcut: spec.shortcut }),
         pressed: active === SETTINGS_TAB.id && shownView === view,
         select: () => {
           if (active === SETTINGS_TAB.id && shownSettingsView() === view) {

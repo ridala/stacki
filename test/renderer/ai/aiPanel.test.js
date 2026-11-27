@@ -164,7 +164,7 @@ function fakeMain(over = {}) {
       if (payload.action.kind === 'signIn' && over.signIn !== undefined) {
         if (over.signIn === 'ready') {
           expired = false;
-          return { agent: payload.agent, step: 'ready', account: { name: undefined, plan: undefined, email: undefined } };
+          return { agent: payload.agent, step: 'ready', account: { name: undefined, plan: undefined, email: undefined, source: 'account' } };
         }
         return over.signIn === 'failed'
           ? { agent: payload.agent, step: 'failed', during: 'sign-in', message: 'Signing in took too long. Try again.', details: 'codex login: timed out' }
@@ -175,10 +175,13 @@ function fakeMain(over = {}) {
       }
       const step = payload.action.kind === 'install' ? 'installing' : (over.setup?.[payload.agent] ?? 'ready');
       return step === 'ready'
-        ? { agent: payload.agent, step, account: { name: 'Timothy Ricks', plan: 'Max', email: 'designer@example.com' } }
+        ? { agent: payload.agent, step, account: over.account ?? { name: 'Timothy Ricks', plan: 'Max', email: 'designer@example.com', source: 'account' } }
         : { agent: payload.agent, step };
     }),
-    onAiSetup: () => () => undefined,
+    onAiSetup: (callback) => {
+      listeners.setup = callback;
+      return () => undefined;
+    },
     aiCancel: record('aiCancel', { ok: true }),
     aiSetOption: record('aiSetOption', { ok: true, value: { set: true } }),
     aiChatUpdate: record('aiChatUpdate', { ok: true, value: summary }),
@@ -298,8 +301,11 @@ test('with "ask before allowing" on, a new project asks first', async (context) 
   const { calls } = fakeMain({ trusted: false });
   const { container, root } = await mount();
   context.after(() => act(() => root.unmount()));
-  assert.match(container.textContent, /Let agents work in this project\?/);
-  await click(button(container, 'Allow in this project'));
+  assert.match(container.textContent, /Allow agents in this project\?/);
+  for (const fact of ['read, change and run anything in this project', 'apply to your files right away', 'keep or undo each changed file']) {
+    assert.ok(container.textContent.includes(fact), `the permission still says: ${fact}`);
+  }
+  await click(button(container, 'Allow agents'));
   assert.ok(calls.some((call) => call.name === 'aiTrust'));
 });
 
@@ -626,9 +632,15 @@ test('a draft hand-off (Build an app) waits unsent in the composer: ready or not
 });
 
 test('the account line shows a name and plan, falls back to the plan, and keeps the email inside ⋯', async (context) => {
-  assert.equal(ai.accountLabel('claude', { name: 'Timothy Ricks', plan: 'Max', email: 'a@b.c' }, ai.ENGLISH_TRANSLATE), 'Timothy Ricks · Max');
-  assert.equal(ai.accountLabel('claude', { name: undefined, plan: 'Max', email: 'a@b.c' }, ai.ENGLISH_TRANSLATE), 'Claude Max');
-  assert.equal(ai.accountLabel('codex', { name: undefined, plan: undefined, email: undefined }, ai.ENGLISH_TRANSLATE), 'Signed in to ChatGPT');
+  assert.equal(
+    ai.accountLabel('claude', { name: 'Timothy Ricks', plan: 'Max', email: 'a@b.c', source: 'account' }, ai.ENGLISH_TRANSLATE),
+    'Timothy Ricks · Max',
+  );
+  assert.equal(ai.accountLabel('claude', { name: undefined, plan: 'Max', email: 'a@b.c', source: 'account' }, ai.ENGLISH_TRANSLATE), 'Claude Max');
+  assert.equal(
+    ai.accountLabel('codex', { name: undefined, plan: undefined, email: undefined, source: 'account' }, ai.ENGLISH_TRANSLATE),
+    'Signed in to ChatGPT',
+  );
   ai.resetAiStore();
   window.localStorage.setItem('stacki.ai.agent', 'codex');
   fakeMain({ trusted: true });
@@ -805,9 +817,9 @@ test('whole panel: subagents show in a strip and as units holding their own call
   assert.match(strip.querySelector('.ai-agents-head').textContent, /1 agent working/);
   const row = strip.querySelector('.ai-agent');
   assert.equal(row.querySelector('.ai-agent-name').textContent, 'Tidy Hero.astro');
-  assert.equal(row.querySelector('.ai-agent-model').textContent, 'Session model', 'no model asked for and none reported: the session’s');
+  assert.equal(row.querySelector('.ai-agent-model').textContent, '', 'no model asked for and none reported: no name to show');
   assert.match(row.getAttribute('title'), /general-purpose/, 'its role is in the row’s tooltip');
-  assert.equal(row.querySelector('.ai-agent-dot').getAttribute('aria-label'), 'Running');
+  assert.equal(row.querySelector('.ai-agent-dot').getAttribute('aria-label'), 'Working');
   assert.match(row.querySelector('.ai-agent-time').textContent, /^\d[\d.]*s$/, 'its elapsed time');
   assert.equal(row.querySelector('.ai-agent-doing').textContent, 'Editing Hero.astro');
   const chat = container.querySelector('.ai-transcript');
@@ -818,7 +830,7 @@ test('whole panel: subagents show in a strip and as units holding their own call
   assert.match(unit.querySelector('.ai-subagent-title').textContent, /Tidy Hero\.astro/);
   assert.match(
     unit.querySelector('.ai-subagent-progress').textContent,
-    /Editing Hero\.astro · Edited 1 file, read 1 file/,
+    /Editing Hero\.astro · Read 1 file, edited 1 file/,
     'what it does now and what it has done',
   );
   assert.equal(unit.querySelector('.ai-subagent-head').getAttribute('aria-expanded'), 'false', 'closed by default');
@@ -828,7 +840,7 @@ test('whole panel: subagents show in a strip and as units holding their own call
   assert.equal(unit.querySelector('.ai-subagent-head').getAttribute('aria-expanded'), 'true', 'a strip row opens its unit');
   assert.deepEqual(
     [...unit.querySelectorAll('.ai-subagent-body .ai-step-label')].map((label) => label.textContent),
-    ['Read Hero.astro', 'Edited Hero.astro'],
+    ['Read Hero component', 'Edited Hero component'],
     'with its own calls inside, as steps in words',
   );
   assert.equal(unit.querySelector('.ai-subagent-body .ai-tool') ?? undefined, undefined, 'no raw call cards in the unit');
@@ -836,7 +848,7 @@ test('whole panel: subagents show in a strip and as units holding their own call
   const chip = container.querySelector('.ai-running-chip');
   assert.equal(chip.textContent, '1 agent working');
 
-  await click(button(container, 'Open transcript'));
+  await click(button(container, 'See all steps'));
   assert.equal(container.querySelector('.ai-agents') ?? undefined, undefined, 'the strip gives way to the subagent’s transcript');
   const head = container.querySelector('.ai-agent-pane-head');
   assert.match(head.textContent, /Tidy Hero\.astro/);
@@ -1095,4 +1107,115 @@ test('whole panel: narrow, the panel shows the chat alone with the way back to t
   assert.equal(container.querySelector('.ai-sidebar') ?? undefined, undefined, 'no sidebar');
   assert.ok(container.querySelector('button[aria-label="All chats"]'), 'the way back to the list');
   assert.equal(container.querySelector('.ai-list-row') ?? undefined, undefined, 'the list is one step back');
+});
+
+test('a sign-in that could not be checked blocks nothing: no card, a quiet note that checks again, also when the window is focused', async (context) => {
+  ai.resetAiStore();
+  window.localStorage.clear();
+  const { calls, listeners } = fakeMain({ trusted: true, setup: { codex: 'unchecked' } });
+  const { container, root } = await mount();
+  context.after(() => act(() => root.unmount()));
+  assert.equal(container.querySelector('.ai-signin') ?? undefined, undefined, 'no sign-in card');
+  assert.equal(container.querySelector('.ai-gate') ?? undefined, undefined, 'no setup card');
+  assert.equal(container.querySelector('.ai-composer.is-blocked') ?? undefined, undefined, 'typing and sending are open');
+  await act(async () => ai.setDraft(CHAT, () => ai.draftFromText('hello')));
+  assert.equal(container.querySelector('.ai-send').disabled, false);
+  const note = container.querySelector('button.ai-sign-in-chip');
+  assert.equal(note.textContent, 'Sign-in not checked');
+  assert.match(note.getAttribute('title'), /You can keep typing and sending/);
+  const checks = () => calls.filter((call) => call.name === 'aiSetup' && call.payload.action.kind === 'detect').length;
+  const first = checks();
+  await click(note);
+  assert.equal(checks(), first + 1, 'pressing the note checks again');
+  await act(async () => window.dispatchEvent(new window.Event('focus')));
+  await settle();
+  assert.equal(checks(), first + 2, 'coming back to the window checks again');
+  // A real refusal when sending still shows the one sign-in card.
+  await act(async () => listeners.status({ projectPath: PROJECT, availability: { agent: 'codex', state: 'sign-in' } }));
+  await settle();
+  assert.equal(container.querySelectorAll('.ai-signin').length, 1);
+  assert.match(container.textContent, /Your session expired/);
+});
+
+test('a key, token or cloud sign-in is named quietly, without a value; an account sign-in says nothing', async (context) => {
+  ai.resetAiStore();
+  window.localStorage.clear();
+  fakeMain({ trusted: true, account: { name: undefined, plan: undefined, email: undefined, source: 'api-key' } });
+  const { container, root } = await mount();
+  context.after(() => act(() => root.unmount()));
+  const note = container.querySelector('.ai-sign-in-chip');
+  assert.equal(note.textContent, 'API key');
+  assert.equal(note.tagName, 'SPAN', 'it only tells');
+  assert.match(note.getAttribute('title'), /Codex is using an API key, not an account sign-in\. Usage may be billed to that key\./);
+  assert.equal(ai.accountLabel('claude', { name: undefined, plan: undefined, email: undefined, source: 'cloud' }, ai.ENGLISH_TRANSLATE), 'Cloud sign-in');
+});
+
+test('a Claude chat says when it is billed per use, and what a sign-in that is no subscription needs', async (context) => {
+  ai.resetAiStore();
+  window.localStorage.clear();
+  const claude = { ...summary, agent: 'claude' };
+  const { calls, listeners } = fakeMain({ trusted: true, chats: [claude] });
+  const { container, root } = await mount();
+  context.after(() => act(() => root.unmount()));
+  const account = { name: undefined, plan: 'Max', email: undefined, source: 'account' };
+  const push = async (state) => {
+    await act(async () => listeners.setup({ agent: 'claude', ...state }));
+    await settle();
+  };
+  await push({ step: 'ready', account });
+  assert.equal(container.querySelector('.ai-billing') === null, true, 'a subscription within its plan says nothing');
+  await push({ step: 'ready', account, billing: 'extra-usage' });
+  const warning = container.querySelector('.ai-billing');
+  assert.equal(warning?.querySelector('.ai-billing-label').textContent, 'Billed per use, not your subscription');
+  assert.equal(warning?.querySelector('button.ai-primary').textContent, 'Sign in with subscription');
+  await push({ step: 'signed-out', reason: 'billed' });
+  assert.equal(container.querySelector('.ai-billing') === null, true, 'a stopped turn warns in the card, once');
+  const card = () => container.querySelector('.ai-signin');
+  assert.equal(card()?.querySelector('strong').textContent, 'Billed per use, not your subscription');
+  assert.equal(card()?.querySelector('p').textContent, 'Stacki stopped the reply to avoid more charges.');
+  await push({ step: 'signed-out', reason: 'not-subscription' });
+  assert.equal(card()?.querySelector('p').textContent, 'Stacki needs a Claude subscription sign-in.');
+  await act(async () => card().querySelector('button.ai-primary').click());
+  await settle();
+  assert.equal(
+    calls.some((call) => call.name === 'aiSetup' && call.payload.agent === 'claude' && call.payload.action.kind === 'signIn'),
+    true,
+  );
+});
+
+test('a chat whose agent needs a server sign-in says so above the composer, with Sign in right there', async (context) => {
+  ai.resetAiStore();
+  window.localStorage.clear();
+  const { listeners } = fakeMain({ trusted: true });
+  const asked = [];
+  let state = 'connected';
+  window.avb.onAiMcpAuth = () => () => undefined;
+  window.avb.aiMcpAuth = async ({ request }) => {
+    asked.push(request);
+    if (request.kind === 'signIn') {
+      return { servers: [{ agent: 'codex', name: request.name, state: 'signing-in' }] };
+    }
+    return {
+      servers: [
+        { agent: 'codex', name: 'figma', state },
+        { agent: 'claude', name: 'other', state: 'needs-sign-in' },
+      ],
+    };
+  };
+  const { container, root } = await mount();
+  context.after(() => act(() => root.unmount()));
+  assert.equal(container.querySelector('.ai-mcp-signins') ?? undefined, undefined, 'nothing while this agent can use its servers');
+  // The agent meets the server it cannot use: the panel asks again.
+  state = 'needs-sign-in';
+  await push(listeners, [
+    { kind: 'turn-start', turn: TURN, at: 1 },
+    { kind: 'tool', turn: TURN, call: 'call-1', title: 'figma', toolKind: 'other', status: 'failed', toolName: 'mcp__figma__get_design' },
+  ]);
+  const note = container.querySelector('.ai-mcp-signins');
+  assert.match(note.textContent, /figma.*Needs sign-in/);
+  assert.doesNotMatch(note.textContent, /other/, 'only this chat’s agent');
+  assert.equal(asked.at(-1).freshness, 'fresh');
+  await click(button(note, 'Sign in'));
+  assert.deepEqual(asked.at(-1), { kind: 'signIn', agent: 'codex', name: 'figma' });
+  assert.match(container.querySelector('.ai-mcp-signins').textContent, /Waiting for your browser/);
 });

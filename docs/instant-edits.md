@@ -18,7 +18,9 @@ frame's DOM and is never written to disk by itself.
 3. **Same task as the patch.** The morph client takes every shown change back just before it patches
    and puts it back right after when the rendering is of the old source (`avb:before-morph`,
    `avb:after-patch`; judged by the source stamps), so nothing flashes or jumps and nothing is
-   shown twice.
+   shown twice. No change to the page's DOM skips this. The patch writes only what two renderings
+   disagree about, so a guess left on the page is never corrected by it: a class taken off an
+   instance, which its component also writes itself, stayed off until a refresh.
 4. **Refusal reverts.** `onRefusedGesture` (`src/app/state/appLifecycle.ts`) sends `avb:move-revert`
    and `avb:insert-revert` (which also takes back deletes and edits); a rendering that never comes
    takes the change away after a bound (20 s; 5 s for a delete).
@@ -35,13 +37,16 @@ reads the operation union, checks every named module exists and that nothing is 
 
 | Action | Strategy | Where |
 |---|---|---|
-| Insert element or component | Stand-in at the future path (element from the writer's template; component as a labelled neutral block) | `shared/page/canvasInsert.ts`, `framePendingInsert.ts` |
+| Insert element | Stand-in at the future path, from the writer's template | `shared/page/canvasInsert.ts`, `framePendingInsert.ts` |
+| Insert component | A copy of an instance already on the page that is written the same way; otherwise nothing is drawn until the render, and a quiet bar with no label after 600 ms | same, `shared/page/canvasTwin.ts` |
 | Duplicate | Deep copy of what the original rendered, paths renamed | same (`clone`) |
 | Wrap | Plain wrapper where the node stood, node inside, paths under it renumbered | same (`wrap`) |
 | Delete | Elements removed, kept detached | `framePendingDelete.ts` |
 | Reorder | Real nodes moved, paths renumbered | `canvasMove.ts`, `frameMove.ts` |
 | Attribute, class, prop on a plain element, rename attribute | Set or removed | `shared/page/canvasEdit.ts`, `framePendingEdit.ts` |
 | Words of an element, rename tag | Words set, element replaced with children moved | same |
+| A class added to or taken off an element or instance (`avb:class-patch`) | Only the names that really changed, taken back like every other shown edit | same |
+| Words typed on the canvas, until their save renders | Kept in the page's text nodes, taken back like every other shown edit | `frameTextNative.ts` (`showTypedWords`) |
 | Component props, expressions, component rename | Old DOM, `updating` cue after 80 ms | same |
 | Undo, redo | The step's result applied from the model diff the moment it is installed (including the one node an undo added or removed) | `src/editor/canvasEditShow.ts` |
 
@@ -107,8 +112,8 @@ write began to the rendered node on the canvas, median / worst ms.
 |---|---|---|---|
 | Insert p | about 1 ms | 121 / 149 | 37 / 71 |
 | Insert div | about 1 ms | 128 / 133 | 33 / 43 |
-| Insert Section component | about 1 ms (labelled block) | 129 / 134 | 36 / 40 |
-| Insert Image component | about 1 ms (labelled block) | 129 / 149 | 34 / 46 |
+| Insert Section component | about 1 ms (the labelled block of that day) | 129 / 134 | 36 / 40 |
+| Insert Image component | about 1 ms (the labelled block of that day) | 129 / 149 | 34 / 46 |
 | Delete | about 1 ms | 120 / 139 | 36 / 52 |
 | Reorder | about 1 ms | 122 / 146 | 35 / 38 |
 | Attribute | about 1 ms | 129 / 138 | 34 / 41 |
@@ -119,6 +124,12 @@ The "before" column is the same bench with the app's write announcement not reac
 (the state before `cc062913`, and the symlink bug fixed after it). Panel refresh (the style panel's
 matched selectors) is one canvas round trip within a frame of the change; it is tested in jsdom
 (`test/renderer/style/panelRefresh.test.js`) and not timed.
+
+Component inserts since 2026-11-25, in the real app on a copy of the Lumos framework (RichText,
+Accordion, Card, Heading): the first visible change is the real content, 111 to 199 ms
+after Enter (written at 46 to 82 ms, then one page render and patch); a second RichText written like
+the first showed its content at 19 ms and did not move when the render landed. A component that took
+1.8 s to render got the bar at 621 ms.
 
 Not measured: duplicate, wrap and undo and redo (their first visual change is the same frame code;
 undo and redo start after the app's revert call returns, tens of milliseconds at most).

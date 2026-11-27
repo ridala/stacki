@@ -15,6 +15,9 @@ import { assert } from '../../../shared/core/assert';
 import { LIMITS } from '../../../shared/core/limits';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { VOID_TAGS } from '../../editor/elementSchemas';
+
+// Elements whose content model holds no text: <html> holds <head> and <body>, <head> only metadata.
+const NO_TEXT_TAGS: ReadonlySet<string> = new Set(['html', 'head']);
 import { isInlineOnly } from './RichContent';
 import { type ElementPropsPanelProps } from './propsPanelTypes';
 import { sourceKind, useSourceDimensions } from './SourcePanels';
@@ -142,7 +145,8 @@ export function elementFieldLayout(props: ElementPropsPanelProps) {
   // adds, since a fresh instance is self-closing — has no Content field, and
   // so no way to be given its first words.
   const isEmpty = node.children === undefined || node.children.length === 0;
-  const canHoldText = (node.kind === 'element' && !VOID_TAGS.has(String(node.name).toLowerCase())) || !!takesSlotText;
+  const canHoldText =
+    (node.kind === 'element' && !VOID_TAGS.has(String(node.name).toLowerCase()) && !NO_TEXT_TAGS.has(String(node.name).toLowerCase())) || !!takesSlotText;
   const showContentField = isInlineOnly(node.children) || (isEmpty && canHoldText);
   // HTML lets a node hold text *and* elements — `<div>Intro<Button/></div>` is
   // ordinary markup — but the rich editor above only covers all-inline
@@ -326,7 +330,9 @@ export function elementSettings(
   // offers a prop the component would ignore. Always the CSS editor, even
   // when a component types it `style?: string`.
   const styleField: FieldDefinition | undefined =
-    allowAttrs || node.props?.['style'] !== undefined ? { ...(schema.find((field) => field.name === 'style') || {}), name: 'style', type: 'style' } : undefined;
+    allowAttrs || props.offersStyle === true || node.props?.['style'] !== undefined
+      ? { ...(schema.find((field) => field.name === 'style') || {}), name: 'style', type: 'style' }
+      : undefined;
   // The page's wrapper switches through the same Tag field as everything else
   // — it just answers with a layout rather than a tag, so its list is the
   // project's layouts and the change goes through the import rewrite.

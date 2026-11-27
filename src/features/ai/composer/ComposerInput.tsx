@@ -60,7 +60,11 @@ import {
 } from '../mentions/componentMentions';
 import { MENTION_TABS, mentionRows, readMentionIndex, refreshMentionIndex, relatedItems, type MentionTab } from '../mentions/projectMentions';
 import { RelatedCssPopover } from '../mentions/RelatedCssPopover';
-import { MentionRowIcon } from '../mentions/MentionRowIcon';
+import { ChipIcon, MentionRowIcon } from '../mentions/MentionRowIcon';
+import { fileLookOf } from '../../../ui/ElementIcons';
+import { useChipCard, type ChipCard } from '../mentions/useChipCard';
+import type { ChipSubject } from '../mentions/ChipValue';
+import { chipReadableText } from '../../../../shared/properties/ai/sentMessage';
 import {
   chipCountOf,
   chipFits,
@@ -68,8 +72,7 @@ import {
   chipsEqual,
   chipLook,
   chipStyleOf,
-  CHIP_STYLE_ICONS,
-  type ChipStyle,
+  chipFilePath,
   hostChipCountOf,
   isFileDrag,
   segmentsEqual,
@@ -79,11 +82,17 @@ import {
 import { useMentionRows, type MentionSearch } from '../mentions/useMentionRows';
 import '../mentions/mentions.css';
 import { SlashMenu } from './SlashMenu';
+import { joinAtCaret, splitAtCaret } from './caretSegments';
 import { skillsForAgent, slashQueryOf, slashRowName, slashRows, type SlashRow } from './slashRows';
 import { useSlashSkills } from './useSlashSkills';
 
 /** Which send key was pressed: plain Enter, or Enter with Cmd or Ctrl (queue). */
 export type SendKey = 'send' | 'queue';
+
+export interface CaretMemory {
+  readonly read: () => number | undefined;
+  readonly write: (caret: number) => void;
+}
 
 /** What a caller can ask of the input from outside. A textarea's `focus` fits, so older callers' refs still work. */
 export interface ComposerFocus {
@@ -93,6 +102,12 @@ export interface ComposerFocus {
 /** The focus handle plus the edits the composer's menus make: `insertText('@')` opens the file picker, `insertText('/')` the command menu. */
 export interface ComposerHandle extends ComposerFocus {
   readonly insertText: (text: string) => void;
+  /** The caret's place in the draft, a chip counting as one character. */
+  readonly caret: () => number | undefined;
+  /** The draft up to the caret. */
+  readonly beforeCaret: () => ComposerSegments;
+  /** Rewrites the draft up to the caret, as one edit the draft's owner hears; the caret ends after what was written. */
+  readonly editBeforeCaret: (change: (before: ComposerSegments) => ComposerSegments) => void;
 }
 
 export interface ComposerInputProps {
@@ -103,6 +118,8 @@ export interface ComposerInputProps {
   /** Filled with a `ComposerHandle` while mounted (typed as its `focus` part so a ref made for a textarea is accepted). */
   readonly inputRef: Ref<ComposerFocus>;
   readonly onSend: (key: SendKey) => void;
+  /** Where the caret was when this draft's box last closed, put back as it opens; and where it is as it closes. */
+  readonly caretMemory?: CaretMemory | undefined;
   /** The words being dictated, drawn after the text as a draft that is not part of it (dictationDraft.ts). */
   readonly dictationDraft?: DictationDraft | undefined;
   /** The draft with its chips. Pair with `onSegmentsChange`. */
@@ -139,22 +156,19 @@ const MENTION_TAB_LABELS = {
 // Marks a transaction that applies a draft the caller already holds: it is not reported back, and not undoable.
 const externalDraft = Annotation.define<boolean>();
 
-const iconMarkup = new Map<ChipStyle, string>();
+const iconMarkup = new Map<string, string>();
 
-/** The icon of a chip's look (mentionChips.ts, CHIP_STYLE_ICONS), at the size the pill (12) or the picker (16) draws it. */
-function chipStyleIcon(style: ChipStyle, size: number) {
-  const Icon = CHIP_STYLE_ICONS[style];
-  return <Icon size={size} />;
-}
-
-/** The 12px icon of a chip's look as static markup, drawn once per look. */
-function chipIconMarkup(style: ChipStyle): string {
-  const cached = iconMarkup.get(style);
+/** The 12px icon of a chip (MentionRowIcon.tsx, ChipIcon) as static markup, drawn once per look or file type. */
+function chipIconMarkup(chip: MentionChip): string {
+  const path = chipFilePath(chip);
+  // Files of one type share a drawing, so the cache stays as small as the two tables behind it.
+  const key = path === undefined ? chipStyleOf(chip) : `file:${fileLookOf(path).glyph}:${fileLookOf(path).hue ?? ''}`;
+  const cached = iconMarkup.get(key);
   if (cached !== undefined) {
     return cached;
   }
-  const markup = renderToStaticMarkup(chipStyleIcon(style, 12));
-  iconMarkup.set(style, markup);
+  const markup = renderToStaticMarkup(<ChipIcon chip={chip} size={12} />);
+  iconMarkup.set(key, markup);
   return markup;
 }
 
@@ -214,6 +228,10 @@ export function ComposerInput(props: ComposerInputProps) {
   // The editor is built once; its chip callbacks read the language that is current when they run.
   const translateLatest = useRef(translate);
   translateLatest.current = translate;
+  // The card of the chip under the pointer or the keyboard; the pills are the editor's own elements, so they reach it through a ref.
+  const card = useChipCard();
+  const cardLatest = useRef(card);
+  cardLatest.current = card;
   // The project's components, read the same way: a chip whose component is gone is drawn invalid.
   const components = useMentionComponents();
   const componentsLatest = useRef(components);
@@ -252,22 +270,40 @@ export function ComposerInput(props: ComposerInputProps) {
   const [highlight, setHighlight] = useState<number | undefined>(undefined);
   const [tab, setTab] = useState<MentionTab>(() => lastMentionTab);
   const host = useRef<HTMLDivElement>(null);
+  const caretLatest = useRef(props.caretMemory);
+  caretLatest.current = props.caretMemory;
   const viewRef = useRef<EditorView | undefined>(undefined);
   const live = useRef<Live | undefined>(undefined);
   const attributes = useMemo(() => new Compartment(), []);
   const editor = useMemo(
     () =>
       createChipEditor<MentionChip>({
-        describe: (chip) => chipLook(chip, translateLatest.current, chipProblemText(chip, componentsLatest.current, translateLatest.current)),
+        describe: (chip) => ({
+          ...chipLook(chip, translateLatest.current, chipProblemText(chip, componentsLatest.current, translateLatest.current)),
+          hover: 'card',
+        }),
+        // A cut or copied chip leaves the box as the words it stands for; selected code as its place and the code.
+        copyText: chipReadableText,
         // A prop, value or slot chip means nothing without its component: deleting the component chip deletes them too.
         orphans: orphanMembers,
         decorate: (chip, element) => {
-          element.insertAdjacentHTML('beforeend', chipIconMarkup(chipStyleOf(chip)));
+          element.insertAdjacentHTML('beforeend', chipIconMarkup(chip));
+          chipCardEvents(
+            element,
+            chip,
+            () => cardLatest.current,
+            () => ({
+              chip,
+              problem: chipProblemText(chip, componentsLatest.current, translateLatest.current),
+            }),
+          );
           if (chip.kind === 'builtin') {
             element.setAttribute('aria-live', 'polite');
           }
         },
         onChipClick: (chip, element) => {
+          // What a click opens takes the card's place.
+          cardLatest.current.close();
           if (chip.kind === 'builtin') {
             void copyBuiltinChip(chip.id).then((done) => {
               if (done) {
@@ -532,7 +568,12 @@ export function ComposerInput(props: ComposerInputProps) {
     ]);
     const view = new EditorView({ state, parent });
     viewRef.current = view;
+    const remembered = caretLatest.current?.read();
+    if (remembered !== undefined) {
+      view.dispatch({ selection: { anchor: Math.min(remembered, view.state.doc.length) } });
+    }
     return () => {
+      caretLatest.current?.write(view.state.selection.main.head);
       view.destroy();
       viewRef.current = undefined;
     };
@@ -543,12 +584,13 @@ export function ComposerInput(props: ComposerInputProps) {
   // The dictation draft follows the prop; it is a decoration, so the document and its history are untouched.
   const draftText = props.dictationDraft?.text ?? NO_DRAFT.text;
   const draftDecoding = props.dictationDraft?.decoding ?? NO_DRAFT.decoding;
+  const draftPlace = props.dictationDraft?.place ?? 'end';
   useEffect(() => {
     const view = viewRef.current;
     if (view !== undefined) {
-      showDictationDraft(view, { text: draftText, decoding: draftDecoding });
+      showDictationDraft(view, { text: draftText, decoding: draftDecoding, place: draftPlace });
     }
-  }, [draftText, draftDecoding]);
+  }, [draftText, draftDecoding, draftPlace]);
 
   useImperativeHandle(
     props.inputRef,
@@ -561,8 +603,22 @@ export function ComposerInput(props: ComposerInputProps) {
           view.dispatch(view.state.replaceSelection(text), { scrollIntoView: true, userEvent: 'input' });
         }
       },
+      caret: () => viewRef.current?.state.selection.main.head,
+      beforeCaret: () => {
+        const view = viewRef.current;
+        return view === undefined ? [] : splitAtCaret(editor.readSegments(view.state), view.state.selection.main.head).before;
+      },
+      editBeforeCaret: (change) => {
+        const view = viewRef.current;
+        if (view === undefined) {
+          return;
+        }
+        const split = splitAtCaret(editor.readSegments(view.state), view.state.selection.main.head);
+        const joined = joinAtCaret(change(split.before), split.after);
+        view.dispatch({ ...editor.replaceSegments(view.state, joined.segments), selection: { anchor: joined.caret }, scrollIntoView: true });
+      },
     }),
-    [],
+    [editor],
   );
 
   // A draft that changed from outside replaces the document; one the editor itself reported is already there.
@@ -712,6 +768,7 @@ export function ComposerInput(props: ComposerInputProps) {
         <SlashMenu agent={props.agent} rows={matches} activeIndex={active} skills={skillState} onActiveChange={setHighlight} onChoose={chooseSlashRow} />
       )}
       <div ref={host} className="ai-editor" />
+      {card.card}
       {membersView !== undefined && (
         <ComponentMembersPopover
           component={membersView.component}
@@ -799,6 +856,23 @@ export function ComposerInput(props: ComposerInputProps) {
   );
 }
 
+/** A pill the editor drew shows its card on hover and keyboard focus, as a sent chip does (MentionChipView.tsx). */
+function chipCardEvents(element: HTMLElement, chip: MentionChip, card: () => ChipCard, subject: () => ChipSubject): void {
+  // A tab stop, so the keyboard reaches the code of a chip without a pointer.
+  element.tabIndex = 0;
+  element.dataset['chip'] = chip.kind;
+  element.addEventListener('mouseenter', () => card().rest(element, subject()));
+  element.addEventListener('mouseleave', () => card().leave());
+  element.addEventListener('focus', () => card().focus(element, subject()));
+  element.addEventListener('blur', () => card().leave());
+  element.addEventListener('keydown', (event) => {
+    if (card().key(event.key)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  });
+}
+
 /** The member chip with a new value: a slot has none, text keeps its own when cleared. */
 function memberWithValue(chip: ComponentMemberChip, value: string | undefined): ComponentMemberChip | undefined {
   switch (chip.role) {
@@ -826,7 +900,7 @@ function pickerCandidate(row: PickerRow) {
     id: row.id,
     label: row.label,
     group: row.group,
-    icon: row.look === undefined ? chipStyleIcon(chipStyleOf(row.chip), 16) : <MentionRowIcon look={row.look} />,
+    icon: row.look === undefined ? <ChipIcon chip={row.chip} size={16} /> : <MentionRowIcon look={row.look} chip={row.chip} />,
     ...(row.description === undefined ? {} : { description: row.description }),
   };
 }

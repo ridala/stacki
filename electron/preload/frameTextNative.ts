@@ -1,15 +1,12 @@
+import { assert } from '../../shared/core/assert';
+import { sourceStamps } from './frameMove';
 import type { TextMatch } from './frameTextMatch';
+import type { CanvasTextBreaks } from '../../shared/properties/canvasText';
 import { createTextBuffer, type TextRunChange } from './frameTextBuffer';
 import { placeTextCaret, textEditorRoot, textSelection, type TextSpace } from './frameTextSelection';
 import { installNativeTextEvents } from './frameTextNativeEvents';
 import { installInterceptedPointer, pointOnWords } from './frameTextPointer';
-
-let editingRoot: HTMLElement | undefined;
-let stylesheet: CSSStyleSheet | undefined;
-
-export function isCanvasTextEditing(target: unknown): boolean {
-  return target instanceof Node && !!editingRoot?.contains(target);
-}
+import { holdTextEditing, isCanvasTextEditing, styleTextEditor } from './frameTextEditing';
 
 export interface NativeTextResult {
   /** What to save: empty when nothing changed or the edit was cancelled. */
@@ -25,7 +22,7 @@ interface NativeTextCallbacks {
   readonly done: (result: NativeTextResult) => void;
 }
 
-export function openNativeText(match: TextMatch, space: TextSpace, event: MouseEvent, callbacks: NativeTextCallbacks) {
+export function openNativeText(match: TextMatch, space: TextSpace, event: MouseEvent, callbacks: NativeTextCallbacks, breaks?: CanvasTextBreaks) {
   const root = textEditorRoot(match);
   if (!root || match.nodes.map((node) => node.data).join('').length > 10_000) {
     return undefined;
@@ -45,7 +42,7 @@ export function openNativeText(match: TextMatch, space: TextSpace, event: MouseE
     }
   };
   const heightBefore = root.getBoundingClientRect().height;
-  installNativeTextStyle(root);
+  installNativeTextStyle(root, breaks);
   root.setAttribute('contenteditable', 'true');
   root.setAttribute('data-avb-text-editor', '');
   // Opening the editor must not move a pixel. In Chromium an editable block with
@@ -55,8 +52,14 @@ export function openNativeText(match: TextMatch, space: TextSpace, event: MouseE
   // That whitespace is collapsed and invisible while the page is not editable, so
   // the editor keeps it out of the text it edits and puts it back on close.
   const trimmed = root.getBoundingClientRect().height > heightBefore + GROWTH_TOLERANCE_PX ? trimEdgeWhitespace(root, match.nodes) : [];
+  // Where Enter types a line break, the editor shows newlines (pre-line): the template's own newlines, which the page
+  // shows as spaces, are spaces while it is open, and come back when it closes without a save.
+  const folded = breaks === undefined ? [] : foldSourceNewlines(space.runs.flat());
   const buffer = createTextBuffer(root, space, changed);
   if (!buffer) {
+    for (const edge of folded) {
+      edge.node.data = edge.data;
+    }
     restoreAttributes();
     for (const edge of trimmed) {
       edge.node.data = edge.data;
@@ -74,17 +77,28 @@ export function openNativeText(match: TextMatch, space: TextSpace, event: MouseE
     clearNativeTextSelection(root);
     const changes = action === 'apply' ? buffer.changes() : [];
     // The original words come back first: the save is checked against them.
-    const { restored, keep } = buffer.restore();
+    const { restored, keep: keepTyped } = buffer.restore();
+    const unfolded = folded.map((edge) => ({ ...edge, shown: edge.node.data }));
+    for (const edge of unfolded) {
+      edge.node.data = edge.data;
+    }
+    // The typed words are shown over the folded text they were typed in.
+    const keep = () => {
+      for (const edge of unfolded) {
+        edge.node.data = edge.shown;
+      }
+      keepTyped();
+    };
     restoreAttributes();
     for (const edge of trimmed) {
       edge.node.data = edge.data;
     }
-    editingRoot = undefined;
+    release();
     root.blur();
     done({ changes, restored, keep });
   };
-  editingRoot = root;
-  const { cleanup, pressed } = installNativeTextEvents({ root, space, buffer, finish, refused });
+  const release = holdTextEditing(root);
+  const { cleanup, pressed } = installNativeTextEvents({ root, space, buffer, finish, refused, breaks });
   const stopPointer = installInterceptedPointer(root, match.nodes);
   root.focus({ preventScroll: true });
   placeTextCaret(space, event);
@@ -109,6 +123,111 @@ export function openNativeText(match: TextMatch, space: TextSpace, event: MouseE
   };
 }
 
+/** How long typed words wait for their rendering: the canvas's bound for what it shows ahead of one. */
+const TYPED_HOLD_MS_MAX = 20_000;
+/** Saves shown at once before any rendering: past it the page's own words come back at once. */
+const TYPED_PENDING_MAX = 64;
+let typedPending = 0;
+
+interface TypedWords {
+  readonly node: Text;
+  readonly rendered: string;
+  readonly typed: string;
+}
+
+/**
+ * Shows the typed words again while their save is on its way; `write` puts them into `nodes`.
+ * They are a guess like every other instant edit: taken back just before the patch, shown again
+ * over a render of the old file, and dropped when the save is refused or never renders.
+ *
+ * They used to stay in the page's own text nodes. The patch only writes a text node that still
+ * says what the last rendering said, so words the render did not repeat exactly (a component
+ * that reshapes them, a refused save) stayed on the canvas, and no later edit could replace
+ * them: only a refresh did.
+ */
+export function showTypedWords(nodes: readonly Text[], write: () => void): void {
+  // Read before the words change: which source the page shows now.
+  let shownFrom = sourceStamps(document);
+  const rendered = nodes.map((node) => node.data);
+  write();
+  const words: readonly TypedWords[] = nodes.flatMap((node, at) => {
+    const before = rendered[at];
+    return before === undefined || before === node.data ? [] : [{ node, rendered: before, typed: node.data }];
+  });
+  if (words.length === 0) {
+    return;
+  }
+  if (typedPending >= TYPED_PENDING_MAX) {
+    takeWordsBack(words);
+    return;
+  }
+  typedPending += 1;
+  const waiting = new AbortController();
+  const listen = { signal: waiting.signal };
+  let stale = false;
+  const end = () => {
+    clearTimeout(timer);
+    waiting.abort();
+    typedPending -= 1;
+    assert(typedPending >= 0, 'showTypedWords: each guess ends once');
+  };
+  const drop = () => {
+    takeWordsBack(words);
+    end();
+  };
+  const timer = setTimeout(drop, TYPED_HOLD_MS_MAX);
+  document.addEventListener(
+    'avb:before-morph',
+    (event) => {
+      const incoming = event instanceof CustomEvent && event.detail instanceof Document ? sourceStamps(event.detail) : undefined;
+      stale = shownFrom !== undefined && shownFrom !== '' && incoming === shownFrom;
+      shownFrom = incoming;
+      takeWordsBack(words);
+    },
+    listen,
+  );
+  document.addEventListener(
+    'avb:after-patch',
+    () => {
+      // A render of the old file leaves the words it said; any other has answered the save.
+      if (stale) {
+        showWordsAgain(words);
+      } else {
+        end();
+      }
+    },
+    listen,
+  );
+  window.addEventListener(
+    'message',
+    (event) => {
+      const data: unknown = event.data;
+      const type: unknown = typeof data === 'object' && data !== null && 'type' in data ? data.type : undefined;
+      if (type === 'avb:insert-revert' || type === 'avb:move-revert') {
+        drop();
+      }
+    },
+    listen,
+  );
+}
+
+// Only a node still holding what the guess left there, or found there, is written.
+function takeWordsBack(words: readonly TypedWords[]): void {
+  for (const { node, rendered, typed } of words) {
+    if (node.data === typed) {
+      node.data = rendered;
+    }
+  }
+}
+
+function showWordsAgain(words: readonly TypedWords[]): void {
+  for (const { node, rendered, typed } of words) {
+    if (node.isConnected && node.data === rendered) {
+      node.data = typed;
+    }
+  }
+}
+
 function holdsSelection(root: HTMLElement): boolean {
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed) {
@@ -129,19 +248,24 @@ function clearNativeTextSelection(root: HTMLElement): void {
   }
 }
 
-function installNativeTextStyle(root: HTMLElement): void {
-  const whitespace = getComputedStyle(root).whiteSpace;
-  if (!stylesheet) {
-    stylesheet = new CSSStyleSheet();
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, stylesheet];
+// Each text's newlines and the indentation around them, as one space: what `white-space: normal` shows for them.
+function foldSourceNewlines(nodes: readonly Text[]): TrimmedEdge[] {
+  const folded: TrimmedEdge[] = [];
+  for (const node of nodes) {
+    if (/\n/.test(node.data)) {
+      folded.push({ node, data: node.data });
+      node.data = node.data.replace(/[\t\f\r ]*\n[\t\n\f\r ]*/g, ' ');
+    }
   }
-  // Editing must preserve collapsed source indentation as well as preformatted
-  // text. The browser owns the caret; only its default focus outline is suppressed.
-  stylesheet.replaceSync(
-    '[data-avb-text-editor] { outline: none !important; caret-color: auto !important;' +
-      ` white-space: ${whitespace} !important; }` +
-      '[data-avb-text-editor], [data-avb-text-editor] * { cursor: text !important; }',
-  );
+  return folded;
+}
+
+function installNativeTextStyle(root: HTMLElement, breaks: CanvasTextBreaks | undefined): void {
+  const computed = getComputedStyle(root).whiteSpace;
+  // Typed line breaks show as lines; spaces still collapse as they did, so nothing moves when the editor opens.
+  const whitespace = breaks !== undefined && /^(normal|nowrap)$/.test(computed) ? 'pre-line' : computed;
+  // Editing must preserve collapsed source indentation as well as preformatted text.
+  styleTextEditor(whitespace);
 }
 
 /** Height growth that is layout noise, not a new line: sub-pixel rounding. */

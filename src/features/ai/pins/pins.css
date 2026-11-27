@@ -1,0 +1,741 @@
+/* Comment pins (pins/): the markers over the canvas, the mode's bar and list, a pin's popover, and a message of
+   pins in the transcript. Controls are fills, never outlines (backgrounds-not-borders); every scrolling box keeps
+   a stable gutter. */
+
+/* The layer covers the canvas and takes no pointer itself: only the markers do. It stacks above the outlines and
+   app overlays (previewViewport.css's canvas layer scale). */
+.ai-pin-layer {
+  position: absolute;
+  inset: 0;
+  z-index: calc(var(--canvas-layer-app) + 1);
+  pointer-events: none;
+}
+
+/* A marker's tip (its bottom-left corner) is the pinned point. */
+.ai-pin-marker {
+  position: absolute;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 12px 12px 12px 3px;
+  transform: translateY(-100%);
+  background: var(--accent);
+  color: #fff;
+  font: 600 12px/24px var(--font);
+  text-align: center;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease;
+}
+/* Hovered, pressed, focused, open or dragged, a pin stays the same blue, darker and opaque (blue buttons stay blue).
+   `button.` and :not(:disabled) outrank controls.css's grey wash on every button's hover, which faded it. */
+button.ai-pin-marker:hover:not(:disabled),
+button.ai-pin-marker:focus-visible,
+button.ai-pin-marker:active:not(:disabled),
+button.ai-pin-marker.is-open,
+button.ai-pin-marker.is-open:hover:not(:disabled),
+button.ai-pin-marker.is-dragging,
+button.ai-pin-marker.is-dragging:hover:not(:disabled) {
+  background: var(--accent-pressed);
+  color: #fff;
+  opacity: 1;
+  transform: translateY(-100%) scale(1.08);
+  transform-origin: bottom left;
+}
+button.ai-pin-marker.is-movable {
+  cursor: grab;
+}
+button.ai-pin-marker.is-dragging {
+  cursor: grabbing;
+  transition: none;
+  z-index: 1;
+}
+/* A pin never saved (its box is open, or the app closed before Save): the same blue, ringed, so it reads as unfinished. */
+button.ai-pin-marker.is-unsaved {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--accent-soft),
+    0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.ai-pin-marker.is-queued {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.ai-pin-marker.is-working {
+  animation: ai-pin-pulse 1.2s ease-in-out infinite;
+}
+.ai-pin-marker.is-done {
+  background: var(--green);
+}
+.ai-pin-marker.is-attention {
+  background: var(--orange);
+}
+.ai-pin-marker.is-sent,
+.ai-pin-marker.is-unfinished,
+.ai-pin-marker.is-unreported {
+  background: var(--bg-active);
+  color: var(--text);
+}
+button.ai-pin-marker.is-done:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--green), #000 18%);
+}
+button.ai-pin-marker.is-attention:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--orange), #000 18%);
+}
+button.ai-pin-marker.is-queued:hover:not(:disabled),
+button.ai-pin-marker.is-sent:hover:not(:disabled),
+button.ai-pin-marker.is-unfinished:hover:not(:disabled),
+button.ai-pin-marker.is-unreported:hover:not(:disabled) {
+  background: var(--bg-pressed);
+  color: var(--text);
+}
+.ai-pin-marker.is-excluded:not(:hover):not(.is-open) {
+  opacity: 0.55;
+}
+/* A pin that left the board fades where it was, with the popups' exit motion, and takes no press meanwhile. */
+.ai-pin-marker.is-leaving {
+  pointer-events: none;
+  animation: ai-pin-leave var(--popup-duration, 160ms) ease forwards;
+}
+@keyframes ai-pin-leave {
+  to {
+    opacity: 0;
+    scale: 0.85;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-pin-marker.is-leaving {
+    animation: none;
+    opacity: 0;
+  }
+}
+.ai-pin-layer.is-moving .ai-pin-marker {
+  opacity: 0.4;
+}
+@keyframes ai-pin-pulse {
+  50% {
+    filter: brightness(1.25);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-pin-marker,
+  .ai-pin-marker.is-working {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* The mode's bar, at the bottom of the canvas so it never covers the page's own navigation: a slot as wide as the
+   canvas centres it and is the container the bar's narrow layout asks about, so the pill keeps its centre as its
+   contents change. It stacks upward: what comes with the bar stands over it. */
+.ai-pin-bar-slot {
+  position: absolute;
+  bottom: 16px;
+  inset-inline: 12px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  container-type: inline-size;
+  container-name: pin-bar;
+}
+/* For the frame of a pin's crop the bar and the toasts step aside: both sit over the bottom of the canvas. */
+.ai-pin-bar-slot.is-capturing,
+body:has(.ai-pin-bar-slot.is-capturing) .toast-stack {
+  visibility: hidden;
+}
+/* Toasts and the refused-save notice sit at the window's bottom centre: while the bar is up they start above it. */
+body:has(.ai-pin-bar-slot) .toast-stack {
+  bottom: 68px;
+}
+body:has(.ai-pin-bar-slot) .save-conflict {
+  bottom: 104px;
+}
+body:has(.ai-pin-bar-slot > .ai-billing) .toast-stack {
+  bottom: 116px;
+}
+body:has(.ai-pin-bar-slot > .ai-billing) .save-conflict {
+  bottom: 152px;
+}
+/* A pin's list or box was opened on purpose and stands over the bar: a notice waits under it, and takes no press
+   meant for it. */
+body:has(.ai-pin-list) .toast-stack,
+body:has(.ai-pin-popover) .toast-stack {
+  z-index: 50;
+}
+/* The billing warning over the bar: over the canvas, so it takes the pointer and casts the bar's shadow. */
+.ai-pin-bar-slot > .ai-billing {
+  max-width: 100%;
+  pointer-events: auto;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+.ai-pin-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  box-sizing: border-box;
+  /* A faded edge keeps the pill apart from a dark page behind it: the owner's one exception to fills-not-borders, for
+     this pill only. The edge and the padding add up to 4px, so the pill and everything in it keep their places. */
+  border: 1px solid var(--border-strong);
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  pointer-events: auto;
+  max-width: 100%;
+}
+.ai-pin-bar > * {
+  flex: none;
+}
+.ai-pin-bar-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px;
+  color: var(--text-dim);
+}
+.ai-pin-bar.is-empty .ai-pin-bar-mode {
+  padding-inline-end: 4px;
+  color: var(--text);
+}
+/* Too narrow for the name: it drops, and the icon's tooltip still names the mode. */
+@container pin-bar (max-width: 220px) {
+  .ai-pin-bar-mode-name.is-droppable {
+    display: none;
+  }
+}
+.ai-pin-bar-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.ai-pin-bar-button:hover,
+.ai-pin-bar-button.is-on {
+  background: var(--bg-hover);
+}
+/* Send waiting for the agent: a quiet button, its tooltip says why. */
+.ai-pin-send-waiting[aria-disabled='true'] {
+  color: var(--text-dim);
+  cursor: default;
+}
+.ai-pin-bar .ai-pin-bar-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--text-dim);
+}
+/* Send is the one primary action: blue, and blue it stays on hover and press. */
+.ai-pin-send {
+  height: 28px;
+  margin-inline-start: 2px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ai-pin-send:hover:not(:disabled):not([aria-disabled='true']) {
+  background: var(--accent-hover);
+}
+.ai-pin-send:active:not(:disabled):not([aria-disabled='true']) {
+  background: var(--accent-pressed);
+}
+
+/* The list of every pin. Its place and size are set above the bar (PinList.tsx listPosition). */
+.ai-pin-list {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  /* The bar's own faded edge, and no shadow. */
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: none;
+  color: var(--text);
+  font-size: 12px;
+  z-index: 60;
+}
+.ai-pin-rows {
+  min-height: 0;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.ai-pin-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 2px;
+  border-radius: 8px;
+}
+.ai-pin-row:hover {
+  background: var(--bg-hover);
+}
+.ai-pin-row.is-excluded .ai-pin-row-open {
+  opacity: 0.55;
+}
+.ai-pin-row-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.ai-pin-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ai-pin-row-comment,
+.ai-pin-row-place {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-pin-row-comment.is-empty {
+  color: var(--text-faint);
+}
+.ai-pin-row-place {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+/* A sent pin's work, live: one fixed line, so a row keeps its height whatever is said. */
+.ai-pin-live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 18px;
+  line-height: 18px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ai-pin-live > .ai-agent-dot {
+  flex: none;
+}
+.ai-pin-live-words {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-pin-live-time {
+  flex: none;
+  min-width: 44px;
+  text-align: end;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ai-pin-live.is-queued .ai-pin-live-words,
+.ai-pin-live.is-sent .ai-pin-live-words,
+.ai-pin-live.is-unreported .ai-pin-live-words {
+  color: var(--text-dim);
+}
+.ai-pin-live.is-unfinished .ai-pin-live-words {
+  color: var(--red);
+}
+.ai-pin-live.is-attention .ai-pin-live-words {
+  color: var(--orange);
+}
+
+.ai-pin-list-empty {
+  padding: 16px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+/* A pin's number, in the list, the popover and a message. */
+.ai-pin-number {
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px 10px 10px 3px;
+  background: var(--accent);
+  color: #fff;
+  font: 600 11px/20px var(--font);
+  text-align: center;
+}
+.ai-pin-number.is-done {
+  background: var(--green);
+}
+.ai-pin-number.is-attention {
+  background: var(--orange);
+}
+.ai-pin-number.is-queued,
+.ai-pin-number.is-sent,
+.ai-pin-number.is-unfinished,
+.ai-pin-number.is-unreported {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.ai-pin-thumb {
+  flex: none;
+  width: 40px;
+  height: 28px;
+  border-radius: 5px;
+  object-fit: cover;
+  background: var(--bg-panel-2);
+}
+
+/* How a pin stands. */
+.ai-pin-progress {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: var(--bg-panel-2);
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ai-pin-progress.is-working {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.ai-pin-progress.is-done {
+  background: var(--component-green-soft);
+  color: var(--green);
+}
+.ai-pin-progress.is-attention,
+.ai-pin-progress.is-detached {
+  background: color-mix(in srgb, var(--orange) 18%, transparent);
+  color: var(--orange);
+}
+.ai-pin-progress-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ai-pin-pulse 1.2s ease-in-out infinite;
+}
+
+/* A pin's popover: a small message box beside the pin. */
+.ai-pin-popover {
+  z-index: 70;
+  border-radius: 12px;
+  background: var(--bg-panel);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  font-size: 12px;
+}
+/* For the frame of a crop the popover steps aside, so the photograph shows the page and the pin. */
+.ai-pin-popover.is-capturing {
+  visibility: hidden;
+}
+.ai-pin-popover.is-dragging .ai-pin-popover-body {
+  background: var(--accent-soft);
+}
+.ai-pin-popover-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+}
+.ai-pin-popover-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-pin-popover-names {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ai-pin-popover-element,
+.ai-pin-popover-page {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-pin-popover-element {
+  font-weight: 600;
+}
+.ai-pin-popover-page {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.ai-pin-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--bg-input);
+}
+.ai-pin-composer .cm-editor {
+  max-height: 200px;
+}
+.ai-pin-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.ai-pin-tools-gap {
+  flex: 1;
+}
+.ai-pin-move,
+.ai-pin-reopen {
+  align-self: flex-start;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--bg-hover);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.ai-pin-move:hover,
+.ai-pin-reopen:hover {
+  background: var(--bg-active);
+}
+.ai-pin-sent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ai-pin-sent-actions {
+  display: flex;
+  gap: 8px;
+}
+.ai-pin-sent-comment {
+  max-height: 160px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A message of pins in the transcript. */
+.ai-pins-message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.ai-pins-message-title {
+  font-weight: 600;
+}
+.ai-pins-message-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ai-pins-message-pin {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+/* A pin's words and where it is: one column starting at the card's text edge, the same for every row. */
+.ai-pins-message-words {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+.ai-pins-message-open {
+  cursor: pointer;
+}
+button.ai-pins-message-open:hover:not(:disabled) .ai-pins-message-comment {
+  text-decoration: underline;
+  text-decoration-color: var(--text-faint);
+}
+/* The crop at the row's end (the start in a right-to-left interface), one size for every row, level with the words. */
+.ai-pins-message-thumb {
+  width: 48px;
+  height: 34px;
+  margin-top: 1px;
+}
+.ai-pins-message-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ai-pins-message-comment {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ai-pins-message-comment.is-empty {
+  color: var(--text-faint);
+}
+.ai-pins-message-place {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.ai-pins-message-status {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* How the pin stands sits under its words, so a long status never pushes the row past the bubble. */
+.ai-pins-message-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin-top: 2px;
+}
+.ai-pins-message-model {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* A pin's question, right under its badge: the words, each choice, and Reply. */
+.ai-pin-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--bg-input);
+}
+.ai-pin-ask-words {
+  overflow-wrap: anywhere;
+}
+.ai-pin-ask-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ai-pin-ask-choice,
+.ai-pin-ask-reply {
+  max-width: 100%;
+  min-height: 26px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.ai-pin-ask-choice {
+  background: var(--bg-active);
+  color: var(--text);
+}
+button.ai-pin-ask-choice:hover:not(:disabled) {
+  background: var(--bg-pressed);
+}
+.ai-pin-ask-choice.is-reply {
+  background: transparent;
+  color: var(--text-dim);
+}
+button.ai-pin-ask-choice:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The pin's model: quiet, beside the box's tools, as wide as the model's name. Only a name longer than the row's free
+   room is cut short. */
+.ai-pin-tools .ai-pin-model {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  height: 28px;
+  gap: 4px;
+  padding-inline: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.ai-pin-tools .ai-pin-model:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.ai-pins-message-pin,
+.ai-pins-message-list {
+  min-width: 0;
+}
+
+/* The pin's Save: the composer's primary action, blue at rest, on hover and on press (controls.css button.primary). */
+.ai-pin-save {
+  height: 28px;
+  margin-inline-start: 4px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font: inherit;
+  font-weight: 600;
+}
+.ai-pin-save:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* A pin's number in a row or a message darkens with the row it opens, as the canvas pin does. */
+button.ai-pin-row-open:hover:not(:disabled) .ai-pin-number.is-draft {
+  background: var(--accent-pressed);
+}
+button.ai-pins-message-open:hover:not(:disabled) {
+  background: transparent;
+}
+
+.ai-pin-progress.is-queued,
+.ai-pin-progress.is-unreported {
+  background: var(--bg-input);
+}
+.ai-pin-progress.is-unfinished {
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+  color: var(--red);
+}
+.ai-pin-progress.is-unsaved {
+  background: var(--accent-soft);
+  color: var(--accent);
+}

@@ -171,6 +171,8 @@ const metadataSamples: Readonly<Record<string, unknown>> = {
   'ai:prompt': { ...aiChat, text: 'Tighten the hero copy', attachments: [] },
   'ai:steer': { ...aiChat, text: 'Also fix the footer', attachments: [] },
   'ai:compact': aiChat,
+  'ai:pinsRead': { projectPath: '/site' },
+  'ai:pinsWrite': { projectPath: '/site', board: { version: 1, pins: [] }, images: [] },
   'ai:chatFork': aiChat,
   'ai:chatMove': { ...aiChat, section: `s${'1'.repeat(16)}` },
   'ai:sections': { projectPath: '/site', action: { kind: 'create', name: 'Launch' } },
@@ -183,6 +185,7 @@ const metadataSamples: Readonly<Record<string, unknown>> = {
   'ai:setOption': { ...aiChat, option: 'model', value: 'large' },
   'ai:remember': { projectPath: '/site', agent: 'claude', action: { kind: 'reset' } },
   'ai:setup': { projectPath: '/site', agent: 'claude', action: { kind: 'detect' } },
+  'ai:mcpAuth': { projectPath: '/site', request: { kind: 'list', freshness: 'cached' } },
   'ai:review': { ...aiChat, turn: `t${'1'.repeat(16)}`, path: 'src/pages/index.astro', action: { kind: 'keep' } },
   'style:selectorUsage': { projectPath: '/site' },
   'style:removeSelectors': {
@@ -410,6 +413,7 @@ const metadataSamples: Readonly<Record<string, unknown>> = {
     request: { action: 'start', id: '00000000-0000-4000-8000-000000000000' },
   },
   'publish:workerSetup': { projectPath: '/site', worker: { accountId: 'account', project: 'my-site' } },
+  'publish:netlifySite': { projectPath: '/site', site: { team: 'acme', name: 'my-site' } },
   'publish:repository': {
     projectPath: '/site',
     request: { action: 'list', account: 'owner' },
@@ -453,6 +457,22 @@ const metadataSamples: Readonly<Record<string, unknown>> = {
   'audit:measure': { projectPath: '/site', devUrl: 'http://localhost:4321', route: '/' },
   // The phone preview: the project and the mode its dev server restarts in (shared/ipc/devNetwork.ts).
   'dev:setNetwork': { projectPath: '/site', mode: 'network' },
+  // The Files panel (shared/ipc/fileExplorer.ts; its bad shapes are in fileExplorer.test.ts).
+  'files:list': { projectPath: '/site', path: 'src' },
+  'codeIntel:request': { projectPath: '/site', path: 'src/pages/index.astro', text: '<p></p>', query: { kind: 'hover', position: 1 } },
+  'files:read': { projectPath: '/site', path: '.env' },
+  'files:write': { projectPath: '/site', path: 'notes.txt', text: 'hello', byteOrderMark: false, base: 'c'.repeat(64) },
+  'files:create': { projectPath: '/site', parent: '', name: 'notes.txt', kind: 'file' },
+  'files:rename': { projectPath: '/site', path: 'notes.txt', name: 'readme.txt' },
+  'files:transfer': { projectPath: '/site', paths: ['notes.txt'], target: 'src', mode: 'move', collision: 'refuse' },
+  'files:trash': { projectPath: '/site', paths: ['notes.txt'] },
+  'files:import': { projectPath: '/site', sources: ['/Users/me/logo.svg'], target: 'public', collision: 'refuse' },
+  'design:session': { op: 'state' }, // Design mode (experimental): docs/design-mode/REMOVE.md
+  'files:reveal': { projectPath: '/site', path: '' },
+  'files:find': { projectPath: '/site', query: 'ci' },
+  'files:watch': { projectPath: '/site', directories: ['', 'src'] },
+  'files:guardClose': { unsaved: true },
+  'files:allowClose': { proceed: false },
   // The Astro copy of a plain website (shared/ipc/astroCopy.ts; its bad shapes are in astroCopyContract.test.ts).
   'project:checkAstroCopy': { sourcePath: '/sites/shop', parentPath: '/sites', name: 'shop-astro' },
   'project:readShadcnSettings': { projectPath: '/site' },

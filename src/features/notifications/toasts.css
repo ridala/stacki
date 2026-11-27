@@ -183,13 +183,23 @@
   }
 }
 
-.toast-recovery {
+.toast-recovery,
+.toast-copy {
   display: inline-block;
   margin-block: 6px 0;
   margin-inline: 0 8px;
   color: inherit;
   text-decoration: none;
   cursor: pointer;
+}
+.toast-copy {
+  display: inline-grid;
+}
+.toast-copy > span {
+  grid-area: 1 / 1;
+}
+.toast-copy > span[data-shown='false'] {
+  visibility: hidden;
 }
 .toast-message {
   white-space: pre-wrap;
