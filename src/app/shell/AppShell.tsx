@@ -30,7 +30,7 @@ import PagesPanel from '../../features/pages/PagesPanel';
 import { usePageBulkRemoveHost } from './pageBulkRemoveDesktop';
 import { ConnectSanity } from '../../features/cmsConnections/ConnectSanity';
 import PalettePanel from '../../features/palette/PalettePanel';
-import { requestBuildComponent } from '../../features/palette/componentBuildPrompt';
+import { requestBuildComponent } from '../../lib/agentTasks';
 import AddElementsPanel from '../../features/palette/AddElementsPanel';
 import { navigatorShown, useElementDragNavigator } from '../state/elementDragNavigator';
 import { useComponentRoleRules } from '../roles/componentRoleRules';

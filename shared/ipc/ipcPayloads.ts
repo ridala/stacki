@@ -1,8 +1,6 @@
 import { parseCodeIntelRequest } from './codeIntel';
 import { FILE_EXPLORER_PAYLOADS } from './fileExplorer';
 import { DESIGN_SESSION_PAYLOADS } from './designSession'; // Design mode (experimental): docs/design-mode/REMOVE.md
-import { parseProjectSetupApply, parseProjectSetupScan } from './projectSetup';
-import { parseShadcnSettingsChange, parseShadcnSettingsRequest } from './shadcnSettings';
 import { parseLocaleSet } from './localeChannel';
 import { parseMergeResolution } from './mergeResolution';
 import { parseAccountRequest } from './publishAccount';
@@ -64,8 +62,15 @@ import { parseAstroRemoteEdit, parseAstroRemoteRead } from '../properties/astroC
 import { parseStudioAuth } from './studioAuth';
 import { parseRepositoryRequest } from '../ipc/publishRepository';
 import { parseDevNetworkRequest } from './devNetwork';
-import { parseAstroCopyRequest } from './astroCopy';
-import { parseShadcnPresetRequest, parseStarterRequest } from './shadcnStarter';
+import {
+  parseAstroCopyRequest,
+  parseProjectSetupApply,
+  parseProjectSetupScan,
+  parseShadcnPresetRequest,
+  parseShadcnSettingsChange,
+  parseShadcnSettingsRequest,
+  parseStarterRequest,
+} from './astroCopy';
 import { parseCanvasCreate, defaultsCanvasFile } from '../properties/defaultsCanvas';
 import { parseDiscoveryRequest } from '../properties/publishDiscovery';
 import { parseWorkerSetupRequest } from '../properties/publishWorkerSetup';

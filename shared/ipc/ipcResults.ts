@@ -1,5 +1,3 @@
-import type { ProjectSetupReport } from './projectSetup';
-import type { ShadcnSettingsReply } from './shadcnSettings';
 import type { MessageRef } from '../core/i18n/messageReference';
 import type { BreakpointSyncApplied, BreakpointSyncScan, BreakpointUsage } from '../properties/breakpointSyncPlan';
 import type { MicrophoneReport } from '../properties/microphone';
@@ -17,8 +15,7 @@ import type { AppNetResponse } from '../properties/appNet';
 import type { AccountState } from './publishAccount';
 import type { PreviewHealth } from './previewHealth';
 import type { DevNetworkReply, DevNetworkState } from './devNetwork';
-import type { AstroCopyCheck, AstroCopyReply, SiteFolderChoice } from './astroCopy';
-import type { ShadcnPresetReply } from './shadcnStarter';
+import type { AstroCopyCheck, AstroCopyReply, ProjectSetupReport, ShadcnPresetReply, ShadcnSettingsReply, SiteFolderChoice } from './astroCopy';
 import type { FolderOpenChoice } from './folderOpen';
 import type { CmsCheckResult, CmsConnectionList, CmsSaveResult, SanityLoginState } from '../properties/cmsConnections';
 import type { ConstantEditReply, ConstantListingReply } from '../properties/cmsConstants';

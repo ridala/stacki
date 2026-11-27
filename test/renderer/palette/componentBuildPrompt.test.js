@@ -12,11 +12,10 @@ fs.mkdirSync(path.dirname(output), { recursive: true });
 esbuild.buildSync({
   stdin: {
     contents: [
-      "export * from './src/features/palette/componentBuildPrompt';",
+      "export * from './src/lib/agentTasks';",
       "export { aiAgentTaskHandler } from './src/features/ai/aiAgentTask';",
       "export { resetAgentChoiceStore } from './src/features/ai/agentChoiceStore';",
       "export { aiState, draftFromText, draftText, loadAiProject, openChat, resetAiStore, setDraft } from './src/features/ai/aiStore';",
-      "export { registerAgentTaskHandler } from './src/lib/agentTasks';",
       "export { terminalAgentHandler } from './src/features/terminal/terminalAgent';",
       "export { ENGLISH_TRANSLATE } from './shared/properties/i18n/englishTranslator';",
       "export { AGENT_TASK_LIMITS } from './shared/properties/agentTask';",

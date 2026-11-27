@@ -263,6 +263,8 @@ const ALLOWED: Readonly<Record<string, Readonly<Record<string, Allowed>>>> = {
       count: 3,
       reason: 'creates the launcher package.json and pnpm-workspace.yaml exclusively in private staging, then pins the manager in the generated manifest',
     },
+  },
+  'electron/project/stagedStarter.ts': {
     renameSync: {
       count: 2,
       reason: 'moves staged entries into an exclusively created project directory and moves those same entries back on failure',
