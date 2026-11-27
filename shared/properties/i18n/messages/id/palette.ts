@@ -11,6 +11,12 @@ export const messages = {
   'palette.apps.empty.title': 'Belum ada aplikasi',
   'palette.apps.loading': 'Memuat aplikasi…',
   'palette.apps.marketplace': 'Marketplace', // same
+  'palette.components.buildWithAI': 'Buat komponen dengan AI',
+  'palette.components.buildWithAI.copyTask': 'Salin tugas',
+  'palette.components.buildWithAI.description':
+    'Tugas ini meminta agen pemrograman memeriksa apakah proyek mendukung React 19 dan meminta izin sebelum mengubah dependensi.',
+  'palette.components.buildWithAI.draftReady': 'Draf siap di chat AI. Tinjau sebelum mengirim.',
+  'palette.components.buildWithAI.openDraft': 'Buka draf AI',
   'palette.create.folderRoot': '{folder} (root)', // same
   'palette.create.taken': '{file} sudah ada.',
   'palette.create.hint': '{label} menjadi {tag}, disimpan sebagai {file}',

@@ -35,7 +35,12 @@ interface InvokeChannels {
   readonly takeOpenedFolders: 'project:takeOpenedFolders';
   readonly designSession: 'design:session'; // Design mode (experimental): docs/design-mode/REMOVE.md
   readonly createStarter: 'project:createStarter';
+  readonly readShadcnSettings: 'project:readShadcnSettings';
+  readonly changeShadcnSetting: 'project:changeShadcnSetting';
+  readonly inspectShadcnPreset: 'project:inspectShadcnPreset';
   readonly scanProject: 'project:scan';
+  readonly scanProjectSetup: 'project:setupScan';
+  readonly applyProjectSetup: 'project:setupApply';
   readonly listProjectClasses: 'project:classes';
   readonly watchProject: 'watch:start';
   readonly listAssets: 'assets:list';

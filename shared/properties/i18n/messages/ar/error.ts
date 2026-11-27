@@ -95,6 +95,7 @@ export const messages = {
   'error.pageTemplate.keyUnreadable': 'تعذّر على Stacki قراءة مفتاح هذا الاتصال. اربط Sanity مرة أخرى.',
   'error.pages.devServerStatus': 'أعاد خادم التطوير {status}',
   'error.project.chooseInside': 'اختر شيئًا داخل المشروع، وليس المشروع نفسه.',
+  'error.project.creationBusy': 'جارٍ إنشاء موقع بالفعل. انتظر حتى ينتهي.',
   'error.project.gone': 'لم يعد ذلك موجودًا.',
   'error.project.managerMissing': '‏{manager} غير مثبّت. ثبّته أو اختر npm.',
   'error.project.npmMissing': 'تعذّر العثور على npm. ثبّت Node.js (الذي يتضمن npm) ثم حاول مرة أخرى.',

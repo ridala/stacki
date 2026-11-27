@@ -10,11 +10,11 @@
 // lays itself out for its width). The expand toggle in the chat's header and Escape (outside a text field) put
 // it back in the left panel. Whether it is expanded lasts for the app's session; it opens in the side panel.
 import { useTranslate } from '../../lib/i18n/useTranslate';
-import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useSyncExternalStore, type ReactNode } from 'react';
 import { assert } from '../../../shared/core/assert';
 import type { WireMergeClash } from '../../../shared/ipc/ipcWire';
 import type { MergeResolution } from '../../../shared/ipc/mergeResolution';
-import { can } from '../../../shared/properties/projectRoles';
+import { can, type RoleView } from '../../../shared/properties/projectRoles';
 import { aiAgentTaskHandler, AI_PANEL_HANDLER_PRIORITY } from '../../features/ai/aiAgentTask';
 import { mentionComponentsOf, setMentionComponents } from '../../features/ai/mentions/componentMentions';
 import { useAddToChat } from './aiAddToChat';
@@ -28,6 +28,7 @@ import { openExternalURL } from '../../ipc/appBridge';
 import { registerAgentTaskHandler } from '../../lib/agentTasks';
 import { canPanel } from '../../lib/roleAccess';
 import { useCurrentRole } from '../../lib/useCurrentRole';
+import { currentRole } from '../../lib/currentRole';
 import { useAiPanelWidth } from './aiPanelWidth';
 import { useAiScreenshotSource } from './aiScreenshotSource';
 import DockableWindow, { type WindowMode } from '../../ui/DockableWindow';
@@ -74,7 +75,10 @@ function useAiWindow(): AiWindowState {
 
 /** Whether the role may use the panel: it sees it (`panel:ai`) and may edit code, which agents do. */
 export function useAiAvailable(): boolean {
-  const role = useCurrentRole();
+  return aiAvailableFor(useCurrentRole());
+}
+
+function aiAvailableFor(role: RoleView): boolean {
   return canPanel(role, 'ai') && can(role, 'code:edit');
 }
 
@@ -191,7 +195,10 @@ function openAiPanel(setLeftTab: ShellView['setLeftTab']): void {
 
 /** Mounted with the shell: the hand-off handler, the floating window and the merge editor. */
 export function AiHost({ app }: { readonly app: ShellView }) {
-  const available = useAiAvailable();
+  const role = useCurrentRole();
+  const roleId = role.id;
+  const available = aiAvailableFor(role);
+  const componentCreationAllowed = can(role, 'component:create');
   const state = useAiWindow();
   const changeMode = useModeChange(app);
   useAiScreenshotSource();
@@ -213,19 +220,35 @@ export function AiHost({ app }: { readonly app: ShellView }) {
     setMentionIndexSource(mentionIndexSource({ projectPath, platform: window.avb.platform, pages: scannedPages, classNames: projectClasses }));
     return () => setMentionIndexSource(undefined);
   }, [projectPath, scannedPages, projectClasses]);
-  useEffect(
-    () =>
-      registerAgentTaskHandler(
-        'ai-panel',
-        AI_PANEL_HANDLER_PRIORITY,
-        aiAgentTaskHandler({
-          projectPath: () => projectPath,
-          available: () => available,
-          openPanel: () => openAiPanel(setLeftTab),
-        }),
-      ),
-    [available, projectPath, setLeftTab],
-  );
+  useLayoutEffect(() => {
+    // Invalidate callbacks already held by a pending handoff as soon as the host changes.
+    let active = true;
+    const availableInScope = () => {
+      if (!active || !available) {
+        return false;
+      }
+      const latest = currentRole();
+      return latest.id === roleId && aiAvailableFor(latest) && can(latest, 'component:create') === componentCreationAllowed;
+    };
+    const unregister = registerAgentTaskHandler(
+      'ai-panel',
+      AI_PANEL_HANDLER_PRIORITY,
+      aiAgentTaskHandler({
+        projectPath: () => (active ? projectPath : undefined),
+        available: availableInScope,
+        openPanel: () => {
+          if (!availableInScope()) {
+            return;
+          }
+          openAiPanel(setLeftTab);
+        },
+      }),
+    );
+    return () => {
+      active = false;
+      unregister();
+    };
+  }, [available, componentCreationAllowed, projectPath, roleId, setLeftTab]);
   return (
     <>
       {available && state.mode === 'floating' && state.floatingOpen && <AiWindow app={app} mode="floating" onModeChange={changeMode} />}

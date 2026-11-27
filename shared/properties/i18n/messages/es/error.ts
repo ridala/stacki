@@ -85,6 +85,7 @@ export const messages = {
   'error.pageTemplate.keyUnreadable': 'Stacki no pudo leer la clave de esta conexión. Vuelve a conectar Sanity.',
   'error.pages.devServerStatus': 'El servidor de desarrollo devolvió {status}',
   'error.project.chooseInside': 'Elige algo dentro del proyecto, no el proyecto en sí.',
+  'error.project.creationBusy': 'Ya se está creando un sitio. Espera a que termine.',
   'error.project.gone': 'Eso ya no está ahí.',
   'error.project.managerMissing': '{manager} no está instalado. Instálalo o elige npm.',
   'error.project.npmMissing': 'No se encontró npm. Instala Node.js (que incluye npm) y vuelve a intentarlo.',

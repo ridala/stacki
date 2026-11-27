@@ -7,6 +7,7 @@ import type { CreatePackageManager } from '../../../shared/properties/packageMan
 import { cleanError } from '../../lib/cleanError';
 import { parseAstroCopyCheck, parseAstroCopyReply, parseSiteFolderChoice, type AstroCopyRequest } from '../../../shared/ipc/astroCopy';
 import { parseFolderOpenChoice, parseFolderOpenChoices, type FolderOpenChoice } from '../../../shared/ipc/folderOpen';
+import { parseShadcnPresetReply, type StarterRequest } from '../../../shared/ipc/shadcnStarter';
 
 export type RecentProject = IpcResults['recents:list'][number];
 export type ProjectDialog = IpcResults['project:openDialog'];
@@ -118,14 +119,13 @@ export function chooseStarterParent() {
   return welcomeRequest(parseParentDialog, () => window.avb.parentDialog(payload));
 }
 
-export function createStarterProject(parentPath: string, name: string, packageManager: CreatePackageManager) {
-  const payload = parseIpcPayload('project:createStarter', {
-    starter: 'lumos',
-    parentPath,
-    name,
-    packageManager,
-  });
-  return welcomeRequest(parseStarterResult, () => window.avb.createStarter(payload));
+export function createStarterProject(request: StarterRequest) {
+  return welcomeRequest(parseStarterResult, () => window.avb.createStarter(parseIpcPayload('project:createStarter', request)));
+}
+
+export function inspectShadcnPreset(preset: string) {
+  const payload = parseIpcPayload('project:inspectShadcnPreset', { preset });
+  return welcomeRequest(parseShadcnPresetReply, () => window.avb.inspectShadcnPreset(payload));
 }
 
 export function createAstroProject(options: AstroProjectOptions) {

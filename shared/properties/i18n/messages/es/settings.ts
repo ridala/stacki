@@ -669,6 +669,33 @@ export const messages = {
   'settings.folders.addTip': 'Una carpeta dentro de {roots}',
   'settings.folders.remove': 'Quitar {folder} de {label}',
   'settings.folders.none': 'Sin carpetas: este panel no muestra nada.',
+  'settings.folders.setup.approval':
+    'Selecciona los ajustes de carpeta que quieras guardar. Determinan qué archivos muestra Stacki. Cada fila muestra qué cambia si guardas solo esa opción.',
+  'settings.folders.setup.check': 'Comprobar la configuración de carpetas',
+  'settings.folders.setup.continue': 'Continuar al editor',
+  'settings.folders.setup.countChange': 'De {before} a {after}',
+  'settings.folders.setup.desktop': 'Desktop', // same
+  'settings.folders.setup.editors':
+    'Desktop y Studio buscan archivos en sitios distintos. Los recuentos corresponden a los archivos encontrados en el proyecto.',
+  'settings.folders.setup.noSuggestions': 'No se sugieren cambios en las carpetas.',
+  'settings.folders.setup.pageCounts': 'Páginas en Desktop: {desktop}. Páginas en Studio: {studio}.',
+  'settings.folders.setup.permission': 'Elige la carpeta del proyecto abierto en el selector de carpetas para que Stacki pueda revisarla.',
+  'settings.folders.setup.partial': 'Se omitieron algunos archivos. Hace falta una revisión completa para sugerir cambios.',
+  'settings.folders.setup.restartPreview': 'Reinicia la vista previa para usar las carpetas guardadas en las vistas previas de componentes.',
+  'settings.folders.setup.save': 'Guardar carpetas seleccionadas',
+  'settings.folders.setup.saveError': 'No se pudieron guardar los ajustes de carpeta. {message}',
+  'settings.folders.setup.saved': 'Se guardaron los ajustes de carpeta.',
+  'settings.folders.setup.scanError': 'No se pudo comprobar la carpeta. {message}',
+  'settings.folders.setup.scanning': 'Comprobando los archivos del proyecto…',
+  'settings.folders.setup.skip': 'Omitir configuración',
+  'settings.folders.setup.skipped': 'Se omitió la configuración de carpetas.',
+  'settings.folders.setup.stale': 'El proyecto cambió durante la revisión. Consulta el informe actualizado antes de guardar.',
+  'settings.folders.setup.studio': 'Studio', // same
+  'settings.folders.setup.suggestions': 'Carpetas sugeridas',
+  'settings.folders.setup.title': 'Revisar la configuración',
+  'settings.folders.setup.unavailable': 'No se pudieron leer los ajustes de carpeta existentes. No se puede guardar desde esta revisión.',
+  'settings.folders.setup.unverifiedPages':
+    'Stacki no pudo verificar la carpeta de páginas en la configuración de Astro. El recuento de Desktop se estima con la ruta predeterminada.',
   'settings.folders.cms.loading': 'Cargando fuentes del CMS…',
   'settings.folders.cms.collections': 'Colecciones del CMS',
   'settings.folders.cms.collectionsNone': 'La configuración de contenido no declara colecciones.',

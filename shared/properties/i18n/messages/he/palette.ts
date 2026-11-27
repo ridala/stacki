@@ -11,6 +11,11 @@ export const messages = {
   'palette.apps.empty.title': 'עדיין אין אפליקציות',
   'palette.apps.loading': 'טוען אפליקציות…',
   'palette.apps.marketplace': 'Marketplace', // same
+  'palette.components.buildWithAI': 'בניית רכיב עם AI',
+  'palette.components.buildWithAI.copyTask': 'העתקת משימה',
+  'palette.components.buildWithAI.description': 'המשימה מבקשת מסוכן תכנות לבדוק אם הפרויקט תומך ב־React 19 ולבקש את אישורך לפני שינוי יחסי התלות.',
+  'palette.components.buildWithAI.draftReady': 'הטיוטה מוכנה בצ׳אט ה־AI. כדאי לבדוק אותה לפני השליחה.',
+  'palette.components.buildWithAI.openDraft': 'פתיחת טיוטה בצ׳אט',
   'palette.create.folderRoot': '{folder} (שורש)',
   'palette.create.taken': '{file} כבר קיים.',
   'palette.create.hint': '{label} הופך ל־{tag}, ונשמר כ־{file}',

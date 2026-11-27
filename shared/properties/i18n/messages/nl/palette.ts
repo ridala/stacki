@@ -11,6 +11,12 @@ export const messages = {
   'palette.apps.empty.title': 'Nog geen apps',
   'palette.apps.loading': 'Apps laden…',
   'palette.apps.marketplace': 'Marketplace', // same
+  'palette.components.buildWithAI': 'Component bouwen met AI',
+  'palette.components.buildWithAI.copyTask': 'Taak kopiëren',
+  'palette.components.buildWithAI.description':
+    'De taak vraagt een programmeeragent om te controleren of dit project React 19 ondersteunt en toestemming te vragen voordat afhankelijkheden worden gewijzigd.',
+  'palette.components.buildWithAI.draftReady': 'Het concept staat klaar in de AI-chat. Bekijk het voordat je het verstuurt.',
+  'palette.components.buildWithAI.openDraft': 'AI-concept openen',
   'palette.create.folderRoot': '{folder} (root)', // same
   'palette.create.taken': '{file} bestaat al.',
   'palette.create.hint': '{label} wordt {tag}, opgeslagen als {file}',

@@ -84,6 +84,7 @@ export const messages = {
   'error.pageTemplate.keyUnreadable': 'Stacki bu bağlantının anahtarını okuyamadı. Sanity’yi yeniden bağlayın.',
   'error.pages.devServerStatus': 'Geliştirme sunucusu {status} döndürdü',
   'error.project.chooseInside': 'Projenin kendisini değil, proje içindeki bir şeyi seçin.',
+  'error.project.creationBusy': 'Zaten bir site oluşturuluyor. Tamamlanmasını bekleyin.',
   'error.project.gone': 'Bu artık yok.',
   'error.project.managerMissing': '{manager} yüklü değil. Yükleyin veya npm’i seçin.',
   'error.project.npmMissing': 'npm bulunamadı. Node.js’i (npm dahildir) yükleyip yeniden deneyin.',

@@ -84,6 +84,7 @@ export const messages = {
   'error.pageTemplate.keyUnreadable': 'Stackiはこの接続のキーを読み取れませんでした。Sanityをもう一度接続してください。',
   'error.pages.devServerStatus': '開発サーバーが{status}を返しました',
   'error.project.chooseInside': 'プロジェクト自体ではなく、プロジェクト内の項目を選択してください。',
+  'error.project.creationBusy': 'サイトの作成が進行中です。完了するまでお待ちください。',
   'error.project.gone': 'それはもう存在しません。',
   'error.project.managerMissing': '{manager} がインストールされていません。インストールするか、npm を選択してください。',
   'error.project.npmMissing': 'npm が見つかりません。Node.js（npm を含む）をインストールしてから、もう一度お試しください。',

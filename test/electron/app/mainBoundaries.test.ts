@@ -141,7 +141,9 @@ test('the complete channel inventory matches real main and terminal registration
   // The code editor's intelligence adds one (codeIntel:request; shared/ipc/codeIntel.ts), 344 in all.
   // Signing in to MCP servers adds one (ai:mcpAuth; shared/properties/mcp.ts), 345 in all.
   // The Files panel's git marks add one (files:gitStatus; shared/ipc/fileExplorer.ts), 346 in all.
-  assert.equal(harness.handlers.size, 346); // Design mode (experimental): docs/design-mode/REMOVE.md
+  // The shadcn wizard adds one (project:inspectShadcnPreset) and shadcn project settings add two, 349 in all.
+  // Existing Astro setup adds a read-only scan and a witnessed apply (project:setupScan and :setupApply), 351 in all.
+  assert.equal(harness.handlers.size, 351); // Design mode (experimental): docs/design-mode/REMOVE.md
   assert.equal(terminalChannels.length, 4);
   assert.deepEqual([...Object.keys(IPC_PAYLOADS)].sort(), [...harness.handlers.keys(), ...terminalChannels].sort());
   // One-way `send` listeners bypass the invoke registrar, so each must name
@@ -158,6 +160,22 @@ test('the complete channel inventory matches real main and terminal registration
     ['ai:ack'],
   );
   assert.match(ai, /parseSendPayload\('ai:ack'/, 'ai:ack is parsed');
+});
+
+test('setup refuses IPC from outside the main frame even when its path matches the project recorded by scan', async (context) => {
+  const harness = fixture();
+  context.after(harness.dispose);
+  await harness.invoke('project:scan', harness.root);
+
+  for (const request of [{ projectPath: harness.root }, { projectPath: harness.root, permission: 'confirm-open' }]) {
+    const result = toRecord(await harness.invoke('project:setupScan', request));
+    assert.equal(result?.['ok'], false);
+    assert.equal(toRecord(result?.['error'])?.['code'], 'unauthorized');
+  }
+  const result = toRecord(await harness.invoke('project:setupApply', { projectPath: harness.root, revision: 'a'.repeat(64), kinds: ['components'] }));
+  assert.equal(result?.['ok'], false);
+  assert.equal(toRecord(result?.['error'])?.['code'], 'unauthorized');
+  assert.equal(fs.existsSync(path.join(harness.root, '.stacki', 'folders.json')), false);
 });
 
 test('malformed writes fail before altering disk; valid writes still work', async (context) => {

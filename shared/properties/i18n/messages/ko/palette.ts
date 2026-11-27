@@ -11,6 +11,12 @@ export const messages = {
   'palette.apps.empty.title': '아직 앱이 없습니다',
   'palette.apps.loading': '앱 불러오는 중…',
   'palette.apps.marketplace': '마켓플레이스',
+  'palette.components.buildWithAI': 'AI로 컴포넌트 만들기',
+  'palette.components.buildWithAI.copyTask': '작업 복사',
+  'palette.components.buildWithAI.description':
+    '코딩 에이전트에게 이 프로젝트가 React 19를 지원하는지 확인하고, 종속성을 변경하기 전에 사용자에게 묻도록 요청합니다.',
+  'palette.components.buildWithAI.draftReady': 'AI 채팅에 초안이 준비되었습니다. 보내기 전에 검토하세요.',
+  'palette.components.buildWithAI.openDraft': 'AI 초안 열기',
   'palette.create.folderRoot': '{folder}(루트)',
   'palette.create.taken': '{file}이(가) 이미 있습니다.',
   'palette.create.hint': '{label}은(는) {tag}이(가) 되며 {file}(으)로 저장됩니다',

@@ -11,6 +11,12 @@ export const messages = {
   'palette.apps.empty.title': 'Приложений пока нет',
   'palette.apps.loading': 'Загрузка приложений…',
   'palette.apps.marketplace': 'Маркетплейс',
+  'palette.components.buildWithAI': 'Создать компонент с помощью ИИ',
+  'palette.components.buildWithAI.copyTask': 'Скопировать задачу',
+  'palette.components.buildWithAI.description':
+    'Задача просит агента проверить, поддерживает ли проект React 19, и запросить ваше согласие перед изменением зависимостей.',
+  'palette.components.buildWithAI.draftReady': 'Черновик готов в чате с ИИ. Проверьте его перед отправкой.',
+  'palette.components.buildWithAI.openDraft': 'Открыть черновик в чате',
   'palette.create.folderRoot': '{folder} (корень)',
   'palette.create.taken': '{file} уже существует.',
   'palette.create.hint': '{label} станет {tag} и сохранится как {file}',

@@ -9,26 +9,60 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { writeNewProjectDefaults } from '../project/newProjectDefaults';
 import { createStarter, newSiteDirectory, runCreateCommand, startSiteHistory, STARTERS } from '../project/starter';
+import { createHeroUIStarter } from '../project/herouiStarter';
+import { createShadcnStarter, inspectShadcnPreset } from '../project/shadcnStarter';
 import { ensureToolPath, run } from '../lib/nodeTools';
 import { isAstroProject } from '../project/projectFiles';
 import { detectPackageManager, installArguments } from '../project/packageManager';
 import { packageManagerLabel, type PackageManager } from '../../shared/properties/packageManager';
+import type { IsSetupFrame, ProjectSetupAccess } from './projectSetupHandlers';
 import type { MainHost } from './mainHost';
 import { translateMain } from '../lib/mainLocale';
 import { folderOpenChoice, siteFolderChoice } from '../project/folderOpen';
 import { checkAstroCopyTarget, createAstroCopy } from '../project/astroCopyWrite';
 import { ASTRO_COPY_LIMITS, type AstroCopyInstall, type AstroCopyReply, type SiteFolderChoice } from '../../shared/ipc/astroCopy';
 import { err, ok } from '../../shared/core/result';
+import type { IpcPayloads } from '../../shared/ipc/ipcPayloads';
+import type { IpcResults } from '../../shared/ipc/ipcResults';
 
-export function registerProjectHandlers(host: Pick<MainHost, 'ipcMain' | 'send' | 'showOpenDialog'>): void {
-  registerProjectOpenDialogHandlers(host);
-  registerProjectCreateAstroHandlers(host);
-  registerProjectCreateStarterHandlers(host);
-  registerAstroCopyHandlers(host);
+type CreationChannel = 'project:createAstro' | 'project:createStarter' | 'project:createAstroCopy';
+type RegisterCreation = <Channel extends CreationChannel>(channel: Channel, create: (request: IpcPayloads[Channel]) => Promise<IpcResults[Channel]>) => void;
+
+export function registerProjectHandlers(
+  host: Pick<MainHost, 'ipcMain' | 'send' | 'showOpenDialog'>,
+  setup: ProjectSetupAccess,
+  isSetupFrame: IsSetupFrame,
+): void {
+  // Every creation wizard reads the same log and progress channels. Refuse concurrent runs
+  // before they can emit output or touch the chosen folder.
+  let creating = false;
+  const registerCreation: RegisterCreation = (channel, create) => {
+    host.ipcMain.handle(channel, async (_event, request) => {
+      if (creating) {
+        throw new Error(translateMain('error.project.creationBusy'));
+      }
+      creating = true;
+      try {
+        return await create(request);
+      } finally {
+        creating = false;
+        host.send('progress', PROGRESS_CLEARED);
+      }
+    });
+  };
+  registerProjectOpenDialogHandlers(host, setup, isSetupFrame);
+  registerProjectCreateAstroHandlers(host, registerCreation);
+  registerProjectCreateStarterHandlers(host, registerCreation);
+  registerAstroCopyHandlers(host, setup, isSetupFrame, registerCreation);
 }
 
-function registerProjectOpenDialogHandlers({ ipcMain, showOpenDialog }: Pick<MainHost, 'ipcMain' | 'showOpenDialog'>): void {
-  ipcMain.handle('project:openDialog', async () => {
+function registerProjectOpenDialogHandlers(
+  { ipcMain, showOpenDialog }: Pick<MainHost, 'ipcMain' | 'showOpenDialog'>,
+  setup: ProjectSetupAccess,
+  isSetupFrame: IsSetupFrame,
+): void {
+  ipcMain.handle('project:openDialog', async (event) => {
+    const selection = isSetupFrame(event) ? setup.beginPicker() : undefined;
     const result = await showOpenDialog({
       title: translateMain('dialog.open.project.title'),
       properties: ['openDirectory'],
@@ -44,18 +78,24 @@ function registerProjectOpenDialogHandlers({ ipcMain, showOpenDialog }: Pick<Mai
         error: 'That folder does not look like an Astro project ' + '(no astro dependency or astro.config found).',
       };
     }
+    if (selection !== undefined && isSetupFrame(event)) {
+      setup.acceptPicker(selection, directory);
+    }
     return { canceled: false as const, projectPath: directory };
   });
 }
 
-function registerProjectCreateAstroHandlers({ ipcMain, send, showOpenDialog }: Pick<MainHost, 'ipcMain' | 'send' | 'showOpenDialog'>): void {
+function registerProjectCreateAstroHandlers(
+  { ipcMain, send, showOpenDialog }: Pick<MainHost, 'ipcMain' | 'send' | 'showOpenDialog'>,
+  registerCreation: RegisterCreation,
+): void {
   // Runs the real `npm create astro@latest`, answering the questions the CLI
   // would ask interactively with the choices collected in the app's wizard.
   // Output is streamed to the renderer so the user sees the same progress the
   // terminal would show. The wizard names the site, so its folder is made here,
   // empty, and create-astro runs in it with "." as the target rather than
   // guessing a name.
-  ipcMain.handle('project:createAstro', async (_event, options) => {
+  registerCreation('project:createAstro', async (options) => {
     const { parentPath, name, template = 'basics', install = true, git = true, ai = false, packageManager = 'npm' } = options || {};
     const directory = newSiteDirectory(parentPath, name);
     ensureToolPath(); // npm is a Node shim — same PATH problem as astro
@@ -103,19 +143,31 @@ function registerProjectCreateAstroHandlers({ ipcMain, send, showOpenDialog }: P
   });
 }
 
-function registerProjectCreateStarterHandlers({ ipcMain, send }: Pick<MainHost, 'ipcMain' | 'send'>): void {
-  // Starting from a starter. The scaffolder, the first commit and the package's
-  // name are in ./starter.js; what is here is the install that follows and the
-  // log the wizard reads.
-  ipcMain.handle('project:createStarter', async (_event, { starter = 'lumos', parentPath, name, packageManager = 'npm' }) => {
+function registerProjectCreateStarterHandlers({ ipcMain, send }: Pick<MainHost, 'ipcMain' | 'send'>, registerCreation: RegisterCreation): void {
+  ipcMain.handle('project:inspectShadcnPreset', (_event, { preset }) => {
+    ensureToolPath();
+    return inspectShadcnPreset(preset);
+  });
+  // The staged generators finish installation and history before they publish the
+  // project. Lumos installs and starts its history in the resulting folder.
+  registerCreation('project:createStarter', async (request) => {
     ensureToolPath(); // npm and git are both on the PATH the Dock does not have
+    const onLog = (text: string): void => send('create:log', text);
+    if (request.starter === 'heroui') {
+      return { ok: true, ...(await createHeroUIStarter(request, onLog)) };
+    }
+    if (request.starter === 'shadcn') {
+      send('progress', { message: 'Creating the shadcn site…' });
+      return { ok: true, ...(await createShadcnStarter(request, onLog)) };
+    }
+    const { starter = 'lumos', parentPath, name, packageManager = 'npm' } = request;
     await requirePackageManager(packageManager);
     const result = await createStarter({
       starter,
       parentPath,
       name,
       manager: packageManager,
-      onLog: (text) => send('create:log', text),
+      onLog,
     });
     const label = STARTERS[starter]?.label ?? starter;
     await finishNewSite({ send }, result.projectPath, {
@@ -128,10 +180,16 @@ function registerProjectCreateStarterHandlers({ ipcMain, send }: Pick<MainHost, 
   });
 }
 
-function registerAstroCopyHandlers({ ipcMain, send, showOpenDialog }: Pick<MainHost, 'ipcMain' | 'send' | 'showOpenDialog'>): void {
+function registerAstroCopyHandlers(
+  { ipcMain, send, showOpenDialog }: Pick<MainHost, 'ipcMain' | 'send' | 'showOpenDialog'>,
+  setup: ProjectSetupAccess,
+  isSetupFrame: IsSetupFrame,
+  registerCreation: RegisterCreation,
+): void {
   // The Welcome screen's "Open from folder": an Astro project opens, a plain website is offered an
   // Astro copy (shared/ipc/astroCopy.ts), and anything else is said to be neither.
-  ipcMain.handle('project:openSiteDialog', async (): Promise<SiteFolderChoice> => {
+  ipcMain.handle('project:openSiteDialog', async (event): Promise<SiteFolderChoice> => {
+    const selection = isSetupFrame(event) ? setup.beginPicker() : undefined;
     const result = await showOpenDialog({
       title: translateMain('dialog.open.project.title'),
       properties: ['openDirectory'],
@@ -140,7 +198,11 @@ function registerAstroCopyHandlers({ ipcMain, send, showOpenDialog }: Pick<MainH
     if (result.canceled || directory === undefined) {
       return { kind: 'canceled' };
     }
-    return siteFolderChoice(path.resolve(directory));
+    const choice = siteFolderChoice(path.resolve(directory));
+    if (choice.kind === 'astro' && selection !== undefined && isSetupFrame(event)) {
+      setup.acceptPicker(selection, choice.projectPath);
+    }
+    return choice;
   });
   // A folder dropped on the window: the renderer names it from the drag, and main decides what is there
   // (electron/project/folderOpen.ts) before it is opened, copied or refused like the dialog's choice.
@@ -149,7 +211,7 @@ function registerAstroCopyHandlers({ ipcMain, send, showOpenDialog }: Pick<MainH
   // The copy, then the steps every new site gets: Stacki's defaults, the install and a first commit.
   // A manager that is missing fails before any folder exists; a failed install keeps the finished copy
   // (opening it installs again) and says so.
-  ipcMain.handle('project:createAstroCopy', async (_event, input): Promise<AstroCopyReply> => {
+  registerCreation('project:createAstroCopy', async (input): Promise<AstroCopyReply> => {
     const request = normalizedRequest(input);
     ensureToolPath(); // npm and git are both on the PATH the Dock does not have
     const manager = detectPackageManager(request.sourcePath);
@@ -168,7 +230,6 @@ function registerAstroCopyHandlers({ ipcMain, send, showOpenDialog }: Pick<MainH
     try {
       await finishNewSite({ send }, projectPath, { install: true, manager, history: true, label: path.basename(request.sourcePath) });
     } catch (error: unknown) {
-      send('progress', PROGRESS_CLEARED);
       install = { kind: 'failed', detail: error instanceof Error ? error.message : String(error) };
     }
     return ok({
@@ -256,7 +317,6 @@ async function finishNewSite(
       await startSiteHistory(directory, options.label, onLog);
     }
   }
-  send('progress', PROGRESS_CLEARED);
 }
 
 // Clears the progress line: no message (src/ipc/appBridge.ts, onAppProgress). IPC is

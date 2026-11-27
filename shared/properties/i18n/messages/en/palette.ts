@@ -11,6 +11,12 @@ export const messages = {
   'palette.apps.empty.title': 'No apps yet',
   'palette.apps.loading': 'Loading apps…',
   'palette.apps.marketplace': 'Marketplace',
+  'palette.components.buildWithAI': 'Build a component with AI',
+  'palette.components.buildWithAI.copyTask': 'Copy task',
+  'palette.components.buildWithAI.description':
+    'The task asks a coding agent to check whether this project supports React 19 and to ask you before changing dependencies.',
+  'palette.components.buildWithAI.draftReady': 'Draft ready in AI chat. Review it before sending.',
+  'palette.components.buildWithAI.openDraft': 'Open AI draft',
   'palette.create.folderRoot': '{folder} (root)',
   'palette.create.taken': '{file} already exists.',
   'palette.create.hint': '{label} becomes {tag}, saved as {file}',

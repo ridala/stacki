@@ -147,8 +147,9 @@ function fakeMain(over = {}) {
     aiChats: record('aiChats', () => ({ chats: [...chats], sections: over.sections ?? [] })),
     aiDiff: record('aiDiff', over.diff ?? { ok: true, value: { oldText: 'one\ntwo\n', newText: 'one\n2\n' } }),
     aiChatCreate: record('aiChatCreate', () => {
-      chats.push(summary);
-      return { ok: true, value: summary };
+      const created = over.createChat?.(chats.length) ?? summary;
+      chats.push(created);
+      return { ok: true, value: created };
     }),
     aiChatRead: record('aiChatRead', { ok: true, value: { summary, events: [], full: false } }),
     aiTrust: record('aiTrust', () => {
@@ -602,24 +603,25 @@ test('a draft hand-off (Build an app) waits unsent in the composer: ready or not
   // A trusted project with a ready agent still only drafts: the person sends it.
   ai.resetAiStore();
   window.localStorage.setItem('stacki.ai.agent', 'codex');
-  const ready = fakeMain({ trusted: true });
+  const ready = fakeMain({ trusted: true, createChat: (index) => ({ ...summary, id: `c${index.toString(16).padStart(24, '0')}` }) });
   const outcome = await ai.requestAgentTask(task);
   assert.equal(outcome.tag, 'sent');
   assert.equal(opened, 1);
   assert.equal(ready.calls.filter((call) => call.name === 'aiPrompt').length, 0, 'nothing is sent');
   assert.equal(ai.draftText(ai.aiState().drafts.get(ai.aiState().open)), 'Build me an app');
-  // The same request again reuses that chat: it has no messages, and its box holds only the prompt it was given.
-  // A box with the person's own words is another matter, below.
+  // Once the person clears the draft, the empty chat can be reused.
   const created = ready.calls.filter((call) => call.name === 'aiChatCreate').length;
   ai.setDraft(ai.aiState().open, () => ai.draftFromText(''));
   await ai.requestAgentTask(task);
   assert.equal(ready.calls.filter((call) => call.name === 'aiChatCreate').length, created, 'an empty chat is reused');
   assert.equal(ai.draftText(ai.aiState().drafts.get(ai.aiState().open)), 'Build me an app');
   // A chat with a draft the person is writing is left alone: the prompt goes to a new chat.
-  ai.setDraft(ai.aiState().open, () => ai.draftFromText('my own words'));
-  // (The fake main hands every chat one id, so the count of created chats is what shows a new one was made.)
+  const original = ai.aiState().open;
+  ai.setDraft(original, () => ai.draftFromText('my own words'));
   await ai.requestAgentTask(task);
   assert.equal(ready.calls.filter((call) => call.name === 'aiChatCreate').length, created + 1, 'a typed draft is never replaced');
+  assert.notEqual(ai.aiState().open, original);
+  assert.equal(ai.draftText(ai.aiState().drafts.get(original)), 'my own words');
   // An agent that is not ready: the prompt waits all the same.
   ai.resetAiStore();
   const missing = fakeMain({ trusted: false, codex: 'missing-cli' });

@@ -9,11 +9,15 @@
 // is announced, that only the cards that need one are re-rendered, that they go
 // one at a time, and that closing the screen stops the queue rather than
 // leaving it running against a project the user has just opened.
-// Split actions also verify folder selection, menu focus and dismissal.
+// Split actions verify folder selection, menu focus and dismissal. The shadcn
+// flow holds IPC replies to exercise overlapping preset checks and creation retries.
+// The HeroUI flow drives keyboard controls, verifies a failed install keeps form
+// values and confirms the returned directory is opened and can be reopened.
 
 const fs = require('fs');
 const path = require('path');
 const { repoPath } = require('../../helpers/sources.js');
+const { waitFor } = require('../../helpers/waitFor.js');
 
 // The DOM answers "none" with null. The fakes below that stand in for DOM APIs
 // return the platform's own value, read from JSON because our code never writes one.
@@ -37,7 +41,11 @@ const PIXEL = 'data:image/png;base64,' + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAA
   fs.mkdirSync(buildDirectory, { recursive: true });
   const bundlePath = path.join(buildDirectory, 'welcome.bundle.js');
   await esbuild.build({
-    entryPoints: [repoPath('src/features/welcome/WelcomeScreen.tsx')],
+    stdin: {
+      contents: `export { default as WelcomeScreen } from './src/features/welcome/WelcomeScreen';
+export { subscribeErrorToasts } from './src/ui/errorNotices';`,
+      resolveDir: repoPath('.'),
+    },
     outfile: bundlePath,
     bundle: true,
     format: 'cjs',
@@ -66,7 +74,7 @@ const PIXEL = 'data:image/png;base64,' + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAA
   const React = require('react');
   const { createRoot } = require('react-dom/client');
   const { act } = require('react');
-  const WelcomeScreen = require(bundlePath).default;
+  const { WelcomeScreen, subscribeErrorToasts } = require(bundlePath);
 
   const container = dom.window.document.getElementById('root');
   let reactRoot = createRoot(container);
@@ -101,6 +109,7 @@ const PIXEL = 'data:image/png;base64,' + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAA
   let maxInFlight = 0;
   let release;
   const toasts = [];
+  const opened = [];
 
   dom.window.avb = {
     // The window drop's inbox (src/features/welcome/FolderDropHost.tsx): nothing handed over.
@@ -127,7 +136,7 @@ const PIXEL = 'data:image/png;base64,' + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAA
     act(async () => {
       reactRoot.render(
         React.createElement(WelcomeScreen, {
-          onOpen: () => {},
+          onOpen: (directory) => opened.push(directory),
           setBusy: () => {},
           showToast: (message) => toasts.push(message),
         }),
@@ -342,6 +351,330 @@ const PIXEL = 'data:image/png;base64,' + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAA
       JSON.stringify(created),
     );
     check('and the wizard closes on the project it made', !dom.window.document.querySelector('.new-project-modal'));
+  }
+
+  {
+    const parentPath = '/tmp/sites';
+    const errorNotices = [];
+    const stopErrorNotices = subscribeErrorToasts(
+      (notice) => errorNotices.push(notice),
+      () => {},
+    );
+    let parentRequests = 0;
+    let log;
+    const pendingPresets = new Map();
+    const attempts = [];
+    let finishCreate;
+    let failCreate;
+    dom.window.avb.parentDialog = async () => {
+      parentRequests++;
+      return parentRequests === 1 ? { canceled: true } : { canceled: false, parentPath };
+    };
+    dom.window.avb.onCreateLog = (receive) => {
+      log = receive;
+      return () => {};
+    };
+    dom.window.avb.inspectShadcnPreset = ({ preset }) =>
+      new Promise((resolve) => {
+        pendingPresets.set(preset, resolve);
+      });
+    dom.window.avb.createStarter = (payload) => {
+      attempts.push(payload);
+      return new Promise((resolve, reject) => {
+        finishCreate = resolve;
+        failCreate = reject;
+      });
+    };
+
+    const openShadcn = async () => {
+      await act(async () => arrows[1].click());
+      check(
+        'the starter menu lists Astro, shadcn and HeroUI in order',
+        all('[role=menuitem]')
+          .map((item) => item.textContent)
+          .join('|') === 'Start from Astro|Start from shadcn|Start from HeroUI',
+      );
+      check('the shadcn action uses its own mark', all('[role=menuitem]')[1].querySelector('svg[aria-hidden="true"][viewBox="0 0 256 256"]') !== null);
+      await act(async () => {
+        document.activeElement.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      });
+      check('ArrowDown focuses the shadcn alternative', document.activeElement === all('[role=menuitem]')[1]);
+      await act(async () => document.activeElement.click());
+    };
+
+    await openShadcn();
+    check('canceling the shadcn parent picker leaves the welcome screen', parentRequests === 1 && !document.querySelector('.shadcn-starter-modal'));
+    await openShadcn();
+    const dialog = document.querySelector('dialog[aria-label="Start from shadcn"]');
+    const siteName = dialog.querySelector('label.starter-field-label').control;
+    const path = dialog.querySelector('input[readonly]');
+    const preset = dialog.querySelector('label[for]:not(.starter-field-label)').control;
+    const submit = dialog.querySelector('.modal-footer .primary');
+    const cancel = dialog.querySelector('.modal-footer .ghost');
+    const manager = dialog.querySelector('.dd-trigger');
+    const [base, styles, icons] = dialog.querySelectorAll('fieldset');
+    const [pointer, rtl] = dialog.querySelectorAll('[role=switch]');
+    const pathCaption = path.closest('label').querySelector('span');
+    const presetAction = dialog.querySelector('a').parentElement;
+    const description = (input) => document.getElementById(input.getAttribute('aria-describedby'));
+    const selected = (group) => group.querySelector(':checked')?.value;
+    const setInput = (input, value) =>
+      act(async () => {
+        Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+      });
+    const waitForPreset = (code) => waitFor({ what: `the check for ${code}`, read: () => pendingPresets.has(code), until: (started) => started });
+    const resolvePreset = async (code, result) => {
+      await waitForPreset(code);
+      const resolve = pendingPresets.get(code);
+      pendingPresets.delete(code);
+      await act(async () => resolve(result));
+    };
+
+    check('shadcn opens only after the parent picker', parentRequests === 2 && !!dialog);
+    check('the read-only project path uses the name and native parent', path.value === '/tmp/sites/my-site');
+    check('npm is the default manager', manager.textContent === 'npm');
+    check('the Base field offers all three bases and defaults to Base UI', base.textContent === 'BaseBase UIReact AriaRadix UI' && selected(base) === 'base');
+    check(
+      'the Icon library field offers five named choices and defaults to Lucide',
+      icons.textContent === 'Icon libraryLucideTabler IconsHugeiconsPhosphor IconsRemix Icon' && selected(icons) === 'lucide',
+    );
+    check(
+      'the Style field offers the eight upstream choices and defaults to Nova',
+      styles.textContent === 'StyleVegaNovaMaiaLyraMiraLumaSeraRhea' && selected(styles) === 'nova',
+    );
+    const styleTiles = [...styles.querySelectorAll('.shadcn-starter-tile')];
+    const baseTiles = [...base.querySelectorAll('.shadcn-starter-tile')];
+    const iconTiles = [...icons.querySelectorAll('.shadcn-starter-tile')];
+    check(
+      'each tile labels a native group radio and has an accessible-name-neutral logo',
+      baseTiles.length === 3 &&
+        iconTiles.length === 5 &&
+        styleTiles.length === 8 &&
+        baseTiles[0].control.name !== iconTiles[0].control.name &&
+        [baseTiles, styleTiles, iconTiles].every((tiles) =>
+          tiles.every(
+            (tile) =>
+              tile.control?.type === 'radio' &&
+              tile.control.name === tiles[0].control.name &&
+              tile.querySelector(':scope > svg[aria-hidden="true"][focusable="false"]'),
+          ),
+        ),
+    );
+    check('both switches default off', pointer.getAttribute('aria-checked') === 'false' && rtl.getAttribute('aria-checked') === 'false');
+    check('the preset field links to the official tool', dialog.querySelector('a')?.href === 'https://ui.shadcn.com/create');
+
+    await setInput(siteName, '-option');
+    check(
+      'an invalid name replaces the path caption with feedback and blocks creation',
+      siteName.getAttribute('aria-invalid') === 'true' &&
+        description(siteName) === pathCaption &&
+        pathCaption.textContent === 'Use letters, numbers, dots, dashes, or underscores.' &&
+        submit.disabled,
+    );
+    await setInput(siteName, 'shadcn-site');
+    check('a valid name restores the caption and updates the path', pathCaption.textContent === 'Project path' && path.value === '/tmp/sites/shadcn-site');
+    await setInput(preset, 'https://ui.shadcn.com/create');
+    check(
+      'an invalid preset replaces the link with feedback and blocks submission',
+      preset.getAttribute('aria-invalid') === 'true' &&
+        description(preset) === presetAction &&
+        presetAction.textContent === 'Enter a shadcn preset code.' &&
+        !presetAction.querySelector('a') &&
+        submit.disabled,
+    );
+    check('an invalid format never reaches preload', pendingPresets.size === 0);
+    await setInput(preset, '');
+    await act(async () => styles.querySelector('[value=vega]').closest('label').click());
+    check(
+      'the user can select Vega independently of Base and Icon library',
+      selected(styles) === 'vega' && selected(base) === 'base' && selected(icons) === 'lucide',
+    );
+
+    await act(async () => {
+      submit.click();
+      submit.click();
+      log('Installing starter dependencies');
+    });
+    check('submitting twice starts only one project', attempts.length === 1);
+    check(
+      'a blank preset submits the chosen style with the other wizard choices',
+      JSON.stringify(attempts[0]?.shadcn) === JSON.stringify({ base: 'base', style: 'vega', iconLibrary: 'lucide', pointer: false, rtl: false }),
+    );
+    check(
+      'creation displays progress and prevents cancellation and edits',
+      dialog.querySelector('.create-log')?.textContent.includes('Installing starter dependencies') && cancel.disabled && siteName.disabled,
+    );
+    await act(async () => failCreate(new Error('Install failed')));
+    check(
+      'failure stays in the wizard and enables retry',
+      errorNotices.at(-1)?.message === 'Install failed' && errorNotices.at(-1)?.kind === 'error' && submit.textContent === 'Try again',
+    );
+    check('a failed attempt keeps the name and does not open a site', siteName.value === 'shadcn-site' && !opened.includes('/tmp/sites/shadcn-site'));
+
+    await act(async () => icons.querySelector('[value=remixicon]').click());
+    await setInput(preset, 'aStale');
+    await waitForPreset('aStale');
+    await setInput(preset, 'aFirst');
+    check(
+      'the pending preset uses the link slot and blocks submission',
+      description(preset) === presetAction && presetAction.querySelector('[role=status]').textContent === 'Checking preset…' && submit.disabled,
+    );
+    await waitForPreset('aFirst');
+    await setInput(preset, 'bSecond');
+    await resolvePreset('bSecond', { ok: false, error: { message: 'Preset checker is busy.' } });
+    check('inspection failure reports an error toast', errorNotices.at(-1)?.message === 'Preset checker is busy.');
+    await act(async () => presetAction.querySelector('button').click());
+    check(
+      'retry rechecks the same preset and returns focus to the field',
+      preset.value === 'bSecond' && presetAction.textContent === 'Checking preset…' && document.activeElement === preset,
+    );
+    await resolvePreset('bSecond', { ok: true, value: { iconLibrary: 'tabler', style: 'maia' } });
+    check('the preset selects and locks its style', selected(styles) === 'maia' && styles.disabled);
+    check('a new preset supplies its icon library even after an earlier explicit choice', selected(icons) === 'tabler');
+    await resolvePreset('aFirst', { ok: true, value: { iconLibrary: 'phosphor', style: 'lyra' } });
+    check('a stale preset reply cannot replace the current preset’s icon library', selected(icons) === 'tabler' && selected(styles) === 'maia');
+    await resolvePreset('aStale', { ok: false, error: { message: 'Stale preset failure.' } });
+    check('a stale failed check cannot show a toast or invalidate the current preset', errorNotices.length === 2 && !preset.hasAttribute('aria-invalid'));
+    await act(async () => icons.querySelector('[value=hugeicons]').click());
+    check('an explicit choice replaces the preset’s icon library', selected(icons) === 'hugeicons');
+    await setInput(preset, 'bInvalid');
+    await resolvePreset('bInvalid', { ok: false, error: { message: 'Unknown preset code.' } });
+    check(
+      'a rejected preset gets a toast and keeps its reason available with retry',
+      preset.getAttribute('aria-invalid') === 'true' &&
+        description(preset) === presetAction &&
+        presetAction.querySelector('.info-hint-text')?.textContent === 'Unknown preset code.' &&
+        errorNotices.at(-1)?.message === 'Unknown preset code.' &&
+        submit.disabled,
+    );
+
+    await setInput(preset, 'bSecond');
+    await resolvePreset('bSecond', { ok: true, value: { iconLibrary: 'tabler', style: 'maia' } });
+    await act(async () => {
+      base.querySelector('[value=aria]').closest('label').click();
+      icons.querySelector('[value=hugeicons]').closest('label').click();
+      pointer.click();
+      rtl.click();
+      manager.click();
+    });
+    await act(async () => document.querySelectorAll('.dd-option')[1].click());
+    await act(async () => submit.click());
+    check(
+      'retry sends the new preset, its explicit icon override, and other wizard choices',
+      attempts.length === 2 &&
+        JSON.stringify(attempts[1]) ===
+          JSON.stringify({
+            parentPath,
+            name: 'shadcn-site',
+            packageManager: 'pnpm',
+            starter: 'shadcn',
+            shadcn: { base: 'aria', style: 'maia', iconLibrary: 'hugeicons', preset: 'bSecond', pointer: true, rtl: true },
+          }),
+      JSON.stringify(attempts[1]),
+    );
+    check('retry clears the first attempt’s log', !dialog.querySelector('.create-log')?.textContent.includes('Installing starter dependencies'));
+    await act(async () => finishCreate({ ok: true, projectPath: '/tmp/sites/shadcn-site' }));
+    check('success closes the wizard and opens the site', !document.querySelector('.shadcn-starter-modal') && opened.at(-1) === '/tmp/sites/shadcn-site');
+    stopErrorNotices();
+  }
+
+  {
+    const parentPath = '/tmp/sites';
+    const projectPath = parentPath + '/heroui-site';
+    let parentRequests = 0;
+    let receiveLog;
+    let finishCreate;
+    let failCreate;
+    const attempts = [];
+    dom.window.avb.parentDialog = async () => {
+      parentRequests++;
+      return parentRequests === 1 ? { canceled: true } : { canceled: false, parentPath };
+    };
+    dom.window.avb.onCreateLog = (receive) => {
+      receiveLog = receive;
+      return () => {};
+    };
+    dom.window.avb.createStarter = (payload) => {
+      attempts.push(payload);
+      return new Promise((resolve, reject) => {
+        finishCreate = resolve;
+        failCreate = reject;
+      });
+    };
+    const key = (element, value) => element.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
+    const openHeroUI = async () => {
+      await act(async () => key(arrows[1], 'ArrowDown'));
+      await act(async () => key(document.activeElement, 'End'));
+      check('the starter menu can focus HeroUI through the keyboard', document.activeElement.textContent === 'Start from HeroUI');
+      await act(async () => document.activeElement.click());
+    };
+    const findDialog = () => document.querySelector('dialog[aria-label="Start from HeroUI"]');
+    await openHeroUI();
+    check('canceling the HeroUI parent picker leaves the screen ready for another action', parentRequests === 1 && !findDialog());
+    await openHeroUI();
+    const dialog = findDialog();
+    const siteName = dialog.querySelector('label.starter-field-label').control;
+    const pathField = dialog.querySelector('input[readonly]');
+    const manager = dialog.querySelector('.dd-trigger');
+    const submit = dialog.querySelector('.modal-footer .primary');
+    const setName = (value) =>
+      act(async () => {
+        Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(siteName, value);
+        siteName.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+      });
+    check('HeroUI starts with npm and a read-only project path', manager.textContent === 'npm' && pathField.value === '/tmp/sites/my-site');
+    await setName('..');
+    await act(async () => key(siteName, 'Enter'));
+    check(
+      'an unsafe HeroUI name is editable and never reaches IPC',
+      !siteName.disabled && siteName.ariaInvalid === 'true' && submit.disabled && !attempts.length,
+    );
+    await setName('heroui-site');
+    check('the HeroUI path follows the corrected site name', pathField.value === projectPath && !submit.disabled);
+    await act(async () => key(manager, 'Enter'));
+    await act(async () => key(manager, 'ArrowDown'));
+    await act(async () => key(manager, 'Enter'));
+    check('HeroUI lets the keyboard choose pnpm in the shared dropdown', manager.textContent === 'pnpm' && manager.ariaExpanded === 'false');
+    await act(async () => receiveLog('Output from another creation'));
+    check('an idle HeroUI wizard does not show another attempt’s log', !dialog.querySelector('.create-log'));
+    await act(async () => {
+      key(siteName, 'Enter');
+      key(siteName, 'Enter');
+      receiveLog('Installing HeroUI dependencies');
+    });
+    const expected = { parentPath, name: 'heroui-site', packageManager: 'pnpm', starter: 'heroui' };
+    check(
+      'HeroUI submits one discriminator and the selected location and manager',
+      attempts.length === 1 && JSON.stringify(attempts[0]) === JSON.stringify(expected),
+    );
+    check(
+      'HeroUI shows streamed progress and locks the form during creation',
+      dialog.querySelector('.create-log')?.textContent.includes('Installing HeroUI dependencies') && siteName.disabled && manager.disabled && submit.disabled,
+    );
+    await act(async () => failCreate(new Error('pnpm install failed')));
+    check(
+      'the failed step is shown in the HeroUI wizard and inputs are kept for retry',
+      dialog.querySelector('[role=alert]')?.textContent === 'pnpm install failed' &&
+        submit.textContent === 'Try again' &&
+        !submit.disabled &&
+        siteName.value === 'heroui-site' &&
+        manager.textContent === 'pnpm' &&
+        !opened.includes(projectPath),
+    );
+    await act(async () => submit.click());
+    check(
+      'HeroUI retry sends the same request and clears the old output',
+      JSON.stringify(attempts[1]) === JSON.stringify(expected) &&
+        !dialog.querySelector('[role=alert]') &&
+        !dialog.querySelector('.create-log')?.textContent.includes('Installing HeroUI dependencies'),
+    );
+    await act(async () => finishCreate({ ok: true, projectPath }));
+    check('HeroUI success closes the wizard and opens the returned path', !findDialog() && opened.at(-1) === projectPath);
+    dom.window.avb.openSiteDialog = async () => ({ kind: 'astro', projectPath });
+    const openCount = opened.length;
+    await act(async () => all('.actions button')[0].click());
+    check('Open from folder also opens the HeroUI project', opened.length === openCount + 1 && opened.at(-1) === projectPath);
   }
 
   // A first run has nothing to return to, so starting a site is the answer

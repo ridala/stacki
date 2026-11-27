@@ -475,6 +475,9 @@ const metadataSamples: Readonly<Record<string, unknown>> = {
   'files:allowClose': { proceed: false },
   // The Astro copy of a plain website (shared/ipc/astroCopy.ts; its bad shapes are in astroCopyContract.test.ts).
   'project:checkAstroCopy': { sourcePath: '/sites/shop', parentPath: '/sites', name: 'shop-astro' },
+  'project:readShadcnSettings': { projectPath: '/site' },
+  'project:changeShadcnSetting': { projectPath: '/site', setting: 'rtl', enabled: true },
+  'project:inspectShadcnPreset': { preset: 'b1QGlW' },
   'project:createAstroCopy': { sourcePath: '/sites/shop', parentPath: '/sites', name: 'shop-astro' },
   // The interface language mirrored to main: a shipped locale or "system".
   'locale:set': { preference: 'de' },

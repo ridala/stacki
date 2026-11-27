@@ -11,6 +11,12 @@ export const messages = {
   'palette.apps.empty.title': 'Henüz uygulama yok',
   'palette.apps.loading': 'Uygulamalar yükleniyor…',
   'palette.apps.marketplace': 'Mağaza',
+  'palette.components.buildWithAI': 'Yapay zekâyla bileşen oluştur',
+  'palette.components.buildWithAI.copyTask': 'Görevi kopyala',
+  'palette.components.buildWithAI.description':
+    'Görev, kodlama aracısından projenin React 19 desteğini kontrol etmesini ve bağımlılıkları değiştirmeden önce onayını almasını ister.',
+  'palette.components.buildWithAI.draftReady': 'Taslak yapay zekâ sohbetinde hazır. Göndermeden önce gözden geçir.',
+  'palette.components.buildWithAI.openDraft': 'Sohbet taslağını aç',
   'palette.create.folderRoot': '{folder} (kök)',
   'palette.create.taken': '{file} zaten var.',
   'palette.create.hint': '{label}, {tag} olur ve {file} olarak kaydedilir',

@@ -62,6 +62,20 @@ the component, never a component folder itself. Redo writes the file again and r
 - The Components panel groups by the scan's folder, so a new component appears in its folder's group after the rescan that
   follows creation.
 
+## Build a component with AI
+
+Open **Build a component with AI** in Components. In Desktop, choose **Open AI draft** to review and edit the prompt
+before sending it. In Studio, choose **Copy task** and review the prompt before pasting it into a coding agent with
+project access. The action is available to roles that can create components. Desktop also requires AI chat and code
+editing access.
+
+The prompt asks for a Dialog in an Astro wrapper with an editable label and body slot. UI SDK needs the Astro React
+integration and React 19. Review any setup with the agent and approve installation separately.
+
+After reviewing the changes, run your project's GitHub checks for the Astro build and `astro-studio check-project`.
+Find the wrapper in Components, insert it into a page, and edit the label and body. Open the page in interactive preview
+to check the Dialog with the keyboard.
+
 ## Deleting a component
 
 Delete in the Components panel's "…" menu is one step over the whole site, planned before anything is written

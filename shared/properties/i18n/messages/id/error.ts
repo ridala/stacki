@@ -84,6 +84,7 @@ export const messages = {
   'error.pageTemplate.keyUnreadable': 'Stacki tidak dapat membaca kunci koneksi ini. Hubungkan Sanity lagi.',
   'error.pages.devServerStatus': 'Server dev mengembalikan {status}',
   'error.project.chooseInside': 'Pilih sesuatu di dalam proyek, bukan proyek itu sendiri.',
+  'error.project.creationBusy': 'Situs lain sedang dibuat. Tunggu hingga selesai.',
   'error.project.gone': 'Itu sudah tidak ada.',
   'error.project.managerMissing': '{manager} belum terinstal. Instal atau pilih npm.',
   'error.project.npmMissing': 'npm tidak ditemukan. Instal Node.js (sudah termasuk npm) lalu coba lagi.',

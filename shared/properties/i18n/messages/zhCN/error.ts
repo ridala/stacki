@@ -83,6 +83,7 @@ export const messages = {
   'error.pageTemplate.keyUnreadable': 'Stacki 无法读取此连接的密钥，请重新连接 Sanity。',
   'error.pages.devServerStatus': '开发服务器返回了 {status}',
   'error.project.chooseInside': '请选择项目内的内容，而不是项目本身。',
+  'error.project.creationBusy': '已在创建站点，请等待创建完成。',
   'error.project.gone': '它已不存在。',
   'error.project.managerMissing': '未安装 {manager}。请安装它或选择 npm。',
   'error.project.npmMissing': '找不到 npm。请安装 Node.js（包含 npm）后重试。',

@@ -85,6 +85,7 @@ export const messages = {
   'error.pageTemplate.keyUnreadable': 'Stacki kon de sleutel van deze verbinding niet lezen. Koppel Sanity opnieuw.',
   'error.pages.devServerStatus': 'Dev-server gaf {status} terug',
   'error.project.chooseInside': 'Kies iets binnen het project, niet het project zelf.',
+  'error.project.creationBusy': 'Er wordt al een site gemaakt. Wacht tot die klaar is.',
   'error.project.gone': 'Dat is er niet meer.',
   'error.project.managerMissing': '{manager} is niet geïnstalleerd. Installeer het of kies npm.',
   'error.project.npmMissing': 'npm is niet gevonden. Installeer Node.js (inclusief npm) en probeer het opnieuw.',

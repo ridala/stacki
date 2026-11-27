@@ -1,3 +1,5 @@
+import type { ProjectSetupReport } from './projectSetup';
+import type { ShadcnSettingsReply } from './shadcnSettings';
 import type { MessageRef } from '../core/i18n/messageReference';
 import type { BreakpointSyncApplied, BreakpointSyncScan, BreakpointUsage } from '../properties/breakpointSyncPlan';
 import type { MicrophoneReport } from '../properties/microphone';
@@ -16,6 +18,7 @@ import type { AccountState } from './publishAccount';
 import type { PreviewHealth } from './previewHealth';
 import type { DevNetworkReply, DevNetworkState } from './devNetwork';
 import type { AstroCopyCheck, AstroCopyReply, SiteFolderChoice } from './astroCopy';
+import type { ShadcnPresetReply } from './shadcnStarter';
 import type { FolderOpenChoice } from './folderOpen';
 import type { CmsCheckResult, CmsConnectionList, CmsSaveResult, SanityLoginState } from '../properties/cmsConnections';
 import type { ConstantEditReply, ConstantListingReply } from '../properties/cmsConstants';
@@ -177,6 +180,8 @@ export interface IpcResults extends AiResults, AgentResults, FileExplorerResults
   readonly 'instructions:reveal': { readonly ok: true };
   readonly 'instructions:write': InstructionWriteResult;
   readonly 'project:metadata': Result<MetadataFile>;
+  readonly 'project:setupScan': Result<ProjectSetupReport>;
+  readonly 'project:setupApply': Result<ProjectSetupReport>;
   readonly 'project:writeMetadata': Result<MetadataFile>;
   /** A folder chosen in the system dialog, project-relative; `outside` when it is not in the project. */
   readonly 'project:pickFolder':
@@ -843,6 +848,9 @@ export interface IpcResults extends AiResults, AgentResults, FileExplorerResults
     readonly ok: boolean;
     readonly projectPath: string;
   };
+  readonly 'project:readShadcnSettings': ShadcnSettingsReply;
+  readonly 'project:changeShadcnSetting': ShadcnSettingsReply;
+  readonly 'project:inspectShadcnPreset': ShadcnPresetReply;
   readonly 'project:injectedRoutes': {
     readonly routes: ReadonlyArray<WireInjectedRoute>;
   };

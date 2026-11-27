@@ -92,6 +92,7 @@ export const messages = {
   'error.pageTemplate.keyUnreadable': 'Stacki не удалось прочитать ключ этого подключения. Подключите Sanity заново.',
   'error.pages.devServerStatus': 'Сервер разработки вернул {status}',
   'error.project.chooseInside': 'Выберите что-то внутри проекта, а не сам проект.',
+  'error.project.creationBusy': 'Сайт уже создаётся. Дождитесь завершения.',
   'error.project.gone': 'Этого больше нет.',
   'error.project.managerMissing': '{manager} не установлен. Установите его или выберите npm.',
   'error.project.npmMissing': 'Не удалось найти npm. Установите Node.js (включает npm) и повторите попытку.',

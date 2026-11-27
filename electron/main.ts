@@ -9,6 +9,7 @@ import { desktopLocalStorageDirectory, registerAppDataHandlers } from './handler
 import { keepAppFramesHome } from './app/appFrameNavigation';
 import { SanityLogin } from './content/sanityLogin';
 import { cmsPreviewEnvironment } from './content/cmsPreviewEnvironment';
+import { createProjectSetupAccess, registerProjectSetupHandlers, type IsSetupFrame } from './handlers/projectSetupHandlers';
 import { registerProjectMetadataHandlers } from './handlers/projectMetadataHandlers';
 import { registerImageConversionHandler } from './handlers/imageConversionHandler';
 import { registerGitRepositoryHandlers } from './handlers/gitRepositoryHandlers';
@@ -110,6 +111,7 @@ import { allowLoopbackFraming } from './app/previewFraming';
 import { registerPageTemplateHandlers } from './handlers/pageTemplateHandlers';
 import { registerPreviewHandlers } from './handlers/previewHandlers';
 import { registerProjectHandlers } from './handlers/projectHandlers';
+import { registerShadcnSettingsHandlers } from './handlers/shadcnSettingsHandlers';
 import { registerProjectScanHandlers } from './handlers/projectScanHandlers';
 import { registerStyleSourceHandlers } from './handlers/styleSourceHandlers';
 import { registerAppPageFilesHandlers } from './handlers/appPageFilesHandlers';
@@ -218,12 +220,16 @@ function relaunchApp() {
 // ---------------------------------------------------------------------------
 
 const ASSET_SCHEME = 'stacki-asset';
+const projectSetupAccess = createProjectSetupAccess();
+const isSetupFrame: IsSetupFrame = (event) =>
+  mainWindow !== undefined && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents && event.senderFrame === mainWindow.webContents.mainFrame;
 let openProjectRoot: string | undefined = undefined; // set when a project's watcher starts
 
 // The project the app has open: the asset protocol, the style panel and the
 // terminal touch files only inside it.
 function noteProjectRoot(projectPath: string): void {
   openProjectRoot = path.resolve(projectPath);
+  projectSetupAccess.activate(openProjectRoot);
 }
 
 // Same containment rule the asset protocol uses: the style panel writes only
@@ -462,10 +468,14 @@ function createWindow() {
   // A new page (a reload, leaving one project for another) is not listening yet: folders wait for its take.
   mainWindow.webContents.on('did-start-navigation', (details) => {
     if (details.isMainFrame && !details.isSameDocument) {
+      projectSetupAccess.resetView();
       folderQueue.hold();
     }
   });
-  mainWindow.webContents.on('render-process-gone', () => folderQueue.hold());
+  mainWindow.webContents.on('render-process-gone', () => {
+    projectSetupAccess.resetView();
+    folderQueue.hold();
+  });
   // A renderer that does not load leaves an empty window; the log says why, and the health watch above shows the recovery screen.
   loadApp(mainWindow).catch((error: unknown) => {
     console.error('[window] the renderer did not load:', error);
@@ -492,6 +502,8 @@ function createWindow() {
     bootStore?.flush();
   });
   mainWindow.on('closed', () => {
+    projectSetupAccess.activate(undefined);
+    projectSetupAccess.resetView();
     openProjectRoot = undefined;
     folderQueue.hold();
     stopWatchingProject();
@@ -885,9 +897,11 @@ app.whenReady().then(
 // held — a page half-loaded, an undo stack, a watcher, a shell — and none of
 // this survives the reload on its own: a pty outlives the window that opened
 // it, and the dev server outlives everything.
-ipcMain.handle('project:close', async (_event, next) => {
+ipcMain.handle('project:close', async (event, next) => {
   pendingProject = typeof next === 'string' && next ? next : undefined;
   codeIntel.stop();
+  projectSetupAccess.activate(isSetupFrame(event) ? pendingProject : undefined);
+  projectSetupAccess.resetView();
   devServers.stop();
   stopAllServices();
   stopAllPreviews();
@@ -1442,7 +1456,9 @@ registerPageTemplateHandlers(
   cmsConnections,
 );
 registerPreviewHandlers(host);
-registerProjectHandlers(host);
+registerProjectHandlers(host, projectSetupAccess, isSetupFrame);
+registerProjectSetupHandlers(host, projectSetupAccess, isSetupFrame);
+registerShadcnSettingsHandlers(host);
 registerProjectMetadataHandlers(host);
 registerInstructionHandlers(host);
 registerAgentHandlers(host);

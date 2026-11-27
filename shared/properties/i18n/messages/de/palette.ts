@@ -11,6 +11,12 @@ export const messages = {
   'palette.apps.empty.title': 'Noch keine Apps',
   'palette.apps.loading': 'Apps werden geladen …',
   'palette.apps.marketplace': 'Marketplace', // same
+  'palette.components.buildWithAI': 'Komponente mit KI erstellen',
+  'palette.components.buildWithAI.copyTask': 'Aufgabe kopieren',
+  'palette.components.buildWithAI.description':
+    'Der Programmieragent prüft, ob dieses Projekt React 19 unterstützt, und fragt vor Änderungen an Abhängigkeiten nach.',
+  'palette.components.buildWithAI.draftReady': 'Der Entwurf ist im KI-Chat bereit. Prüfe ihn vor dem Senden.',
+  'palette.components.buildWithAI.openDraft': 'KI-Entwurf öffnen',
   'palette.create.folderRoot': '{folder} (Hauptordner)',
   'palette.create.taken': '{file} gibt es schon.',
   'palette.create.hint': '{label} wird zu {tag}, gespeichert als {file}',

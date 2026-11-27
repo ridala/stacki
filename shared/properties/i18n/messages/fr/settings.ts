@@ -672,6 +672,33 @@ export const messages = {
   'settings.folders.addTip': 'Un dossier dans {roots}',
   'settings.folders.remove': 'Retirer {folder} de {label}',
   'settings.folders.none': 'Aucun dossier : ce panneau n’affiche rien.',
+  'settings.folders.setup.approval':
+    'Sélectionnez les réglages de dossiers à enregistrer. Ils déterminent les fichiers affichés par Stacki. Chaque ligne montre ce qui change si vous enregistrez uniquement ce choix.',
+  'settings.folders.setup.check': 'Vérifier la configuration des dossiers',
+  'settings.folders.setup.continue': 'Accéder à l’éditeur',
+  'settings.folders.setup.countChange': 'De {before} à {after}',
+  'settings.folders.setup.desktop': 'Desktop', // same
+  'settings.folders.setup.editors':
+    'Desktop et Studio cherchent les fichiers à des endroits différents. Les nombres indiqués concernent les fichiers trouvés dans le projet.',
+  'settings.folders.setup.noSuggestions': 'Aucune modification de dossier n’est proposée.',
+  'settings.folders.setup.pageCounts': 'Pages dans Desktop : {desktop}. Pages dans Studio : {studio}.',
+  'settings.folders.setup.permission': 'Sélectionnez le dossier du projet ouvert pour autoriser Stacki à le vérifier.',
+  'settings.folders.setup.partial': 'Certains fichiers ont été ignorés. Une analyse complète est nécessaire pour proposer des modifications.',
+  'settings.folders.setup.restartPreview': 'Redémarrez l’aperçu pour utiliser les dossiers enregistrés dans les aperçus de composants.',
+  'settings.folders.setup.save': 'Enregistrer les dossiers sélectionnés',
+  'settings.folders.setup.saveError': 'Impossible d’enregistrer les réglages des dossiers. {message}',
+  'settings.folders.setup.saved': 'Réglages des dossiers enregistrés.',
+  'settings.folders.setup.scanError': 'Impossible de vérifier le dossier. {message}',
+  'settings.folders.setup.scanning': 'Vérification des fichiers du projet…',
+  'settings.folders.setup.skip': 'Ignorer la configuration',
+  'settings.folders.setup.skipped': 'Configuration des dossiers ignorée.',
+  'settings.folders.setup.stale': 'Le projet a changé pendant la vérification. Consultez le rapport mis à jour avant d’enregistrer.',
+  'settings.folders.setup.studio': 'Studio', // same
+  'settings.folders.setup.suggestions': 'Dossiers proposés',
+  'settings.folders.setup.title': 'Vérifier la configuration',
+  'settings.folders.setup.unavailable': 'Impossible de lire les réglages de dossiers existants. L’enregistrement est indisponible depuis cette fenêtre.',
+  'settings.folders.setup.unverifiedPages':
+    'Stacki n’a pas pu vérifier le dossier des pages dans la configuration Astro. Le nombre de pages dans Desktop est estimé à partir du chemin par défaut.',
   'settings.folders.cms.loading': 'Chargement des sources CMS…',
   'settings.folders.cms.collections': 'Collections CMS',
   'settings.folders.cms.collectionsNone': 'La configuration du contenu ne déclare aucune collection.',
