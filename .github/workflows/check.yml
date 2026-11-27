@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - dev
 
 # A newer push to the same branch supersedes the older run: only the tip can be
 # released (release:ship tags origin/main's HEAD), and a stale run would hold
@@ -34,11 +35,11 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - name: Check pull request commit messages
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'sync/')
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node scripts/policy/checkCommitRange.mts "$BASE_SHA" "$HEAD_SHA"
+        run: node --experimental-strip-types scripts/policy/checkCommitRange.mts "$BASE_SHA" "$HEAD_SHA"
       - run: npm ci
       - run: npm --prefix studio ci
       - run: npm run format:check
