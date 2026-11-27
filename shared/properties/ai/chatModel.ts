@@ -13,7 +13,18 @@ import type { Brand } from '../../core/brand';
 import { toArray, toRecord } from '../../core/record';
 import { parseAgentId, type AgentId } from './agentIds';
 import { AI_LIMITS } from './aiLimits';
-import { BUILTIN_CHIP_IDS, SKILL_SOURCES, isProjectRelativePath, isSkillDisplayPath, type BuiltinChipId, type SkillSource } from './mentions';
+import { PIN_LIMITS, PIN_SEND_MODES, parseSentPins, type PinSendMode, type SentPin } from './commentPinBrief';
+import {
+  BUILTIN_CHIP_IDS,
+  SKILL_SOURCES,
+  isHostChip,
+  isProjectRelativePath,
+  isSkillDisplayPath,
+  parseMentionChip,
+  type BuiltinChipId,
+  type CodeOrReferenceChip,
+  type SkillSource,
+} from './mentions';
 
 export type ChatId = Brand<string, 'ChatId'>;
 export type TurnId = Brand<string, 'TurnId'>;
@@ -104,7 +115,11 @@ export type SentPart =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'file'; readonly path: string; readonly truncated: boolean; readonly excerpt: string | undefined }
   | { readonly kind: 'skill'; readonly name: string; readonly source: SkillSource; readonly path: string }
-  | { readonly kind: 'builtin'; readonly id: BuiltinChipId; readonly textHash: string };
+  | { readonly kind: 'builtin'; readonly id: BuiltinChipId; readonly textHash: string }
+  /** A reference chip (component, element, member, CSS, asset, page) or a code selection, as it stood in the message. */
+  | { readonly kind: 'chip'; readonly chip: CodeOrReferenceChip }
+  /** Comment pins sent with "Send all" (commentPinBrief.ts): each pin's number, words and names, never the agent's instructions. */
+  | { readonly kind: 'pins'; readonly mode: PinSendMode; readonly pins: readonly SentPin[] };
 
 export type CompactionStatus = 'in_progress' | 'completed' | 'failed' | 'cancelled';
 
@@ -173,6 +188,8 @@ export type ChatEvent =
       readonly until?: number | undefined;
       /** The subagent call that said it (Claude's `parentToolUseId`); absent for the agent's own words and in chats stored before subagents were told apart. */
       readonly parent?: string | undefined;
+      /** The id of the message it belongs to (ACP `messageId`); absent when the adapter gave none, and in older chats. */
+      readonly message?: string;
     }
   | {
       readonly kind: 'tool';
@@ -398,6 +415,15 @@ export function parseSentPart(input: unknown): SentPart {
       }
       return { kind: 'builtin', id: oneOf(value['id'], BUILTIN_CHIP_IDS, 'part.id'), textHash };
     }
+    case 'chip': {
+      const chip = parseMentionChip(value['chip']);
+      if (isHostChip(chip)) {
+        throw new Error('part.chip: expected a reference or code chip');
+      }
+      return { kind: 'chip', chip };
+    }
+    case 'pins':
+      return { kind: 'pins', mode: oneOf(value['mode'], PIN_SEND_MODES, 'part.mode'), pins: parseSentPins(value['pins']) };
     default:
       throw new Error('part.kind: unknown kind');
   }
@@ -423,7 +449,8 @@ function parseChatEventOfKind(kind: unknown, value: Record<string, unknown>): Ch
         kind,
         turn: turnOf(value),
         text: text(value['text'], AI_LIMITS.promptCharsMax, 'user.text'),
-        attachments: list(value['attachments'], AI_LIMITS.attachmentsMax, 'user.attachments').map((entry) => {
+        // A send of pins keeps one picture for each pin, so a stored message holds up to a full board of them.
+        attachments: list(value['attachments'], Math.max(AI_LIMITS.attachmentsMax, PIN_LIMITS.pinsMax), 'user.attachments').map((entry) => {
           const attachment = object(entry, 'attachment');
           const kind = oneOf(attachment['kind'], ['image', 'file'] as const, 'attachment.kind');
           const name = label(attachment['name']);
@@ -442,6 +469,7 @@ function parseChatEventOfKind(kind: unknown, value: Record<string, unknown>): Ch
         at: optionalCount(value['at'], 'text.at'),
         until: optionalCount(value['until'], 'text.until'),
         parent: value['parent'] === undefined ? undefined : identifier(value['parent']),
+        ...(value['message'] === undefined ? {} : { message: identifier(value['message']) }),
       };
     case 'compaction':
       return {

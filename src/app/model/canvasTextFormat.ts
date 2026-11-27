@@ -9,6 +9,10 @@
 // pressing a lit button turns the format off, as it does there.
 
 import { assert } from '../../../shared/core/assert';
+import type { Attr } from '../../../shared/page/pageNode';
+import type { CanvasTextBreaks } from '../../../shared/properties/canvasText';
+import type { EditingSettings } from '../../../shared/properties/componentDefaults';
+import { plainChildrenHTML, richTextNodes, richTextView, sameRichContent, withoutLayoutSpace } from '../../features/props/richTextContent';
 import { LIMITS } from '../../../shared/core/limits';
 import { INLINE_TAGS, isChippable, isInlineOnly, nodesToHtml, type InlineCandidate, type InlineNode } from '../../features/props/richContentModel';
 import { richApplyLink, richContentNodes, richExec, richWrapTag, type FormatState } from '../../features/props/richFormat';
@@ -23,7 +27,8 @@ import type { CanvasTextFormatter } from '../../features/preview/useCanvasText';
  */
 export function canvasTextFormatter<Node extends CanvasFormatTree<Node> & InlineCandidate>(
   nodes: readonly Node[],
-  setInline: (rootId: string, children: readonly InlineNode[]) => void,
+  /** False: nothing was written now (the editor is saving something else, or the node is gone). */
+  setInline: (rootId: string, children: readonly InlineNode[]) => boolean,
 ): CanvasTextFormatter {
   const contentOf = (textId: string) => {
     const found = inlineRootOf(nodes, textId);
@@ -56,7 +61,255 @@ export function canvasTextFormatter<Node extends CanvasFormatTree<Node> & Inline
       setInline(content.rootId, next);
       return true;
     },
+    breaks: (textId, breaks, value) => {
+      const content = contentOf(textId);
+      if (!content) {
+        return false;
+      }
+      const typed = inlineWithValue(content.children, content.trail, value);
+      if (breaks === 'line') {
+        setInline(content.rootId, withLineBreaks(typed, content.trail));
+        return true;
+      }
+      return splitIntoParagraphs(nodes, { rootId: content.rootId, children: typed, trail: content.trail }, setInline);
+    },
+    contentOwner: (textId, breaks) => contentOwnerOf(nodes, textId, breaks)?.id,
+    content: (ownerId) => {
+      const instance = nodeById(nodes, ownerId);
+      return instance === undefined ? undefined : plainChildrenHTML(instance.children);
+    },
+    richText: (ownerId, html, bases) => {
+      const instance = nodeById(nodes, ownerId);
+      if (instance?.id === undefined || richTextView(html, document).view !== 'rich') {
+        return 'refused';
+      }
+      const before = plainChildrenHTML(instance.children);
+      if (before === undefined) {
+        return 'conflict'; // The content holds more than rich text since the editor opened: never write over it.
+      }
+      if (sameRichContent(before, html, document)) {
+        return 'unchanged'; // Nothing a reader would see changed: the file keeps its bytes.
+      }
+      if (!bases.some((base) => sameRichContent(before, base, document))) {
+        return 'conflict';
+      }
+      // The blocks the page already held keep the file's own line breaks around them in the frame; the printer lays the
+      // content out itself, and would write those as blank lines.
+      const next = withoutLayoutSpace(richTextNodes(html, document));
+      // A line of words stays one: blocks typed into content the component may draw inside a <p> are refused.
+      if (isInlineOnly(instance.children ?? []) && next.length > 0 && !isInlineOnly(next)) {
+        return 'refused';
+      }
+      return setInline(instance.id, next) ? 'written' : 'busy';
+    },
   };
+}
+
+// The node whose children a canvas edit of this text writes. A line of words is written over the element whose inline
+// content holds the text (a Paragraph instance, a <p>), never over an outer component such as the page's layout; rich
+// text over the instance that holds its blocks.
+function contentOwnerOf<Node extends CanvasFormatTree<Node> & InlineCandidate>(
+  nodes: readonly Node[],
+  textId: string,
+  breaks: CanvasTextBreaks | undefined,
+): Node | undefined {
+  if (breaks === 'line') {
+    return inlineRootOf(nodes, textId)?.root;
+  }
+  return [...(ancestorsOf(nodes, textId)?.ancestors ?? [])].reverse().find((node) => node.kind === 'component');
+}
+
+const BREAK: InlineNode = { kind: 'element', name: 'br', props: {}, children: undefined };
+
+/** The content with the text at `trail` cut at each typed newline, a `<br>` where each was. */
+export function withLineBreaks(children: readonly InlineNode[], trail: readonly number[], depth = 0): InlineNode[] {
+  assert(depth <= LIMITS.treeDepthMax, 'Inline content depth limit exceeded');
+  const [index, ...rest] = trail;
+  assert(index !== undefined, 'A trail reaches a text node');
+  return children.flatMap((node, at): InlineNode[] => {
+    if (at !== index) {
+      return [node];
+    }
+    if (rest.length > 0) {
+      return node.kind === 'element' ? [{ ...node, children: withLineBreaks(node.children ?? [], rest, depth + 1) }] : [node];
+    }
+    if (node.kind !== 'text') {
+      return [node];
+    }
+    const lines = node.value.split('\n');
+    assert(lines.length <= LIMITS.nodeValueCharsMax, 'Each break is one typed character');
+    return lines.flatMap((line, position) => [...(position === 0 ? [] : [BREAK]), ...(line === '' ? [] : [{ kind: 'text' as const, value: line }])]);
+  });
+}
+
+/**
+ * Inline content cut in two at `offset` of the text at `trail`: each element on the way down is in both halves, so
+ * a cut inside `<strong>` leaves a `<strong>` on either side. A half with nothing in it drops the element.
+ */
+export function splitInlineAt(children: readonly InlineNode[], trail: readonly number[], offset: number, depth = 0): readonly [InlineNode[], InlineNode[]] {
+  assert(depth <= LIMITS.treeDepthMax, 'Inline content depth limit exceeded');
+  const [index, ...rest] = trail;
+  assert(index !== undefined, 'A trail reaches a text node');
+  const node = children[index];
+  assert(node !== undefined, 'The trail names a child');
+  const before = children.slice(0, index);
+  const after = children.slice(index + 1);
+  if (rest.length === 0) {
+    assert(node.kind === 'text', 'A trail ends at a text');
+    const left = node.value.slice(0, offset);
+    const right = node.value.slice(offset);
+    return [
+      [...before, ...(left === '' ? [] : [{ ...node, value: left }])],
+      [...(right === '' ? [] : [{ ...node, value: right }]), ...after],
+    ];
+  }
+  assert(node.kind === 'element', 'A trail passes through elements');
+  const [left, right] = splitInlineAt(node.children ?? [], rest, offset, depth + 1);
+  return [
+    [...before, ...(left.length === 0 ? [] : [{ ...node, children: left }])],
+    [...(right.length === 0 ? [] : [{ ...node, children: right }]), ...after],
+  ];
+}
+
+/** Rich text blocks Enter splits; a heading or a quote goes on as a paragraph, a list item as another item. */
+const SPLIT_BLOCKS: ReadonlySet<string> = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'li', 'pre']);
+
+// The block holding the typed text, as one block per typed newline, written over the parent's content: the parent is
+// a rich text component's slot or a list, whose content is plain rich text (the catalog offers `rich` only then).
+function splitIntoParagraphs<Node extends CanvasFormatTree<Node> & InlineCandidate>(
+  nodes: readonly Node[],
+  block: { readonly rootId: string; readonly children: readonly InlineNode[]; readonly trail: readonly number[] },
+  setInline: (rootId: string, children: readonly InlineNode[]) => void,
+): boolean {
+  const parent = parentOf(nodes, block.rootId);
+  const own = parent?.children?.find((child) => child.id === block.rootId);
+  if (parent?.id === undefined || own === undefined || !SPLIT_BLOCKS.has(own.name ?? '') || !isInlineOnly(own.children ?? [])) {
+    return false;
+  }
+  const siblings = parent.children ?? [];
+  if (!siblings.every((child) => child.id === block.rootId || plainMarkup(child, 0))) {
+    return false;
+  }
+  const blocks = paragraphsOf(block.children, block.trail);
+  assert(blocks.length >= 2, 'A save with a typed newline splits its block');
+  const tag = own.name ?? 'p';
+  const props = attributesOf(own.props);
+  const replaced = blocks.map((children, index): InlineNode => ({
+    kind: 'element',
+    name: index === 0 || tag === 'li' || tag === 'p' ? tag : 'p',
+    props: index === 0 ? props : {},
+    children,
+  }));
+  setInline(
+    parent.id,
+    siblings.flatMap((child) => (child.id === block.rootId ? replaced : [toInline(child, 0)])),
+  );
+  return true;
+}
+
+/** The block's content cut at every newline of the text at `trail`. */
+export function paragraphsOf(children: readonly InlineNode[], trail: readonly number[]): readonly InlineNode[][] {
+  const blocks: InlineNode[][] = [];
+  let current: readonly InlineNode[] = children;
+  let at = trail;
+  for (let cuts = 0; cuts <= LIMITS.nodeValueCharsMax; cuts++) {
+    const text = textAt(current, at);
+    const offset = text?.indexOf('\n') ?? -1;
+    if (text === undefined || offset < 0) {
+      blocks.push([...current]);
+      return blocks;
+    }
+    const [left, right] = splitInlineAt(current, at, offset);
+    blocks.push(left);
+    // The right half starts with the text that held the newline, at the first child of every level it passes.
+    at = at.map(() => 0);
+    // Cut the newline itself off: whatever it leaves empty (the text, an element around it) goes with it.
+    current = textAt(right, at) === undefined ? right : splitInlineAt(right, at, 1)[1];
+  }
+  assert(false, 'A text holds fewer newlines than characters');
+  return blocks;
+}
+
+function textAt(children: readonly InlineNode[], trail: readonly number[]): string | undefined {
+  let level: readonly InlineNode[] = children;
+  let node: InlineNode | undefined;
+  for (const index of trail) {
+    node = level[index];
+    level = node?.kind === 'element' ? (node.children ?? []) : [];
+  }
+  return node?.kind === 'text' ? node.value : undefined;
+}
+
+// Text and elements with plain attributes all the way down: what the parent's content is rewritten from without loss.
+function plainMarkup(node: InlineCandidate, depth: number): boolean {
+  if (depth > LIMITS.treeDepthMax) {
+    return false;
+  }
+  if (node.kind === 'text') {
+    return true;
+  }
+  if (node.kind !== 'element') {
+    return false;
+  }
+  const attributes = Object.values(node.props ?? {}).every((value) => value === undefined || value.type === 'bare' || value.type === 'string');
+  return attributes && (node.children ?? []).every((child) => plainMarkup(child, depth + 1));
+}
+
+function toInline(node: InlineCandidate, depth: number): InlineNode {
+  assert(depth <= LIMITS.treeDepthMax, 'Inline content depth limit exceeded');
+  if (node.kind === 'text') {
+    return { kind: 'text', value: node.value ?? '' };
+  }
+  if (node.kind === 'expr') {
+    return { kind: 'expr', value: node.value ?? '' };
+  }
+  return {
+    kind: 'element',
+    name: node.name ?? '',
+    props: attributesOf(node.props),
+    children: node.children === undefined ? undefined : node.children.map((child) => toInline(child, depth + 1)),
+  };
+}
+
+// Plain attributes only: isInlineOnly admits no other kind, so nothing is dropped here.
+function attributesOf(props: InlineCandidate['props']): Record<string, Attr> {
+  const out: Record<string, Attr> = {};
+  for (const [name, value] of Object.entries(props ?? {})) {
+    if (value?.type === 'bare') {
+      out[name] = { type: 'bare' };
+    } else if (value?.type === 'string' && value.value !== undefined) {
+      out[name] = { type: 'string', value: value.value };
+    }
+  }
+  return out;
+}
+
+function nodeById<Node extends CanvasFormatTree<Node>>(nodes: readonly Node[], id: string): Node | undefined {
+  const stack: Node[] = [...nodes];
+  for (let visited = 0; visited < LIMITS.treeNodesMax; visited += 1) {
+    const node = stack.pop();
+    if (node === undefined || node.id === id) {
+      return node;
+    }
+    stack.push(...(node.children ?? []));
+  }
+  return undefined;
+}
+
+function parentOf<Node extends CanvasFormatTree<Node>>(nodes: readonly Node[], id: string): Node | undefined {
+  const stack: Node[] = [...nodes];
+  for (let visited = 0; visited < LIMITS.treeNodesMax; visited += 1) {
+    const node = stack.pop();
+    if (node === undefined) {
+      return undefined;
+    }
+    const children: readonly Node[] = node.children ?? [];
+    if (children.some((child) => child.id === id)) {
+      return node;
+    }
+    stack.push(...children);
+  }
+  return undefined;
 }
 
 /** A model node whose children are its own kind, as the page model's are. */
@@ -245,4 +498,114 @@ function nodeAtTrail(host: HTMLElement, trail: readonly number[]): ChildNode | u
     level = node.childNodes;
   }
   return node;
+}
+
+/** What Enter types in one text, and for rich text the instance whose blocks the canvas edits. */
+export interface CanvasTextBreaking {
+  readonly breaks: CanvasTextBreaks;
+  readonly richRoot?: string;
+}
+
+/**
+ * What Enter types in each text of a page, keyed by the text's page path, from the editing settings of the component
+ * instance it sits in. Rich text applies to the words of a block (a paragraph, a heading, a list item …) directly in
+ * the instance's content, and only while that content is plain rich text (richTextView); line breaks apply to the
+ * instance's own inline words. Desktop and Studio share it, so both canvases type the same thing.
+ */
+export function canvasTextBreaksOf<Node extends CanvasFormatTree<Node> & InlineCandidate>(
+  nodes: readonly Node[],
+  pathFor: (id: string) => string | undefined,
+  settingsOf: (component: Node) => EditingSettings,
+): ReadonlyMap<string, CanvasTextBreaking> {
+  const breaks = new Map<string, CanvasTextBreaking>();
+  const mark = (node: Node, kind: CanvasTextBreaking, depth: number) => {
+    assert(depth <= LIMITS.treeDepthMax, 'Marked text sits at a bounded depth');
+    if (node.kind === 'text') {
+      const path = node.id === undefined ? undefined : pathFor(node.id);
+      // A component's setting, read first (outer before inner), is not undone by a <p> inside its content.
+      if (path !== undefined && !breaks.has(path)) {
+        breaks.set(path, kind);
+      }
+      return;
+    }
+    if (node.kind === 'element' && INLINE_TAGS.has(node.name ?? '')) {
+      (node.children ?? []).forEach((child) => mark(child, kind, depth + 1));
+    }
+  };
+  const stack: Node[] = [...nodes];
+  for (let visited = 0; visited < LIMITS.treeNodesMax && stack.length > 0; visited += 1) {
+    const node = stack.pop();
+    assert(node !== undefined, 'The stack held a node');
+    stack.push(...(node.children ?? []));
+    // A plain <p> takes line breaks without any setting: Enter in a paragraph's words is a line break, as in the
+    // Content field. Other elements keep Enter finishing the edit.
+    if (node.kind === 'element' && node.name === 'p' && isInlineOnly(node.children ?? [])) {
+      (node.children ?? []).forEach((child) => mark(child, { breaks: 'line' }, 0));
+      continue;
+    }
+    if (node.kind !== 'component') {
+      continue;
+    }
+    const settings = settingsOf(node);
+    const rich = holdsRichText(node, settings);
+    // Content that is one line of words (a Paragraph's) has no block to start a paragraph after, and the component may
+    // draw it inside a <p>, where a paragraph is invalid HTML: with rich text on it takes line breaks, as with breaks on.
+    const words = isLineOfWords(node);
+    const richRoot = rich && !words && node.id !== undefined ? pathFor(node.id) : undefined;
+    for (const child of node.children ?? []) {
+      if (richRoot !== undefined) {
+        markBlock(child, (text) => mark(text, { breaks: 'rich', richRoot }, 0));
+      } else if (settings.lineBreaks === true || (rich && words)) {
+        mark(child, { breaks: 'line' }, 0);
+      }
+    }
+  }
+  return breaks;
+}
+
+// Read from the instance's children, not from a source the parser may leave out: anything but plain markup (a
+// component, an expression) keeps Enter as it was.
+function holdsRichText<Node extends CanvasFormatTree<Node> & InlineCandidate>(node: Node, settings: EditingSettings): boolean {
+  const html = settings.richText === true ? plainChildrenHTML(node.children) : undefined;
+  return html !== undefined && richTextView(html, document).view === 'rich';
+}
+
+function isLineOfWords<Node extends CanvasFormatTree<Node> & InlineCandidate>(node: Node): boolean {
+  return (node.children ?? []).length === 0 || isInlineOnly(node.children);
+}
+
+/** The page paths of the instances whose blocks are typed in as rich text, those with no words among them. */
+export function canvasRichRootsOf<Node extends CanvasFormatTree<Node> & InlineCandidate>(
+  nodes: readonly Node[],
+  pathFor: (id: string) => string | undefined,
+  settingsOf: (component: Node) => EditingSettings,
+): readonly string[] {
+  const roots: string[] = [];
+  const pending: Node[] = [...nodes];
+  for (let visited = 0; visited < LIMITS.treeNodesMax && pending.length > 0; visited += 1) {
+    const node = pending.pop();
+    assert(node !== undefined, 'The stack held a node');
+    pending.push(...(node.children ?? []));
+    if (node.kind === 'component' && node.id !== undefined && !isLineOfWords(node) && holdsRichText(node, settingsOf(node))) {
+      const root = pathFor(node.id);
+      if (root !== undefined) {
+        roots.push(root);
+      }
+    }
+  }
+  return roots;
+}
+
+// A block's words, and a list's items' words.
+function markBlock<Node extends CanvasFormatTree<Node>>(block: Node, mark: (child: Node) => void): void {
+  if (block.kind !== 'element') {
+    return;
+  }
+  if (block.name === 'ul' || block.name === 'ol') {
+    (block.children ?? []).filter((item) => item.name === 'li').forEach((item) => (item.children ?? []).forEach(mark));
+    return;
+  }
+  if (SPLIT_BLOCKS.has(block.name ?? '')) {
+    (block.children ?? []).forEach(mark);
+  }
 }

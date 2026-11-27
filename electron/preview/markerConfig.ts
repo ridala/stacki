@@ -353,6 +353,10 @@ const { studioEntryPlugin } = require(`,
   `);
 const { previewWarmupIntegration } = require(`,
   `);
+// Images go out with no-store, so one replaced under the same name shows, and a frame that leaves
+// mid-load cannot blank the same image on the canvas (previewServer/previewImageCache.ts).
+const { previewImageCachePlugin } = require(`,
+  `);
 const PROJECT_DIRS = `,
   `;
 
@@ -974,7 +978,7 @@ export default {
     ...(Array.isArray(AVB_NETWORK_HOSTS)
       ? { server: { ...((base.vite && base.vite.server) || {}), allowedHosts: avbAllowedHosts(base.vite && base.vite.server && base.vite.server.allowedHosts) } }
       : {}),
-    plugins: [avbLoopbackGuard, studioEntryPlugin(PROJECT_DIRS[0]),
+    plugins: [avbLoopbackGuard, previewImageCachePlugin(base.image), studioEntryPlugin(PROJECT_DIRS[0]),
       componentPreviewPlugin(PROJECT_DIRS, readPackagePreviews),
       avbMarkers, avbMorph, avbVanishedStyles, avbStyleCheck,
       ...((base.vite && base.vite.plugins) || [])],

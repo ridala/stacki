@@ -8,6 +8,9 @@ import type { ClassUsageReply } from '../properties/classUsage';
 import type { PendingStyleMove, StyleMoveResolution } from '../properties/styleMoveJournal';
 import type { AiResults } from './aiChat';
 import type { AgentResults } from './projectAgentChannels';
+import type { CodeIntelReply } from './codeIntel';
+import type { FileExplorerResults, FileGitState } from './fileExplorer';
+import type { DesignSessionResults } from './designSession'; // Design mode (experimental): docs/design-mode/REMOVE.md
 import type { AppFileAnswer } from '../properties/appFiles';
 import type { AppAccessToken, AppAuthStatus } from '../properties/appAuth';
 import type { AppNetResponse } from '../properties/appNet';
@@ -44,6 +47,7 @@ import type { RepositoryResult } from '../ipc/publishRepository';
 import type { PublishDiscovery } from '../properties/publishDiscovery';
 import type { DesktopPublishState, PublishAvailability } from '../properties/publishState';
 import type { WorkerSetupResult } from '../properties/publishWorkerSetup';
+import type { NetlifySiteResult } from '../properties/publishNetlify';
 import type { ComponentOpError } from '../properties/componentOps';
 import type { ComponentRenameSummary } from '../properties/componentRename';
 import type { PageSettingsApplied, PageSettingsSummary } from '../properties/pageSettings';
@@ -164,7 +168,9 @@ export type WirePageEdit =
     } & WirePageDiskRead)
   | { readonly ok: false; readonly error: WirePageEditError };
 
-export interface IpcResults extends AiResults, AgentResults {
+// DesignSessionResults: Design mode (experimental), docs/design-mode/REMOVE.md.
+export interface IpcResults extends AiResults, AgentResults, FileExplorerResults, DesignSessionResults {
+  readonly 'codeIntel:request': CodeIntelReply;
   readonly 'project:createDefaultsCanvas': { readonly file: string };
   readonly 'project:removeDefaultsCanvas': undefined;
   readonly 'instructions:create': InstructionWriteResult;
@@ -592,6 +598,7 @@ export interface IpcResults extends AiResults, AgentResults {
   readonly 'publish:discover': PublishDiscovery;
   readonly 'publish:account': AccountState;
   readonly 'publish:workerSetup': WorkerSetupResult;
+  readonly 'publish:netlifySite': NetlifySiteResult;
   readonly 'cmsConnections:list': CmsConnectionList;
   readonly 'cmsConnections:save': CmsSaveResult;
   readonly 'cmsConnections:remove': CmsConnectionList;
@@ -694,6 +701,8 @@ export interface IpcResults extends AiResults, AgentResults {
     WireStatusFile &
       WireFileDescription & {
         readonly from: undefined | string;
+        /** Absent from Studio, whose lists derive it from the letter (features/git/CommitFilePicker.tsx). */
+        readonly state?: FileGitState | undefined;
       }
   >;
   readonly 'git:unpark':

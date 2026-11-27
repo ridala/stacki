@@ -6,6 +6,7 @@
 // joins the two features); this module only says what crosses between them.
 
 import { createLiveValue } from '../../ui/liveValue';
+import type { RichBlockChoice } from '../../../shared/properties/canvasText';
 
 export type CanvasFormatCommand = 'bold' | 'italic' | 'superscript' | 'subscript';
 export type CanvasFormatWrap = 'code' | 'span';
@@ -37,6 +38,27 @@ export interface CanvasTextSelectionState {
   readonly beginLink: () => void;
   /** The URL, or undefined to leave the words unlinked and save the typing. */
   readonly endLink: (url: string | undefined) => void;
+}
+
+/** The `+` beside an empty block of canvas rich text, in window pixels, and where its choice goes. */
+export interface CanvasRichPlusState {
+  readonly session: string;
+  readonly box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  /** The canvas's left edge: the `+` goes no further left. */
+  readonly leftMin: number;
+  readonly choose: (choice: RichBlockChoice) => void;
+  /** Tells the frame a press is on the `+` or its menu, so the blur it causes does not end the editing. */
+  readonly hold: () => void;
+  /** The menu or its address field closed with nothing chosen: typing goes on in the frame. */
+  readonly resume: () => void;
+}
+
+export const canvasRichPlus = createLiveValue<CanvasRichPlusState | undefined>(undefined);
+
+export function clearCanvasRichPlus(session: string): void {
+  if (canvasRichPlus.get()?.session === session) {
+    canvasRichPlus.set(undefined);
+  }
 }
 
 export const canvasTextSelection = createLiveValue<CanvasTextSelectionState | undefined>(undefined);

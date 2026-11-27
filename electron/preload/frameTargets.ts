@@ -5,11 +5,13 @@
 import { assert } from '../../shared/core/assert';
 import { canvasDragged, canvasInert, canvasSelects, holdLinkClick, replayingLinkClick, trackCanvas } from './frameInteraction';
 import { inlineTextPathAt } from './inlineText';
-import { isElement, type Rect } from './frameBasics';
+import { isCanvasTextEditing } from './frameTextEditing';
+import { PRELOAD_LIMITS, isElement, type Rect } from './frameBasics';
 import {
   PATH_ATTR,
   announceMapped,
   collectRegions,
+  focusPath,
   inFocus,
   inScope,
   pathsOf,
@@ -41,12 +43,10 @@ let lastPointer: { readonly x: number; readonly y: number } | undefined;
 
 // Tells the app what the pointer is over, when that changed.
 function reportHover(picked: ReturnType<typeof nodeAt>, element: Element | undefined): void {
-  // What a hover draws is what a click would pick, except bare text: untagged words among tagged siblings are no hover target
-  // of their own, so the hover is their owner's (the Heading around `Our wild<br><strong>work</strong>`), as over any other part of it.
-  const scoped = picked.textOwner === undefined ? picked : { ...picked, path: picked.textOwner };
+  // What a hover draws is what a click would pick.
   // In deep outline mode a hover inside a closed component names the element there (frameOutlineMode.ts); a click never does.
-  const deep = deepHoverAt(element, scoped.path);
-  const { path: nodePath, occurrence, pseudo } = deep === undefined ? scoped : { ...deep, pseudo: undefined };
+  const deep = deepHoverAt(element, picked.path);
+  const { path: nodePath, occurrence, pseudo } = deep === undefined ? picked : { ...deep, pseudo: undefined };
   if (lastHover === undefined || nodePath !== lastHover.path || occurrence !== lastHover.occurrence || pseudo !== lastHover.pseudo) {
     lastHover = { path: nodePath, occurrence, pseudo };
     // A deep hover says how to label its node, which the editor's tree of the open file cannot.
@@ -74,13 +74,38 @@ function rehover(): void {
   reportHover(nodeAt(target, pointer.x, pointer.y), target);
 }
 
+// Whether the target belongs to the focused instance though it renders outside it: content a script moved
+// elsewhere (a modal or a menu appended to the body), still named by a path under the instance. It is not a click
+// away from the instance. Only while the instance has one copy: with several, an element so named outside the
+// focused one is another copy of it.
+const movedOutOfFocus = (target: Node | undefined): boolean => {
+  if (focusPath === '' || (regions.get(focusPath)?.length ?? 0) > 1) {
+    return false;
+  }
+  let element = target instanceof Element ? (target.closest(`[${PATH_ATTR}]`) ?? undefined) : undefined;
+  for (let depth = 0; element !== undefined && depth < PRELOAD_LIMITS.domDepthMax; depth += 1) {
+    if (!inFocus(element) && pathsOf(element).some((nodePath) => nodePath === focusPath || nodePath.startsWith(`${focusPath}.`))) {
+      return true;
+    }
+    element = taggedAncestor(element);
+  }
+  return false;
+};
+
 // Deepest marked node whose rendered DOM contains the target, plus which
 // instance of it was hit — the app outlines only that one.
 const nodeAt = (
   target: Node | undefined,
   x?: number,
   y?: number,
-): { path: string | undefined; occurrence: number; outside: boolean; pseudo: PseudoLayer | undefined; textOwner?: string } => {
+): {
+  path: string | undefined;
+  occurrence: number;
+  outside: boolean;
+  pseudo: PseudoLayer | undefined;
+  /** The bare text run under the pointer, inside the node `path` names: only a double click asks for it. */
+  textPath?: string;
+} => {
   const tagged = taggedFor(target, x, y);
   // Whether anything at all was under the pointer, focus aside. No path
   // means the canvas could not place the click; `outside` means it could,
@@ -106,13 +131,13 @@ const nodeAt = (
       return { path: thin.path, occurrence: occurrenceOf(thin.path, thin.el), outside: false, pseudo: undefined };
     }
   }
-  // Words beside a tagged sibling — the text around a <strong> — have no
-  // element to hit, so the pointer is checked against them directly.
+  // Words beside a tagged sibling (the text around a <strong> or a <br>) have no element of their own, and are
+  // no target on the canvas: a hover, a click, a right click and a drag there are their owner's. The run is
+  // still named, for the double click that edits it; the Navigator selects it by its own row.
   if (best && x !== undefined && y !== undefined) {
     const text = inlineTextPathAt(best, x, y);
     if (text) {
-      // A bare text node among tagged siblings has no tag of its own: a click still picks it, but a hover is its owner's (hoverTarget).
-      return { path: text, occurrence: occurrenceOf(best, target), outside: false, pseudo: undefined, textOwner: best };
+      return { path: best, occurrence: occurrenceOf(best, target), outside: false, pseudo: undefined, textPath: text };
     }
   }
   // The space between a loop's items is the element holding them as far as the
@@ -129,7 +154,7 @@ const nodeAt = (
   return {
     path: best,
     occurrence: best ? occurrenceOf(best, target) : 0,
-    outside: !best && !!anyTag,
+    outside: !best && !!anyTag && !movedOutOfFocus(target),
     pseudo: undefined,
   };
 };
@@ -440,8 +465,10 @@ const listenForPointer = () => {
       // With the occurrence: a component inside a loop renders once per
       // item, and opening it means the one under the cursor.
       forgetKeptBoxes();
-      const { path: nodePath, occurrence } = nodeAtEvent(event);
-      postLocated('avb:open-node', { path: nodePath || undefined, occurrence, pressedAtMs: pressedAtMsOf(event) });
+      const picked = nodeAtEvent(event);
+      // A double click on bare words still asks for those words (the editor takes the caret to their field).
+      const nodePath = picked.textPath ?? picked.path;
+      postLocated('avb:open-node', { path: nodePath || undefined, occurrence: picked.occurrence, pressedAtMs: pressedAtMsOf(event) });
     },
     true,
   );
@@ -502,6 +529,11 @@ function listenForContextMenu(): void {
     'contextmenu',
     (event) => {
       if (!canvasSelects()) {
+        return;
+      }
+      // In the text being edited a right click is the editor's: it selects nothing else and ends nothing.
+      if (isCanvasTextEditing(event.target)) {
+        event.stopImmediatePropagation();
         return;
       }
       event.preventDefault();

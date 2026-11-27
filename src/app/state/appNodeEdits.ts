@@ -46,6 +46,7 @@ import {
   readAppSettings,
 } from '../../ipc/appBridge';
 import { parseShortcutMessage } from '../../features/preview/previewMessages';
+import { canvasClicksIntercepted } from '../../ui/canvasClickSlot';
 import { namesInSubtree, offerStyleCleanup } from '../../features/selectors/deleteCleanup';
 import { newId, withNewIds, usesPageScope, slotHostOf, definitionOf, frontmatterOf } from '../model/nodeFactory';
 import { extractionGesture, createdComponentMessage, movedStylesEdit, pasteNeeds, pastedImports, pastePlace } from '../model/pageGestures';
@@ -54,7 +55,8 @@ import { copiedFile, pasteSourceOf } from '../model/contextPaste';
 import { useContextPaste } from './appContextPaste';
 import { prunedAfterRemoval } from '../model/pageQueries';
 import { structuralSelection } from '../model/selectionStructure';
-import { loadComponentInstance, componentInstancePlacement } from '../model/componentInstances';
+import { loadComponentInstance, componentInstancePlacement, resolveInstanceImports } from '../model/componentInstances';
+import { sayMissingAssets } from './missingDefaultAssets';
 import { appShortcutRoute } from '../../features/apps/appsRuntime';
 import { runShortcutCommand } from '../../features/apps/appCommands';
 import { useCoreState } from './appLifecycle';
@@ -138,7 +140,7 @@ export function useAddComponent(
         return;
       }
       void loadComponentInstance(comp, insertables, projectPath)
-        .then((instance) => Promise.all(instance.components.map((component) => resolveImportPath(component.path))))
+        .then((instance) => resolveInstanceImports(instance, projectPath, resolveImportPath))
         .catch(() => undefined);
     },
     [insertables, projectRef, resolveImportPath],
@@ -152,15 +154,11 @@ export function useAddComponent(
       if (!comp || !page || !projectPath) {
         return;
       }
-      // The palette already leaves a hidden component out; this refuses one asked for another way (a drag, a stale list).
+      // Lists already leave out what the role is not offered; this refuses one asked for another way (a drag, a stale list).
+      // An admin's hidden component passes: adding it by hand from the Components panel is theirs to do.
       assertCanAddComponent(currentRole(), comp);
       const instance = await loadComponentInstance(comp, insertables, projectPath);
-      const resolved = await Promise.all(
-        instance.components.map(async (component) => ({
-          component,
-          paths: await resolveImportPath(component.path),
-        })),
-      );
+      const resolved = await resolveInstanceImports(instance, projectPath, resolveImportPath);
       // Import lookup is asynchronous; never apply a pending insertion to a
       // different page or project that was opened while those reads ran.
       if (pageStateRef.current.currentPage?.path !== page.path) {
@@ -188,6 +186,7 @@ export function useAddComponent(
       if (gate?.kind === 'stop') {
         return;
       }
+      sayMissingAssets(instance.missing, translate);
       // Nested defaults and all their imports are one insertion and undo step.
       const landing = gate?.target ?? aimed;
       const insert = insertGesture(state.model, node, landing, { urgency: true });
@@ -914,15 +913,29 @@ export function useCanvasMessages(coreState: ReturnType<typeof useCoreState>, in
       if (message === undefined) {
         return;
       }
+      // Comment mode takes the canvas: a forwarded edit key (Delete, an arrow, the insert palette) would act on the
+      // page's selection while the person is writing a pin. Escape still reaches the editor, which ends the mode.
+      if (canvasClicksIntercepted() && !(message.name === 'key' && message.key === 'Escape') && message.name !== 'preview') {
+        return;
+      }
       switch (message.name) {
         case 'insert':
           openIfEditable();
           return;
-        // ⌥P from the canvas or the live preview, replayed as the physical
+        // ⌥⇧P from the canvas or the live preview, replayed as the physical
         // key so the one handler (usePreviewKey) decides what it does.
         case 'preview':
           // i18n-ignore: a physical key code in a replayed keyboard event.
-          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', code: 'KeyP', altKey: true, bubbles: true, cancelable: true }));
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'P', code: 'KeyP', altKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+          return;
+        // ⌥⇧G, replayed for the one handler of it (useGitPullKey).
+        case 'pull':
+          // i18n-ignore: a physical key code in a replayed keyboard event.
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'G', code: 'KeyG', altKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+          return;
+        // A panel chord from the canvas, replayed as its physical key for the rail's own listener (LeftRail.tsx).
+        case 'panel':
+          document.dispatchEvent(new KeyboardEvent('keydown', { code: message.code, altKey: true, bubbles: true, cancelable: true }));
           return;
         // Arrow keys pressed while the canvas iframe holds focus: replay them
         // on the app window so tree navigation behaves the same whether the

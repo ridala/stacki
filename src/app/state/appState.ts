@@ -11,7 +11,7 @@ import { assert } from '../../../shared/core/assert';
 import type { PseudoLayer } from '../../../shared/page/pseudoPath';
 import { parsePseudoLayerTarget } from '../../../shared/page/pseudoElements';
 import type { ScanResult } from '../../../shared/properties/projectScan';
-import { nodeAtPath, pathOfNode } from '../../editor/editorTree';
+import { followedNode } from '../../editor/editorTree';
 import type { DevDiagnosis } from '../../features/preview/DevOffline';
 import type { PreviewDevice } from '../../features/preview/PreviewToolbar';
 import { usePreviewDimensions, type CanvasWidthRequest } from '../../features/preview/usePreviewSizing';
@@ -111,6 +111,8 @@ export function useCanvasReportState() {
   // Navigator selection is an action even when the row is already selected:
   // it resets a canvas-picked loop occurrence to the first rendered copy.
   const [navigatorSelectionTick, setNavigatorSelectionTick] = useState(0);
+  // The element an audit last went to; while it is the selection, the canvas shows whatever hides it.
+  const [revealedId, setRevealedId] = useState<string | undefined>(undefined);
   // Which selection the classes above describe, and a counter that lets the
   // effect below re-check the moment a report lands rather than on a timer.
   const classesForRef = useRef<string | undefined>(undefined);
@@ -149,6 +151,8 @@ export function useCanvasReportState() {
     hoverNode,
     hoverPseudo,
     navigatorSelectionTick,
+    revealedId,
+    setRevealedId,
     nodeClasses,
     nodeStates,
     pseudoPick,
@@ -392,9 +396,21 @@ export function useWindowState() {
     setCanvasWidthRequest((previous) => ({ widthPx, serial: (previous?.serial ?? 0) + 1 }));
     setDevice('custom');
   }, []);
+  // A device somebody asked for outside the toolbar (an app, the style panel's Base): a pick, as the button's is, so
+  // Desktop shows the desktop layout even in a narrow pane. Code that only restores a view calls setDevice.
+  const { setDesktopPick } = previewDimensions;
+  const pickDevice = useCallback(
+    (next: PreviewDevice) => {
+      if (next === 'desktop') {
+        setDesktopPick('asked');
+      }
+      setDevice(next);
+    },
+    [setDesktopPick],
+  );
   // The toolbar's desktop device, for the style panel's Base (model/baseWidth.ts): the
   // same state update the device button makes, so the two can never land differently.
-  const showDesktopCanvas = useCallback(() => setDevice('desktop'), []);
+  const showDesktopCanvas = useCallback(() => pickDevice('desktop'), [pickDevice]);
   // Bumped every time the page itself makes the selection, so the navigator
   // scrolls the row into view — a counter, not the id, so clicking the same
   // element twice still reveals it.
@@ -446,6 +462,7 @@ export function useWindowState() {
     setContentFocus,
     setCreateRequest,
     setDevice,
+    pickDevice,
     canvasWidthRequest,
     canvasWidthPx,
     setCanvasWidthPx,
@@ -493,13 +510,10 @@ export function useSessionRefs(projectState: ReturnType<typeof useProjectState>)
       return;
     }
     setSelectedId((id) => {
-      if (!id || id === 'layout' || id === 'frontmatter' || findNodeById(model.nodes, id)) {
+      if (!id || id === 'layout' || id === 'frontmatter') {
         return id;
       }
-      const was = findNodeById(before.nodes, id);
-      const trail = pathOfNode(before.nodes, id);
-      const now = trail ? nodeAtPath(model.nodes, trail) : undefined;
-      return now && was && now.kind === was.kind ? now.id : undefined;
+      return followedNode(before.nodes, model.nodes, id)?.id;
     });
   }, [pageState, setSelectedId]);
   return { devLogRef, insertables, pageStateRef, saveTimer };

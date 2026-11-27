@@ -11,7 +11,6 @@ import { writeNewProjectDefaults } from '../project/newProjectDefaults';
 import { createStarter, newSiteDirectory, runCreateCommand, startSiteHistory, STARTERS } from '../project/starter';
 import { createHeroUIStarter } from '../project/herouiStarter';
 import { createShadcnStarter, inspectShadcnPreset } from '../project/shadcnStarter';
-import { isWin } from '../lib/mainHelpers';
 import { ensureToolPath, run } from '../lib/nodeTools';
 import { isAstroProject } from '../project/projectFiles';
 import { detectPackageManager, installArguments } from '../project/packageManager';
@@ -167,6 +166,7 @@ function registerProjectCreateStarterHandlers({ ipcMain, send }: Pick<MainHost, 
       starter,
       parentPath,
       name,
+      manager: packageManager,
       onLog,
     });
     const label = STARTERS[starter]?.label ?? starter;
@@ -256,13 +256,10 @@ function normalizedRequest<Request extends { readonly sourcePath: string; readon
 }
 
 export async function installDependencies({ send }: Pick<MainHost, 'send'>, directory: string, pm: PackageManager = detectPackageManager(directory)) {
-  ensureToolPath(); // npm/pnpm/yarn are Node shims — same PATH problem as astro
+  ensureToolPath(); // npm/pnpm/yarn are Node shims, and bun lives in ~/.bun/bin — same PATH problem as astro
   send('progress', { message: `Installing dependencies (${pm} install)…` });
   try {
-    await run(isWin ? `${pm}.cmd` : pm, [...installArguments(pm)], directory, {
-      timeout: 10 * 60 * 1000,
-      shell: isWin,
-    });
+    await run(pm, [...installArguments(pm)], directory, { timeout: 10 * 60 * 1000 });
   } catch (error: unknown) {
     if (toRecord(error)?.['code'] === 'ENOENT') {
       throw new Error(`This project uses ${pm}, but ${pm} is not installed. Install it and try again.`);
@@ -275,9 +272,12 @@ export async function installDependencies({ send }: Pick<MainHost, 'send'>, dire
 // any folder exists. On Windows a missing command fails without ENOENT, so any failure counts.
 async function requirePackageManager(manager: PackageManager): Promise<void> {
   try {
-    await run(isWin ? `${manager}.cmd` : manager, ['--version'], os.homedir());
+    await run(manager, ['--version'], os.homedir());
   } catch {
-    throw new Error(`${packageManagerLabel(manager)} is not installed. Install it or choose npm.`);
+    // The message for the others offers npm, so npm needs one of its own.
+    throw new Error(
+      manager === 'npm' ? translateMain('error.project.npmMissing') : translateMain('error.project.managerMissing', { manager: packageManagerLabel(manager) }),
+    );
   }
 }
 
@@ -340,8 +340,7 @@ async function runCreateAstroInNewFolder({ send }: Pick<MainHost, 'send'>, direc
 // The create-astro run itself, its output streamed to the wizard's log. It
 // settles once the CLI exits and a package.json has landed in `directory`.
 async function runCreateAstro({ send }: Pick<MainHost, 'send'>, directory: string, args: readonly string[]): Promise<void> {
-  const npm = isWin ? 'npm.cmd' : 'npm';
-  await runCreateCommand(npm, args, directory, (text) => send('create:log', text));
+  await runCreateCommand('npm', args, directory, (text) => send('create:log', text));
   if (!fs.existsSync(path.join(directory, 'package.json'))) {
     throw new Error('create-astro finished but no package.json appeared.');
   }

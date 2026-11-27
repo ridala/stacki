@@ -28,7 +28,13 @@ function installFixture(lockfile: string, writeExtra?: (directory: string) => Pr
       return runCreateCommand(command, argumentsList, directory, onLog, options);
     }
     if (argumentsList[0] === '--version') {
-      return /^npm/.test(command) ? '10.9.9\n' : '12.23.0\n';
+      if (command.startsWith('npm')) {
+        return '10.9.9\n';
+      }
+      if (command.startsWith('pnpm')) {
+        return '12.23.0\n';
+      }
+      return '1.2.15\n';
     }
     assert.equal(argumentsList[0], 'install');
     assert.equal(options?.environment?.['COREPACK_ENABLE_PROJECT_SPEC'], '0');
@@ -37,9 +43,11 @@ function installFixture(lockfile: string, writeExtra?: (directory: string) => Pr
     if (command.startsWith('npm')) {
       assert.ok(argumentsList.includes('--workspaces=false'));
       assert.equal(options.environment?.['npm_config_workspaces'], 'false');
-    } else {
+    } else if (command.startsWith('pnpm')) {
       assert.ok(argumentsList.includes('--config.node-linker=hoisted'));
       assert.equal(await readFile(path.join(directory, 'pnpm-workspace.yaml'), 'utf8'), 'packages: []\nnodeLinker: hoisted\n');
+    } else {
+      assert.deepEqual(argumentsList, ['install']);
     }
     await writeFile(path.join(directory, lockfile), 'fixture lockfile\n');
     await writeExtra?.(directory);
@@ -50,6 +58,7 @@ function installFixture(lockfile: string, writeExtra?: (directory: string) => Pr
 for (const [manager, lockfile] of [
   ['npm', 'package-lock.json'],
   ['pnpm', 'pnpm-lock.yaml'],
+  ['bun', 'bun.lock'],
 ] as const) {
   test(`publishes an isolated ${manager} site with tracked sources and one Git commit`, async (context) => {
     const parentPath = await makeParent(context);

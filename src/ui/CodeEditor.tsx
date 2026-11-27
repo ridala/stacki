@@ -10,7 +10,7 @@ import { css } from '@codemirror/lang-css';
 import { javascript } from '@codemirror/lang-javascript';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
-import { syntaxHighlighting, HighlightStyle, indentOnInput, LanguageDescription } from '@codemirror/language';
+import { syntaxHighlighting, HighlightStyle, indentOnInput, LanguageDescription, StreamLanguage } from '@codemirror/language';
 import { search } from '@codemirror/search';
 import { astroHighlight } from './astroHighlight';
 import { codeIndentExtensions } from './codeEditorIndent';
@@ -131,6 +131,8 @@ export interface CodeEditorProps {
   readonly activeRange?: CodeEditorRange | undefined;
   readonly componentRanges?: readonly CodeEditorComponentRange[] | undefined;
   readonly onPositionChange?: ((position: number) => void) | undefined;
+  /** The text selected in the editor, in source offsets with the source it is of, or undefined when none is. */
+  readonly onSelectionChange?: ((selection: CodeEditorSelection | undefined) => void) | undefined;
   readonly onOpenComponent?: ((name: string, id: string) => void) | undefined;
   /**
    * More CodeMirror extensions, read when the editor is made (as `language` is): a caller's own
@@ -150,6 +152,10 @@ export type CodeEditorIndentation = CodeExtent | 'spaces';
 export interface CodeEditorRange {
   readonly from: number;
   readonly to: number;
+}
+
+export interface CodeEditorSelection extends CodeEditorRange {
+  readonly source: string;
 }
 
 export interface CodeEditorComponentRange extends CodeEditorRange {
@@ -382,6 +388,9 @@ function codeEditorCreate(parent: HTMLDivElement, language: string | undefined, 
               latest.current.onChange?.(next.source, codeSourceOffset(next, update.state.selection.main.head));
             }
           }
+          if (update.selectionSet || update.docChanged) {
+            reportSelection(update.state, refs);
+          }
         }),
       ],
     }),
@@ -393,6 +402,16 @@ function codeEditorCreate(parent: HTMLDivElement, language: string | undefined, 
     }),
   });
   return view;
+}
+
+function reportSelection(state: EditorState, refs: CodeEditorRefs): void {
+  const report = refs.latest.current.onSelectionChange;
+  const current = refs.codeViewRef.current;
+  if (report === undefined || current === undefined) {
+    return;
+  }
+  const { from, to } = state.selection.main;
+  report(from === to ? undefined : { from: codeSourceOffset(current, from), to: codeSourceOffset(current, to), source: current.source });
 }
 
 function codeEditorInteractions(refs: CodeEditorRefs) {
@@ -456,6 +475,18 @@ function codeEditorRangeWithin(range: CodeEditorRange | undefined, length: numbe
   return range;
 }
 
+// A file with no grammar in the app (YAML, .env, a log): one token per line and no colour, rather than the JavaScript
+// grammar misreading it. Built from CodeMirror's own stream parser, so no dependency is added.
+const plainTextLanguage = StreamLanguage.define<undefined>({
+  name: 'plaintext',
+  startState: () => undefined,
+  token: (stream) => {
+    stream.skipToEnd();
+    // eslint-disable-next-line stacki/no-null -- CodeMirror's stream parser says "no style" with null.
+    return null;
+  },
+});
+
 export function codeEditorLanguage(language: string | undefined): LanguageSupport {
   if (language === 'astro' || language === 'html') {
     // HTML supplies structural editing while the official Astro TextMate
@@ -467,6 +498,9 @@ export function codeEditorLanguage(language: string | undefined): LanguageSuppor
   }
   if (language === 'toml') {
     return new LanguageSupport(tomlLanguage);
+  }
+  if (language === 'plaintext') {
+    return new LanguageSupport(plainTextLanguage);
   }
   if (language === 'markdown') {
     // MDX is mostly prose: highlight headings and fences instead of parsing it all as JS.

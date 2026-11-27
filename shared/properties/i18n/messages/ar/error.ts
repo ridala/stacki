@@ -97,6 +97,8 @@ export const messages = {
   'error.project.chooseInside': 'اختر شيئًا داخل المشروع، وليس المشروع نفسه.',
   'error.project.creationBusy': 'جارٍ إنشاء موقع بالفعل. انتظر حتى ينتهي.',
   'error.project.gone': 'لم يعد ذلك موجودًا.',
+  'error.project.managerMissing': '‏{manager} غير مثبّت. ثبّته أو اختر npm.',
+  'error.project.npmMissing': 'تعذّر العثور على npm. ثبّت Node.js (الذي يتضمن npm) ثم حاول مرة أخرى.',
   'error.project.outside': 'ذلك خارج المشروع.',
   'error.projectSettings.changed': 'تغيّرت إعدادات المشروع. أعد التحميل قبل الحفظ.',
   'error.projectSettings.changedDuringSave': 'تغيّرت إعدادات المشروع أثناء الحفظ. أعد التحميل لفحصها.',

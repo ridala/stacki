@@ -134,9 +134,17 @@ test('the complete channel inventory matches real main and terminal registration
   // Publish's Add Worker setup adds one (publish:workerSetup), 324 in all.
   // A folder from outside the app adds two (project:inspectFolder for a window drop, project:takeOpenedFolders for
   // the icon and the command line; shared/ipc/folderOpen.ts), 326 in all.
-  // The shadcn wizard adds one (project:inspectShadcnPreset) so main can resolve a preset before site creation, 329 including the two shadcn project settings channels.
-  // Existing Astro setup adds a read-only scan and a witnessed apply.
-  assert.equal(harness.handlers.size, 331);
+  // The Files panel adds thirteen (files:list, :read, :write, :create, :rename, :transfer, :trash, :import, :reveal, :find,
+  // :watch, :guardClose and :allowClose; shared/ipc/fileExplorer.ts), 339 in all.
+  // The AI panel's comment pins add two (ai:pinsRead and :pinsWrite, the board kept under userData), 341 in all.
+  // Design mode adds one (design:session; docs/design-mode/REMOVE.md), 342 in all.
+  // Publish's Add site for Netlify adds one (publish:netlifySite), 343 in all.
+  // The code editor's intelligence adds one (codeIntel:request; shared/ipc/codeIntel.ts), 344 in all.
+  // Signing in to MCP servers adds one (ai:mcpAuth; shared/properties/mcp.ts), 345 in all.
+  // The Files panel's git marks add one (files:gitStatus; shared/ipc/fileExplorer.ts), 346 in all.
+  // The shadcn wizard adds one (project:inspectShadcnPreset) and shadcn project settings add two, 349 in all.
+  // Existing Astro setup adds a read-only scan and a witnessed apply (project:setupScan and :setupApply), 351 in all.
+  assert.equal(harness.handlers.size, 351); // Design mode (experimental): docs/design-mode/REMOVE.md
   assert.equal(terminalChannels.length, 4);
   assert.deepEqual([...Object.keys(IPC_PAYLOADS)].sort(), [...harness.handlers.keys(), ...terminalChannels].sort());
   // One-way `send` listeners bypass the invoke registrar, so each must name
@@ -239,6 +247,7 @@ test('disk parsers validate known shapes and fail on corrupt data', () => {
     aiReviewChanges: false,
     codeChips: true,
     localePreference: 'system',
+    httpCacheCleanupVersion: 0,
   });
   assert.equal(parseSettings({ sound: true, appsPersonHidden: true }).appsPersonHidden, true);
   assert.equal(parseSettings({ sound: true, aiAskBeforeTrust: true }).aiAskBeforeTrust, true);
@@ -298,6 +307,7 @@ test('disk parsers validate known shapes and fail on corrupt data', () => {
       aiReviewChanges: false,
       codeChips: true,
       localePreference: 'system',
+      httpCacheCleanupVersion: 0,
     },
   );
   assert.throws(() => parseSettings({ sound: false, usageCountsEnabled: 'no' }), /boolean/);

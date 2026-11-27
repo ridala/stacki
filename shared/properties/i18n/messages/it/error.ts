@@ -87,6 +87,8 @@ export const messages = {
   'error.project.chooseInside': 'Scegli qualcosa all’interno del progetto, non il progetto stesso.',
   'error.project.creationBusy': 'È già in corso la creazione di un sito. Attendi che finisca.',
   'error.project.gone': 'Non c’è più.',
+  'error.project.managerMissing': '{manager} non è installato. Installalo o scegli npm.',
+  'error.project.npmMissing': 'npm non è stato trovato. Installa Node.js (che include npm) e riprova.',
   'error.project.outside': 'Si trova fuori dal progetto.',
   'error.projectSettings.changed': 'Le impostazioni del progetto sono cambiate. Ricarica prima di salvare.',
   'error.projectSettings.changedDuringSave': 'Le impostazioni del progetto sono cambiate durante il salvataggio. Ricarica per controllarle.',

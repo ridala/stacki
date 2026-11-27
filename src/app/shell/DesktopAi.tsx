@@ -17,9 +17,7 @@ import type { MergeResolution } from '../../../shared/ipc/mergeResolution';
 import { can, type RoleView } from '../../../shared/properties/projectRoles';
 import { aiAgentTaskHandler, AI_PANEL_HANDLER_PRIORITY } from '../../features/ai/aiAgentTask';
 import { mentionComponentsOf, setMentionComponents } from '../../features/ai/mentions/componentMentions';
-import { setSelectionMention } from '../../features/ai/mentions/selectionMention';
-import { projectRelativePath } from '../../lib/projectPath';
-import { locatorOf, selectionMentionOf } from './aiSelection';
+import { useAddToChat } from './aiAddToChat';
 import { mentionIndexSource } from './aiMentionIndex';
 import { setMentionIndexSource } from '../../features/ai/mentions/projectMentions';
 // Lends the Properties panel's prop field to the composer's component-chip popover.
@@ -182,6 +180,19 @@ export function shouldEscapeExpanded(event: { readonly key: string; readonly def
   return !event.target.matches('input, textarea, [contenteditable], [contenteditable] *');
 }
 
+/** Shows the panel where it lives: already over the canvas, in its window, or in the left panel. */
+function openAiPanel(setLeftTab: ShellView['setLeftTab']): void {
+  if (windowState.expanded) {
+    // Already showing over the canvas.
+    return;
+  }
+  if (windowState.mode === 'floating') {
+    setWindowState((current) => ({ ...current, floatingOpen: true }));
+  } else {
+    setLeftTab('ai');
+  }
+}
+
 /** Mounted with the shell: the hand-off handler, the floating window and the merge editor. */
 export function AiHost({ app }: { readonly app: ShellView }) {
   const role = useCurrentRole();
@@ -191,6 +202,7 @@ export function AiHost({ app }: { readonly app: ShellView }) {
   const state = useAiWindow();
   const changeMode = useModeChange(app);
   useAiScreenshotSource();
+  useAddToChat(app, { available, openPanel: () => openAiPanel(app.setLeftTab) });
   const projectPath = app.project.path;
   const { setLeftTab } = app;
   const scannedComponents = app.scan.components;
@@ -208,27 +220,6 @@ export function AiHost({ app }: { readonly app: ShellView }) {
     setMentionIndexSource(mentionIndexSource({ projectPath, platform: window.avb.platform, pages: scannedPages, classNames: projectClasses }));
     return () => setMentionIndexSource(undefined);
   }, [projectPath, scannedPages, projectClasses]);
-  // "Add selected element" offers what the Properties panel shows: the selected node and the values it writes.
-  const { selectedNode, selectedComponent, selectedId, pathFor } = app;
-  const openPage = app.currentPage?.path;
-  useEffect(() => {
-    const platform = window.avb.platform;
-    const openFile = openPage === undefined ? undefined : projectRelativePath(projectPath, openPage, platform);
-    const place = locatorOf(selectedId === undefined ? undefined : pathFor(selectedId), openFile);
-    const node = selectedNode !== undefined && 'kind' in selectedNode && selectedNode.kind !== 'frontmatter' ? selectedNode : undefined;
-    setSelectionMention(
-      selectionMentionOf({
-        node,
-        component: selectedComponent,
-        file: place?.file,
-        locator: place?.locator,
-        componentFile: selectedComponent === undefined ? undefined : projectRelativePath(projectPath, selectedComponent.path, platform),
-      }),
-    );
-    // pathFor is rebuilt each render; the selection and the file are what change the answer.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-  }, [selectedNode, selectedComponent, selectedId, openPage, projectPath]);
-  useEffect(() => () => setSelectionMention(undefined), []);
   useLayoutEffect(() => {
     // Invalidate callbacks already held by a pending handoff as soon as the host changes.
     let active = true;
@@ -246,14 +237,10 @@ export function AiHost({ app }: { readonly app: ShellView }) {
         projectPath: () => (active ? projectPath : undefined),
         available: availableInScope,
         openPanel: () => {
-          if (!availableInScope() || windowState.expanded) {
+          if (!availableInScope()) {
             return;
           }
-          if (windowState.mode === 'floating') {
-            setWindowState((current) => ({ ...current, floatingOpen: true }));
-          } else {
-            setLeftTab('ai');
-          }
+          openAiPanel(setLeftTab);
         },
       }),
     );

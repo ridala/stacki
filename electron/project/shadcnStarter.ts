@@ -182,6 +182,22 @@ async function decodePreset(preset: string, directory: string, run: CommandRunne
   }
 }
 
+function shadcnLauncher(manager: CreatePackageManager): readonly string[] {
+  switch (manager) {
+    case 'npm':
+      // `npm exec` is the same runner as npx, using the npm executable checked before creation.
+      return ['exec', '--yes', '--'];
+    case 'pnpm':
+      return ['dlx'];
+    case 'bun':
+      return ['x'];
+    default: {
+      const exhaustive: never = manager;
+      return exhaustive;
+    }
+  }
+}
+
 async function runShadcn(
   manager: CreatePackageManager,
   argumentsList: readonly string[],
@@ -190,9 +206,7 @@ async function runShadcn(
   options: Parameters<CommandRunner>[4],
   onLog?: Log,
 ): Promise<string> {
-  // `npm exec` is the same runner as npx, using the npm executable checked before creation.
-  const launcher = manager === 'npm' ? ['exec', '--yes', '--'] : ['dlx'];
-  return run(managerCommand(manager), [...launcher, SHADCN_CLI_PACKAGE, ...argumentsList], directory, onLog, options);
+  return run(managerCommand(manager), [...shadcnLauncher(manager), SHADCN_CLI_PACKAGE, ...argumentsList], directory, onLog, options);
 }
 
 async function prepareShadcnStage(staging: string, manager: CreatePackageManager): Promise<NodeJS.ProcessEnv> {

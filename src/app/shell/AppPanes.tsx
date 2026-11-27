@@ -1,3 +1,11 @@
+import { projectRelativePath } from '../../lib/projectPath';
+import { DEFAULT_SLOT_FIELD } from '../../../shared/properties/componentDefaults';
+import { useCodeIntel } from '../../features/codeIntel/useCodeIntel';
+import { InspectorTabButton } from './InspectorTabButton';
+import { assetScopeOf, shownAssetSource } from '../../editor/richAssetImports';
+import { innerSourceOf } from '../../features/props/richTextContent';
+import { sourceRangeForSelection } from '../../features/code/codePanelModel';
+import { FilesCover } from './DesktopFiles';
 import { useFormat, useTranslate, useTranslateRich } from '../../lib/i18n/useTranslate';
 import type { MessageKey, Translator } from '../../lib/i18n/localeContext';
 import { desktopCanvasText } from './desktopCanvasText';
@@ -44,10 +52,11 @@ import { openAppSettings } from '../settings/LazySettings';
 import { PropsPanel, StylePanel, CodeWindow, CmsView, ContentView, VariablesView, InstructionsView } from '../appPanels';
 import CmsFileFields from '../../features/cms/CmsFileFields';
 import { selectInstruction, useInstructionSelection } from '../../features/instructions/instructionSelection';
-import { holdsInlineText, commentAbove, trailOf } from '../model/pageGestures';
+import { holdsInlineText, commentAbove, schemaFor, trailOf, withClassField } from '../model/pageGestures';
 import type { ShellView } from '../App';
 import { editLoopProperty, type LoopPropertyEdit } from '../state/loopPropertyEdit';
 import { assert } from '../../../shared/core/assert';
+import { useListProps } from '../state/useListProps';
 import PanelBoundary from '../../ui/PanelBoundary';
 import { KeptTabPanel } from '../../ui/KeptTabPanel';
 import { PropPreviewContext } from '../../features/props/propPreviewContext';
@@ -55,12 +64,30 @@ import { propPreviewInstance, useDesktopPropPreview } from './desktopPropPreview
 import type { PseudoLayer } from '../../../shared/page/pseudoPath';
 import { selectedPseudo } from '../model/selectionStructure';
 import { appOverlayLayer, useAppOverlayPaths } from './DesktopApps';
+import { usePinCanvas } from './DesktopPins';
 import { useCanvasDrag } from '../state/appCanvasDrag';
 import { useCanvasImagePopup } from './desktopCanvasImage';
 import { ImagePropFields } from '../../features/props/ImagePropFields';
 import { NavigatorDropLine, navigatorDropPaths } from '../../features/preview/CanvasDropOverlay';
 import { navigatorDropShown, subscribeCanvasDrag } from '../../editor/canvasDragSession';
 import { codeChipTextOf, useCodeChips } from '../../features/style/codeChips/CodeChips';
+import { pressWasForEditor, type CanvasPress } from '../../features/preview/canvasEditorPress';
+import {
+  canvasBoxOf,
+  canvasInstanceAt,
+  canvasRootPath,
+  isComponentCanvasPage,
+  useComponentCanvas,
+} from '../../features/preview/componentCanvas/componentCanvasSession';
+import { PropFieldExtrasContext } from '../../features/props/propFieldExtras';
+import { useCanvasInstanceSettings, type CanvasInstanceSettings } from './canvasFrameSettings';
+import { desktopGuideSubject } from '../../features/preview/guideSettings';
+import { CanvasSectionHeading } from '../../features/preview/componentCanvas/CanvasScopeControl';
+import type { PropsPanelProps } from '../../features/props/propsPanelTypes';
+import { installCssFieldChips } from '../../ui/cssFieldChips';
+
+// The Settings panel's CSS fields (the style prop) draw the code editors' chips.
+installCssFieldChips(useCodeChips);
 
 // One function for the life of the app: the Style panel publishes its host on every render, and a
 // new arrow each time would wake every host subscriber (StylePanel.tsx useStableList says why).
@@ -77,16 +104,22 @@ export function CanvasPane({ app }: { readonly app: ShellView }) {
   const navigatorDrop = useSyncExternalStore(subscribeCanvasDrag, navigatorDropShown);
   const dropPaths = navigatorDropPaths(navigatorDrop, (id) => app.pathFor(id));
   const dropKey = dropPaths.join('\n');
-  const trackPaths = useMemo(() => [...appOverlayPaths, ...(dropKey === '' ? [] : dropKey.split('\n'))], [appOverlayPaths, dropKey]);
+  // Comment pins (DesktopPins.tsx): the elements pins sit on are measured too, and their markers drawn over the canvas.
+  const pins = usePinCanvas(app);
+  const pinPaths = pins.trackPaths;
+  const trackPaths = useMemo(() => [...appOverlayPaths, ...pinPaths, ...(dropKey === '' ? [] : dropKey.split('\n'))], [appOverlayPaths, pinPaths, dropKey]);
   const appOverlays = appOverlayLayer(app);
+  const guideSubject = useGuideSubject(app);
   return (
     <>
       <PreviewPane
+        guideSubject={guideSubject}
         extraTrackPaths={trackPaths}
         overlayLayer={(frame) => (
           <>
             <NavigatorDropLine rects={frame.rects} scale={frame.scale} pathOf={(id) => app.pathFor(id)} />
             {appOverlays(frame)}
+            {pins.overlay(frame)}
           </>
         )}
         textDocument={desktopCanvasText(app, translate)}
@@ -111,6 +144,7 @@ export function CanvasPane({ app }: { readonly app: ShellView }) {
         pathScope={app.editedRel ? `${app.editedRel}|` : ''}
         selPath={app.pathFor(app.selectedId)}
         navigatorSelectionTick={app.navigatorSelectionTick}
+        unhidePath={app.revealedId !== undefined && app.revealedId === app.selectedId ? app.pathFor(app.selectedId) : undefined}
         navHoverPath={app.pathFor(hoverNodeId)}
         navHoverPseudo={hoverPseudo}
         selPseudo={selectedPseudo(app.selectedId, app.pseudoPick)}
@@ -130,6 +164,7 @@ export function CanvasPane({ app }: { readonly app: ShellView }) {
         onPreviewReload={app.onPreviewReload}
         onContextPath={context.open}
         onSelectPath={(path, info) => selectCanvasPath(app, path ?? undefined, info)}
+        {...(atCanvasPage(app) ? { canvasPathOf: canvasPageNodePath, canvasWholePath: canvasRootPath() } : {})}
         onSelectedClasses={app.receiveClasses}
         onRenderedPaths={app.setRenderedPaths}
         onNodeStates={app.setNodeStates}
@@ -141,8 +176,18 @@ export function CanvasPane({ app }: { readonly app: ShellView }) {
       />
       {context.menu}
       {image.popup}
+      {pins.bar}
     </>
   );
+}
+
+function useGuideSubject(app: ShellView) {
+  const componentCanvas = useComponentCanvas();
+  return desktopGuideSubject({
+    openFile: app.currentPage,
+    componentCanvas: componentCanvas?.state.kind,
+    defaultsCanvas: app.defaultsCanvas.state.kind === 'idle' ? 'idle' : 'shown',
+  });
 }
 
 // The image popup's fields: the Properties panel's own editors for the selected node, only the ones named.
@@ -193,12 +238,15 @@ function useCanvasContextMenu(app: ShellView) {
   };
 }
 
-function canvasContextPosition(app: ShellView, path: string | undefined, point: CanvasContextPoint): ContextPosition | undefined {
+function canvasContextPosition(app: ShellView, framePath: string | undefined, point: CanvasContextPoint): ContextPosition | undefined {
+  // On the component canvas's page a right click names what a click there selects: a frame's instance, or the root.
+  const path = framePath !== undefined && atCanvasPage(app) ? canvasPageNodePath(framePath) : framePath;
   const action = canvasClickAction({
     path,
     outside: point.outside,
     focusPath: app.focusPath,
     scope: app.editedRel ? `${app.editedRel}|` : '',
+    ownedRoot: defaultsRootPath(app),
   });
   if (action.kind === 'close' || action.kind === 'nothing' || !app.pageState?.editable) {
     return undefined;
@@ -210,6 +258,28 @@ function canvasContextPosition(app: ShellView, path: string | undefined, point: 
   }
   selectCanvasPath(app, path, point);
   return { ...point, nodeId: node.id };
+}
+
+// On the component canvas's page, the node a canvas path stands for: a box (a frame's or a group's) itself, a frame's
+// instance for anything inside it, the page's root (<html>) for the space between boxes; a path in another file's
+// namespace is left as it is.
+function canvasPageNodePath(path: string): string {
+  if (path.includes('|') || canvasBoxOf(path) !== undefined) {
+    return path;
+  }
+  const instance = canvasInstanceAt(path);
+  return instance !== undefined && (path === instance.path || path.startsWith(instance.path + '.')) ? instance.path : (canvasRootPath() ?? path);
+}
+
+// Whether the open file is the component canvas's page itself, not an instance opened inside it.
+function atCanvasPage(app: ShellView): boolean {
+  return isComponentCanvasPage(app.currentPage?.path) && app.editStack.length <= 1;
+}
+
+// The instance the component defaults page edits, while that page is the open file; undefined anywhere else.
+function defaultsRootPath(app: ShellView): string | undefined {
+  const canvas = app.defaultsCanvas;
+  return canvas.isOpen && canvas.state.kind !== 'idle' ? canvas.state.session.targetPath : undefined;
 }
 
 // What a click on the canvas MEANT — see canvasClick.js. The canvas answers with a
@@ -226,6 +296,7 @@ export function selectCanvasPath(
         readonly occurrence?: number;
         readonly copies?: number | undefined;
         readonly iterations?: readonly { readonly path: string; readonly index: number }[] | undefined;
+        readonly press?: CanvasPress | undefined;
       }
     | undefined,
 ): void {
@@ -253,18 +324,30 @@ export function selectCanvasPath(
     app.setLeftTab(leftTabAfterCanvasSelection);
     app.setRevealTick((count) => count + 1);
   };
+  if (atCanvasPage(app)) {
+    // On the component canvas's own page a box (a frame's or a group's) is selected as the div it is; a click inside an
+    // instance selects the instance, closed; a click between boxes selects the canvas itself, its root.
+    const target = path === undefined ? canvasRootPath() : canvasPageNodePath(path);
+    reveal(target === undefined || app.model === undefined ? undefined : nodeAtPath(app.model.nodes, trailOf(target)));
+    return;
+  }
   const { kind } = canvasClickAction({
     path: path ?? undefined,
     outside: !!info?.outside,
     focusPath: app.focusPath,
     scope: app.editedRel ? `${app.editedRel}|` : '',
+    ownedRoot: defaultsRootPath(app),
   });
   if (kind === 'nothing') {
     return;
   }
   if (kind === 'close') {
     if (app.defaultsCanvas.state.kind !== 'idle') {
-      void app.defaultsCanvas.run('done');
+      // Close defaults' own path: it saves first, and a refused save keeps the editor open and says why. A press
+      // that only closed a menu, or landed on one of the editor's tags, is not a press on the dimmed page.
+      if (!pressWasForEditor(info?.press)) {
+        void app.defaultsCanvas.run('done');
+      }
     } else {
       // Opening the parent file reports its own failures.
       void app.closeComponent();
@@ -300,6 +383,19 @@ export function pickPseudo(app: Pick<ShellView, 'setPseudoPick'>, target: Pseudo
 // landed on chrome the layout renders itself (nav, footer) — that markup belongs to
 // the layout, so open the layout, matching what a single click there selects.
 export function openCanvasPath(app: ShellView, path: string | undefined, occurrence: number): void {
+  if (atCanvasPage(app)) {
+    // A double click anywhere in a component canvas frame goes inside its instance, as on its navigator row.
+    const instance = canvasInstanceAt(path);
+    const node = instance === undefined || app.model === undefined ? undefined : nodeAtPath(app.model.nodes, trailOf(instance.path));
+    if (instance !== undefined && node?.kind === 'component') {
+      void app.openComponent(node.name, instance.path, 0).catch(app.reportFailure);
+    }
+    return;
+  }
+  const root = defaultsRootPath(app);
+  if (root !== undefined && canvasClickAction({ path, ownedRoot: root }).kind !== 'select') {
+    return; // On the dimmed page the first click of a double click has already closed the editor: nothing opens.
+  }
   if (!path) {
     if (app.layoutNode?.name) {
       void app.openComponent(app.layoutNode.name, app.pathFor('layout')).catch(app.reportFailure);
@@ -333,6 +429,7 @@ export function CanvasCovers({ app }: { readonly app: ShellView }) {
   return (
     <>
       <InstructionsCover app={app} />
+      <FilesCover app={app} />
       {app.varsGroup && (
         <VariablesView
           key={app.project.path}
@@ -466,6 +563,18 @@ export function RightPanel({ app }: { readonly app: ShellView }) {
   const visible = RIGHT_TABS.filter((tab) => canPanel(role, tab.id));
   const fallback = visible.some((tab) => tab.id === app.rightTab) ? undefined : visible[0]?.id;
   const { setRightTab } = app;
+  // A component canvas frame's instance: its props are that frame's preview values (canvasFrameSettings.tsx).
+  const componentCanvas = useComponentCanvas();
+  const canvasInstance = useCanvasInstanceSettings(app, componentCanvas);
+  // A box or a group on the component canvas shows its frame's instance, as if the instance were selected.
+  const canvasComponent = componentCanvas?.state.kind === 'open' && canvasInstance?.kind === 'instance' ? componentCanvas.state.component.file : undefined;
+  const scanComponent =
+    canvasComponent === undefined ? undefined : app.scan.components.find((entry) => entry.path.replaceAll('\\', '/').endsWith('/' + canvasComponent));
+  const canvasListProps = useListProps(app.project.path, scanComponent?.path);
+  const settingsApp: ShellView =
+    canvasInstance?.kind === 'instance' && app.selectedNode?.id !== canvasInstance.node.id && scanComponent !== undefined
+      ? { ...app, selectedNode: canvasInstance.node, selectedComponent: scanComponent, selectedSchema: schemaFor(scanComponent), listProps: canvasListProps }
+      : app;
   useEffect(() => {
     if (fallback !== undefined) {
       setRightTab(fallback);
@@ -483,10 +592,22 @@ export function RightPanel({ app }: { readonly app: ShellView }) {
         </PanelBoundary>
       </KeptTabPanel>
       <KeptTabPanel shown={app.rightTab === 'settings'}>
+        {canvasInstance?.kind === 'instance' && componentCanvas?.state.kind === 'open' && (
+          <div className="component-canvas-props-scope">
+            <CanvasSectionHeading
+              canvas={componentCanvas}
+              state={componentCanvas.state}
+              section="props"
+              title={translate('componentCanvas.panel.scope.label')}
+            />
+          </div>
+        )}
         <PropPreviewContext.Provider value={propPreview}>
-          <PanelBoundary name="The Settings panel" label={translate('shell.rightTabs.settingsPanel')} resetKey={app.selectedId}>
-            <PropsPanel {...settingsValues(app)} {...settingsHandlers(app, translate)} />
-          </PanelBoundary>
+          <PropFieldExtrasContext.Provider value={canvasInstance === undefined ? undefined : canvasInstance.extras}>
+            <PanelBoundary name="The Settings panel" label={translate('shell.rightTabs.settingsPanel')} resetKey={app.selectedId}>
+              <PropsPanel {...settingsOf(settingsApp, translate, canvasInstance)} />
+            </PanelBoundary>
+          </PropFieldExtrasContext.Provider>
         </PropPreviewContext.Provider>
       </KeptTabPanel>
     </ResizablePanel>
@@ -503,9 +624,7 @@ export function RightTabs({ app }: { readonly app: ShellView }) {
     <div className="right-tabs" ref={stripRef}>
       {indicator && <span className="right-tabs-indicator" style={indicator} />}
       {tabs.map((tab) => (
-        <button key={tab.id} data-right-tab={tab.id} className={app.rightTab === tab.id ? 'on' : ''} onClick={() => app.setRightTab(tab.id)}>
-          {translate(tab.labelKey)}
-        </button>
+        <InspectorTabButton key={tab.id} tab={tab.id} label={translate(tab.labelKey)} active={app.rightTab === tab.id} select={app.setRightTab} />
       ))}
     </div>
   );
@@ -647,6 +766,97 @@ function useRenderedClassesKnown(selectedId: string | undefined, report: { reado
   return gaveUpFor === selectedId;
 }
 
+// The selected element's content as the file holds it, for the rich text field and its code view.
+function selectedContentSource(app: ShellView): string | undefined {
+  const source = app.pageState?.source;
+  const range = source === undefined ? undefined : sourceRangeForSelection(app.model, app.selectedId, source.length);
+  return source === undefined || range === undefined ? undefined : innerSourceOf(source.slice(range.from, range.to));
+}
+
+// The same content as the rich text editor reads it: imported images and videos as their paths.
+function shownContentSource(app: ShellView): string | undefined {
+  const source = selectedContentSource(app);
+  const model = app.pageState?.editable ? app.pageState.model : undefined;
+  const file = app.currentPage?.path;
+  if (source === undefined || model === undefined || file === undefined || !('imports' in model)) {
+    return source;
+  }
+  return shownAssetSource(source, assetScopeOf(projectRelativePath(app.project.path, file, window.avb.platform), model.imports));
+}
+
+// The Settings tab's values and handlers. A component canvas frame's instance is the ordinary panel over the frame's
+// preview values (canvasFrameSettings.tsx): its values, its fields' defaults and every writer are the frame's. Its tag,
+// free attributes and comment are the generated canvas page's, which is never edited, so they are not offered; nothing
+// on that page is in scope, so there is no data to connect to.
+function settingsOf(app: ShellView, translate: Translator, canvasInstance: CanvasInstanceSettings | undefined): PropsPanelProps {
+  const values = settingsValues(app);
+  const handlers = settingsHandlers(app, translate);
+  const { onChangeTag, onSetComment, ...kept } = handlers;
+  const node = values.node;
+  if (canvasInstance?.kind === 'root' && node?.kind === 'element') {
+    // The canvas root: its class list is the canvas's own setting, the one field the root has.
+    return {
+      ...values,
+      ...kept,
+      // No class attribute where no class is set: an empty one would mark the label set (blue) with nothing in it.
+      node: {
+        ...node,
+        props: canvasInstance.value === undefined ? {} : { class: { type: 'string' as const, value: canvasInstance.value } },
+        attrOrder: canvasInstance.value === undefined ? [] : ['class'],
+        children: [],
+      },
+      // The page's own <html>, never a layout: no layout picker, no tag.
+      isLayout: false,
+      // Its one field, there whether or not a class is set, as an element's class field is.
+      schema: withClassField([]),
+      onSetProp: canvasInstance.onSetProp,
+      // However the class field writes its list (one prop, a patch, or the whole attribute list), it is the root's classes.
+      onSetProps: (_nodeId: string, patch: PropValues) => canvasInstance.onSetProp('class', patch['class']),
+      onReplaceProps: (_nodeId: string, props: Readonly<Record<string, Attr>>) => canvasInstance.onSetProp('class', props['class']),
+      takesSlotText: false,
+      allowAttrs: false,
+      richTextContent: false,
+    };
+  }
+  if (canvasInstance?.kind !== 'instance') {
+    return { ...values, ...kept, onChangeTag, onSetComment };
+  }
+  // The frame's instance, whether it, its box or a group around it is the selection.
+  const instance = canvasInstance.node;
+  assert(instance.kind === 'component', 'A canvas frame shows its instance');
+  const { id, props, ...frame } = canvasInstance.panel;
+  // The writers of a page's own code, loops and expressions have nothing to write to on a frame.
+  const general = withoutPageWriters(kept);
+  return {
+    ...values,
+    ...general,
+    ...frame,
+    valuePolicy: 'preview' as const,
+    node: { ...instance, id, props, attrOrder: Object.keys(props), children: undefined },
+    allowAttrs: false,
+    comment: '',
+    bindContext: undefined,
+    loopContext: undefined,
+    frontmatterImports: undefined,
+    onRenameProp: () => undefined,
+    onSetContent: () => undefined,
+    onSetText: () => undefined,
+    onSetTextPieces: undefined,
+    onRenameVariable: undefined,
+    onCommitLoopHead: undefined,
+  };
+}
+
+const PAGE_WRITERS = ['onSetFrontmatter', 'onEditLoopProperty', 'onSetLoopSource'] as const;
+
+function withoutPageWriters<T extends object>(handlers: T): Omit<T, (typeof PAGE_WRITERS)[number]> {
+  const kept = { ...handlers };
+  for (const name of PAGE_WRITERS) {
+    Reflect.deleteProperty(kept, name);
+  }
+  return kept;
+}
+
 // What the Settings tab shows about the selection.
 export function settingsValues(app: ShellView) {
   const { selectedNode, selectedId } = app;
@@ -657,7 +867,7 @@ export function settingsValues(app: ShellView) {
     focusClass: app.classFocus,
     focusContent: app.contentFocus,
     isLayout: selectedId === 'layout',
-    layouts: app.scan.layouts,
+    layouts: app.layoutOptions,
     currentLayoutName: app.currentLayoutName,
     schema: app.selectedSchema,
     listProps: app.listProps,
@@ -778,6 +988,16 @@ export function settingsTextHandlers(app: ShellView) {
         app.setNodeInline(selectedId, kids);
       }
     },
+    richTextContent: app.selectedNode?.kind === 'component' && app.componentEditing(app.selectedComponent?.path, DEFAULT_SLOT_FIELD).richText === true,
+    richTextProps: (app.selectedComponent?.htmlProps ?? []).filter((prop) => app.componentEditing(app.selectedComponent?.path, prop).richText === true),
+    contentSource: selectedContentSource(app),
+    contentShown: shownContentSource(app),
+    onSetContentSource: (source: string) => {
+      const shown = selectedContentSource(app);
+      if (selectedId && shown !== undefined) {
+        app.setNodeContentSource(selectedId, source, shown);
+      }
+    },
     onSetTextPieces: (pieces: readonly TextPiece[]) => {
       if (selectedId) {
         app.setNodeTextPieces(selectedId, pieces);
@@ -794,6 +1014,10 @@ export function CodeWindowHost({ app }: { readonly app: ShellView }) {
   const canCode = can(useCurrentRole(), 'code:edit');
   // A stylesheet or a `<style>` node draws CSS chips throughout, a page in its `<style>` blocks, a script none.
   const codeChips = useCodeChips(codeChipTextOf(codeWin?.language));
+  // A window on a whole project file knows the project; one on a block of a page (its frontmatter, a script or a style)
+  // is a piece of a file, with nothing to ask about on its own.
+  const wholeFile = codeWin?.kind === 'file' && codeWin.area === 'src' ? codeWin.rel : undefined;
+  const intelligence = useCodeIntel(app.project.path, wholeFile);
   if (!codeWin || codeWinValue === undefined || !canCode) {
     return undefined;
   }
@@ -807,7 +1031,7 @@ export function CodeWindowHost({ app }: { readonly app: ShellView }) {
       editorKey={isFileWin ? `file:${codeWin.rel}` : targetId}
       revealLine={codeWin.revealLine}
       revealSerial={codeWin.revealSerial}
-      extensions={codeChips.extension}
+      extensions={wholeFile === undefined ? codeChips.extension : [codeChips.extension ?? [], intelligence]}
       overlay={codeChips.overlay}
       onChange={(value) => {
         if (isFileWin) {

@@ -32,17 +32,31 @@ in Base. Turning it back on targets the canvas's own query again, in the same fr
 Why a pick keeps following: picking a row while following asks to see and edit that breakpoint, so
 the target and the canvas move together. Only a row with no canvas width to go to holds instead.
 
-## The Desktop device at a narrow pane
+## The Desktop device and the pane
 
-The Desktop device fills the pane at the pane's own width, never scaled (`previewFrameWidth` has no
-width for it, `previewViewport` scale 1). The canvas reports that width, so following works on the
-width the page really has. A pane narrower than the Laptop canvas is therefore a Laptop layout: the
-page's media queries switch, the toolbar shows the device that width belongs to (`activeDeviceFor`,
-here Laptop, not Desktop), and the panel follows `< 64rem` under the Laptop icon. No `< 64rem` row
-ever wears the Desktop icon, because the icon is the canvas's own device at the width it draws.
-Only a pane inside the Desktop range (past the widest `down` canvas, under the narrowest `up` one)
-reads as Desktop; a pane at or past an `up` canvas reads as that breakpoint's device.
+The ordinary editing canvas is the pane's own width at 100%, and it **reflows**: shrinking the window
+or widening a panel lays the page out as a browser window that size would, the toolbar presses the
+device that width belongs to (`activeDeviceFor`) and following moves the style target with it. This
+is what a project opens on, a page switch, a reload, component canvas, and any view code restores.
+A resize or a layout change never scales the page.
 
+Only a **pick** of Desktop can do otherwise (`DesktopPick` in `usePreviewSizing.ts`): its button, its
+device key, Fit, the style panel's Base, and an app's `canvas.setDevice`. What the pick finds decides:
+
+| The pane | The pick |
+|---|---|
+| has the desktop range (from one pixel past the widest `down` canvas, up to the first `up` one) | nothing to hold: the ordinary canvas |
+| is narrower | `narrow`: the project's Desktop width, framed and scaled to fit, as typing it would |
+| reaches an `up` breakpoint | `wide`: the page stops one pixel short of it, centred and unscaled |
+
+A `narrow` or `wide` pick is one look. The next resize of the canvas pane, either way and whether or not it is now
+wide enough, ends it and the ordinary canvas is back: the app window, and a side panel dragged, opened or closed, since
+each resizes the pane. Not counted: a difference of up to `DESKTOP_PICK_JITTER_PX` from the size the pick is held at, and
+whatever moves the pane in the `DESKTOP_PICK_SETTLE_MS` after the pick (the layout the pick itself causes). Choosing
+Desktop again looks again. Another device, another page and a reload end it too. It is not saved across restarts. A
+typed width is not a pick: it stays, and is scaled to fit as the pane changes. The preview mode reads the pick and draws
+it in its own stage; only the canvas, which listens for the device keys, changes it. In the range, where the scrollbar's
+gutters would push the page below it, they give way first.
 ## Where a picked row puts the canvas
 
 `rowPlacement` answers, and it only keeps a width at which following picks that very row, so the
@@ -65,3 +79,15 @@ The mode and the target change in one commit. The `0` key arrives outside a Reac
 and the target's state update render in two commits and one frame shows the old query beside a
 link already off. `test/renderer/style/followCanvasPick.test.js` records the trigger frame by frame
 across each action.
+
+## Inline styles is always Base
+
+A style attribute applies at every width, so the panel never shows a query while the "Inline styles"
+chip is the target (`useStyleContexts`). Clicking the chip picks Base as the dropdown does. While it
+stays picked, following waits: a resized canvas, the link and the `0` key leave the target on Base.
+Reselecting an element on its attribute, and Design mode's inline default, move the target only, never
+the canvas. Picking or adding a query leaves the chip first, so the edit goes into a rule.
+In Design mode, where the canvas width is a frame's own, the chip (and an override note naming the attribute)
+moves the dropdown alone: no canvas move, so no frame is resized. Picking Base or a breakpoint in the dropdown
+still moves it.
+`test/renderer/style/inlineStyleBase.test.js` holds this.

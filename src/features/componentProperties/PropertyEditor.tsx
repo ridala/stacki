@@ -14,6 +14,7 @@ import type { PropertyOptionChange } from './PropertyOptions';
 import { PropertyType, opensOnCode, type CodeMode } from './PropertyType';
 import { PropertyDefault, propertyDefaultText } from './PropertyDefault';
 import { PropertyDefaultNote, PropertyKindSettings } from './PropertySettings';
+import { PropertyEditingSettings } from './PropertyEditingSettings';
 import { literalOptions } from '../../../shared/properties/propertyOptions';
 export { literalOptions };
 import { useRef, useState, type ReactNode } from 'react';
@@ -116,15 +117,19 @@ export function PropertyEditor(props: PropertyEditorProps) {
             variants={draft.exists ? variants : undefined}
             defaults={draft.exists ? { computed: props.variantDefaults, properties: props.properties ?? [] } : undefined}
             actions={
-              <PropertyActions
-                name={draft.exists ? draft.savedName : ''}
-                // A shared prop is deleted from its type's file, in source.
-                removable={props.property.editing?.kind !== 'override' && props.property.shared === undefined}
-                onRemove={(name) => {
-                  draft.discard();
-                  void props.onSave({ kind: 'remove', name }, 'close');
-                }}
-              />
+              <>
+                {/* How the field is typed in: the last options, above the delete button as every form ends. */}
+                <PropertyEditingSettings field={draft.exists ? draft.savedName : undefined} />
+                <PropertyActions
+                  name={draft.exists ? draft.savedName : ''}
+                  // A shared prop is deleted from its type's file, in source.
+                  removable={props.property.editing?.kind !== 'override' && props.property.shared === undefined}
+                  onRemove={(name) => {
+                    draft.discard();
+                    void props.onSave({ kind: 'remove', name }, 'close');
+                  }}
+                />
+              </>
             }
           />
         </>

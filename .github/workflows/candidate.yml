@@ -36,6 +36,9 @@ permissions:
 
 jobs:
   plan:
+    # Only run automatic signing/candidate builds on upstream or manual rehearsals so forks do not
+    # burn macOS runners and fail on missing Apple signing secrets.
+    if: github.repository == 'flowtricks/stacki' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       build: ${{ steps.plan.outputs.build }}

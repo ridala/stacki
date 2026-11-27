@@ -20,7 +20,7 @@ import { LoaderDots } from '../../../ui/LoaderDots';
 import Popup from '../../../ui/Popup';
 import { stopChat } from '../aiStore';
 import type { ChatView } from '../chatReducer';
-import { chipLabel, chipState, commandName, deriveRunningWork, RUNNING_LIMITS, type RunningItem, type RunningWork } from '../runningWork';
+import { chipLabel, chipMark, chipState, commandName, deriveRunningWork, RUNNING_LIMITS, type RunningItem, type RunningWork } from '../runningWork';
 import { deriveSubagentWork, isWorking, type SubagentUnit, type SubagentWork } from '../subagents';
 import { groupSteps, STEP_LIMITS, timelineSummary } from './agentSteps';
 import { StepList } from './StepGroups';
@@ -82,13 +82,11 @@ export const RunningChip = memo(function RunningChip({ view, chatId, projectPath
         aria-expanded={open}
         onClick={() => (open ? close() : setOpen(true))}
       >
-        {chip.kind === 'working' ? (
-          <LoaderDots dotPx={3} />
-        ) : (
-          <span className={`ai-agent-dot ai-agent-dot-${chip.failed > 0 ? 'failed' : 'done'}`} aria-hidden="true" />
-        )}
+        {chip.kind === 'working' ? <LoaderDots dotPx={3} /> : <SubagentDot status={chipMark(chip)} />}
         <span className="ai-running-chip-text">{chipLabel(chip, translate)}</span>
-        {chip.kind === 'finished' && chip.failed > 0 && <span className="ai-agents-failed">{translate('ai.subagents.failed', { count: chip.failed })}</span>}
+        {chip.kind === 'finished' && chip.failed > 0 && chip.agents + chip.commands > 0 && (
+          <span className="ai-agents-failed">{translate('ai.subagents.failed', { count: chip.failed })}</span>
+        )}
       </button>
       <Popup
         mode="popover"
@@ -269,7 +267,7 @@ const AgentRow = memo(function AgentRow({
   const working = isWorking(agent.status);
   const timeline = groupSteps(unit.children, { working });
   const name = displayName(agent, projectPath, translate);
-  const model = agentModelLabel(agent, options, translate);
+  const model = agentModelLabel(agent, options);
   const summary =
     timeline.tasks === 0
       ? working
@@ -289,7 +287,7 @@ const AgentRow = memo(function AgentRow({
         <span className="ai-step-chevron">{open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}</span>
         <SubagentDot status={agent.status} />
         <span className="ai-running-name">{name}</span>
-        <span className={`ai-agent-model${agent.model.kind === 'inherited' ? ' ai-agent-model-inherited' : ''}`}>{model}</span>
+        <span className="ai-agent-model">{model}</span>
         <span className="ai-agent-time-cell">
           <SubagentTime status={agent.status} />
         </span>

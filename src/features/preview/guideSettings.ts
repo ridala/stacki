@@ -4,6 +4,7 @@ import { useProjectGuideSettings } from './guidePersistence';
 import { useEffect, useRef } from 'react';
 import { assert } from '../../../shared/core/assert';
 import { BOUNDARY_LIMITS } from '../../../shared/core/boundary';
+import { CANVAS_DIRECTORY } from '../../../shared/properties/defaultsCanvas';
 import {
   GUIDE_DEFAULTS,
   GUIDE_COLUMN_COUNT_DEFAULT,
@@ -29,6 +30,39 @@ const GUIDE_STORED_CHARS_MAX = 2_048;
 // Mark new saves so an explicitly entered 12 remains an override after reopening.
 const GUIDE_COLUMN_DEFAULTS_VERSION = 1;
 
+// What the canvas is editing, as the column guide sees it. The guide lays out a page's columns, so while a component is
+// open (in its own canvas, in place on a page, or on its defaults page) it is not drawn, and neither its toolbar button
+// nor ⇧G is there to turn it on. The saved preference is not touched: it applies again on the next page.
+export type GuideSubject = 'page' | 'component';
+
+/** What Desktop is editing. */
+export function desktopGuideSubject(editor: {
+  readonly openFile: { readonly kind: string; readonly path?: string | undefined } | undefined;
+  readonly componentCanvas: 'idle' | 'opening' | 'open' | undefined;
+  readonly defaultsCanvas: 'idle' | 'shown';
+}): GuideSubject {
+  if (editor.componentCanvas !== undefined && editor.componentCanvas !== 'idle') {
+    return 'component';
+  }
+  if (editor.defaultsCanvas === 'shown') {
+    return 'component';
+  }
+  if (editor.openFile?.kind === 'component') {
+    return 'component';
+  }
+  // A canvas page can stay open for a moment after its canvas has closed, while the way back loads.
+  const path = editor.openFile?.path?.replaceAll('\\', '/');
+  return path?.includes('/' + CANVAS_DIRECTORY) === true ? 'component' : 'page';
+}
+
+/** What Studio is editing, from the open file's project path: an Astro file outside src/pages/ is a component. */
+export function studioGuideSubject(file: string): GuideSubject {
+  if (!file.endsWith('.astro')) {
+    return 'page';
+  }
+  return file.startsWith('src/pages/') ? 'page' : 'component';
+}
+
 export type GuideUpdate = (update: (settings: GuideSettings) => GuideSettings) => void;
 
 /** How a host reaches its preview frame: the desktop canvas and Studio each link their own way. */
@@ -48,18 +82,24 @@ export interface ShownGuide {
  * The column guide of one canvas, as the desktop preview and Studio both use
  * it: the settings saved under `projectKey`, the variables the frame is told
  * to measure, and what the toolbar's menu and the overlay are drawn from.
+ * While a component is the subject there is no menu, overlay or shortcut.
  */
 export function useColumnGuide(options: {
   readonly projectKey: string | undefined;
   readonly metrics: GuideMetrics | undefined;
   readonly available: boolean;
   readonly frame: GuideFrameLink;
-}): { readonly menu: GuideMenuProps; readonly shown: ShownGuide | undefined } {
+  readonly subject: GuideSubject;
+}): { readonly menu: GuideMenuProps | undefined; readonly shown: ShownGuide | undefined } {
   const { settings, update, persistence } = useProjectGuideSettings(options.projectKey);
-  useGuideShortcut(update);
+  useGuideShortcut(update, options.subject);
   useGuideVariables(guideVariableNames(settings), options.frame);
   const metrics = options.metrics;
   const guide = metrics === undefined ? undefined : resolveGuide(metrics, settings);
+  // Decided in render, not in an effect, so a component is never drawn with the guide for a frame.
+  if (options.subject === 'component') {
+    return { menu: undefined, shown: undefined };
+  }
   const menu = { settings, update, metrics, guide, persistence, available: options.available };
   if (guide === undefined) {
     return { menu, shown: undefined };
@@ -70,7 +110,7 @@ export function useColumnGuide(options: {
 /** The settings for the open project, and the one way to change them. */
 export function useGuideSettings(projectKey: string | undefined): readonly [GuideSettings, GuideUpdate] {
   const { settings, update } = useProjectGuideSettings(projectKey);
-  useGuideShortcut(update);
+  useGuideShortcut(update, 'page');
   return [settings, update] as const;
 }
 
@@ -133,8 +173,11 @@ export function parseGuideColor(input: unknown): string | undefined {
 // ⇧G shows or hides the guide, outside fields. The canvas replays it as the
 // key "G" with no modifier flags (electron/preload/frameDesign.ts), so the
 // capital letter is what says Shift.
-function useGuideShortcut(update: GuideUpdate): void {
+function useGuideShortcut(update: GuideUpdate, subject: GuideSubject): void {
   useEffect(() => {
+    if (subject === 'component') {
+      return undefined;
+    }
     const onKey = (event: KeyboardEvent): void => {
       if (event.metaKey || event.ctrlKey || event.altKey) {
         return;
@@ -153,7 +196,7 @@ function useGuideShortcut(update: GuideUpdate): void {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [update]);
+  }, [update, subject]);
 }
 
 function storageKey(projectKey: string): string {

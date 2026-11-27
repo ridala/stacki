@@ -13,12 +13,20 @@ import type { Rename, SetText, TagOption, TagFieldProps } from './propNodeEditor
 import type { VariableRename } from '../../../shared/engine/variableRename';
 import type { SourceContext } from './propBindings';
 import type { RichContext, InlineNode } from './RichContent';
+import type { InlineCandidate } from './richContentModel';
+import type { PropFieldProvenance } from './propFieldExtras';
 import type { TextPiece } from './textConnect';
 import type { AssetDimensions } from '../../ui/AssetThumb';
 import type { AssetReference, PickedAsset } from '../../ui/AssetField';
 import React from 'react';
 import LinkField from './LinkField';
 
+export interface ContentValue {
+  readonly nodes: readonly InlineCandidate[];
+  readonly own: boolean;
+  readonly provenance?: PropFieldProvenance | undefined;
+  readonly onReset: () => void;
+}
 export type SelectedNode = PageNode | { readonly kind: 'frontmatter'; readonly id: string };
 export type ElementNode = (PairedNode | ChunkGroupNode) & { readonly props?: PropValues };
 export interface PropsPanelProps {
@@ -35,6 +43,13 @@ export interface PropsPanelProps {
   readonly listProps?: ReadonlyMap<string, ListProp> | undefined;
   readonly slotOptions?: readonly string[] | undefined;
   readonly takesSlotText?: boolean;
+  /**
+   * The default slot's content where the host stores it itself (a component canvas frame): what the Content field
+   * shows, whether it is set here, and how it is cleared back to what shows without it.
+   */
+  readonly contentValue?: ContentValue | undefined;
+  /** Whether the instance takes a style attribute though it declares none (a component canvas frame of a `...rest` one). */
+  readonly offersStyle?: boolean | undefined;
   readonly tagOptions?: readonly TagOption[];
   readonly projectClasses?: readonly string[];
   readonly allowAttrs?: boolean;
@@ -56,6 +71,19 @@ export interface PropsPanelProps {
   readonly onSetText: SetText;
   readonly onSetContent: (text: string) => void;
   readonly onSetInline: (nodes: readonly InlineNode[]) => void;
+  /**
+   * The selected component instance's text is rich text (its component's richText setting, while it qualifies): the
+   * Content field becomes the rich text editor's button and a code view (ComponentEditingFields.tsx).
+   */
+  readonly richTextContent?: boolean | undefined;
+  /** Props of the selected instance that its component sets with `set:html` and whose rich text setting is on. */
+  readonly richTextProps?: readonly string[] | undefined;
+  /** Writes the selected node's content as code, byte for byte; absent where the host has no source writer. */
+  readonly onSetContentSource?: ((source: string) => void) | undefined;
+  /** The selected node's content as the file holds it (the bytes between its tags); undefined when it cannot be read. */
+  readonly contentSource?: string | undefined;
+  /** `contentSource` with each imported image and video shown as its path, for the rich text editor. */
+  readonly contentShown?: string | undefined;
   /** Restates the selected text or expression node as these pieces (TextConnectField.tsx); absent where the host cannot. */
   readonly onSetTextPieces?: ((pieces: readonly TextPiece[]) => void) | undefined;
   readonly onOpenCode?: () => void;

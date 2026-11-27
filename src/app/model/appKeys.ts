@@ -16,7 +16,9 @@ import { type InsertPlace, insertGesture } from '../../editor/editGestures';
 import type { PageEditError, PageEdited } from '../../../shared/ipc/pageSave';
 import { loopVarsAt, strippedBindings } from '../../editor/loopBindings';
 import { cleanError } from '../../lib/cleanError';
+import { focusedMenuEditTarget } from '../../ui/menuEditTarget';
 import { menuPasteClaimed } from '../../ui/menuPasteClaim';
+import { inspectorTabOfKey } from '../inspectorTabKeys';
 import { type AppHistory, type LeftTab, type NodeClipboard, type ProjectIdentity, type PseudoPick, type RightTab, type ToastKind } from '../appTypes';
 import { toEditorPageState, carriedParse, type EditorPageState, type OpenFile, type PageStateSnapshot } from '../../editor/pageState';
 import { type EditorModel, type EditorNode } from '../../editor/pageView';
@@ -196,11 +198,12 @@ export function handleSelectionKey(event: KeyboardEvent, keys: AppKeys): void {
     return;
   }
 
-  // S / D swap the right panel — plain keys, so they only fire outside
-  // fields (the check above) and never collide with ⌘D (duplicate).
-  if (!mod && !event.altKey && (event.key === 's' || event.key === 'S')) {
+  // S / D swap the right panel (inspectorTabKeys.ts): plain keys, so they only fire
+  // outside fields (the check above) and never collide with ⌘D (duplicate).
+  const inspectorTab = inspectorTabOfKey(event);
+  if (inspectorTab !== undefined) {
     event.preventDefault();
-    keys.setRightTab('style');
+    keys.setRightTab(inspectorTab);
     return;
   }
   // 0 turns Follow canvas size on or off (the toggle on the style panel's breakpoint dropdown). A plain
@@ -211,12 +214,6 @@ export function handleSelectionKey(event: KeyboardEvent, keys: AppKeys): void {
     }
     return;
   }
-  if (!mod && !event.altKey && (event.key === 'd' || event.key === 'D')) {
-    event.preventDefault();
-    keys.setRightTab('settings');
-    return;
-  }
-
   if (!mod && (event.key === 'Delete' || event.key === 'Backspace')) {
     const deletable = structuralSelection(selectionId, keys.pseudoPickRef.current);
     if (deletable === undefined) {
@@ -567,6 +564,11 @@ export function menuCopy(menu: MenuEdits): void {
     runNativeEdit('copy');
     return;
   }
+  const panel = focusedMenuEditTarget(document.activeElement ?? undefined);
+  if (panel !== undefined) {
+    panel.copy();
+    return;
+  }
   const copyable = structuralSelection(menu.selectedIdRef.current, menu.pseudoPickRef.current);
   if (copyable === undefined) {
     return;
@@ -591,6 +593,11 @@ export function menuPaste(menu: MenuEdits): void {
   }
   if (inEditable()) {
     runNativeEdit('paste');
+    return;
+  }
+  const panel = focusedMenuEditTarget(document.activeElement ?? undefined);
+  if (panel !== undefined) {
+    panel.paste();
     return;
   }
   if (menuPasteClaimed()) {

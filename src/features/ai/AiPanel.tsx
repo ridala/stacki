@@ -29,6 +29,7 @@ import type { ChatId, TurnId } from '../../../shared/properties/ai/chatModel';
 import type { Translator } from '../../lib/i18n/localeContext';
 import { useFormat, useTranslate, useTranslateDescribed } from '../../lib/i18n/useTranslate';
 import { ErrorToast } from '../../ui/ErrorToast';
+import { Skeleton, SkeletonRows } from '../../ui/Skeleton';
 import { PlusIcon } from '../../ui/Icons';
 import {
   dismissAiError,
@@ -41,9 +42,8 @@ import {
   openStartingChat,
   runSetup,
   reviewChange,
-  sendPrompt,
+  resendMessage,
   setPanelVisibility,
-  trustProject,
   useAiState,
   type AiState,
 } from './aiStore';
@@ -52,6 +52,9 @@ import { ChatComposer } from './composer/ChatComposer';
 import { usePrewarm } from './prewarm';
 import { agentBadge, type AgentBadge } from './agentSwitch';
 import { SetupCard } from './SetupCard';
+import { TrustCard } from './TrustCard';
+import { McpSignInCard } from './McpSignInCard';
+import { BillingWarning, billingWarning } from './BillingWarning';
 import { SIGNED_IN_MS, SIGNED_IN_RETRY_MS, SignInCard, SignedInStrip, signInStage, useSignedInMoment, type SignInStage } from './SignInCard';
 import { readSignInFailures } from './signInTranscript';
 import { PlanCard } from './transcript/PlanCard';
@@ -59,12 +62,14 @@ import { RunningChip } from './transcript/RunningPanel';
 import { ChatTranscript } from './transcript/SubagentPane';
 import { ChatHeader, type PanelExpansion, type PanelWindow } from './sessions/ChatHeader';
 import { SessionsView } from './sessions/SessionsView';
+import { NoChats } from './sessions/ListStates';
 import { groupSessions, listOrder } from './sessions/sessionsModel';
 import { chatLayoutFor, chatStepFor, stepThrough, type ChatLayout } from './chatLayout';
 import { EMPTY_CHAT } from './chatReducer';
 import { AgentChoiceNotices, AgentChoicesDialog } from './AgentChoices';
 import { loadAgentChoices } from './agentChoiceStore';
 import './aiShell.css';
+import { useAiHold } from './aiHold'; // Design mode (experimental): docs/design-mode/REMOVE.md
 
 export interface AiPanelProps {
   readonly projectPath: string;
@@ -103,7 +108,8 @@ export default function AiPanel(props: AiPanelProps) {
   }, []);
   const chat = state.open === undefined ? undefined : state.chats.find((candidate) => candidate.id === state.open);
   const { ref: bodyRef, widthPx } = useBodyWidth();
-  const layout = chatLayoutFor(widthPx);
+  // With no chats and no sections there is nothing for a sidebar to hold: a wide panel shows the one card, not two.
+  const layout = state.chats.length === 0 && state.sections.length === 0 ? 'stacked' : chatLayoutFor(widthPx);
   const header = <ChatHeader chat={chat} layout={layout} expansion={props.expansion} windowToggle={props.windowToggle} />;
   const onBodyKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     const direction = chatStepFor(event);
@@ -125,18 +131,30 @@ export default function AiPanel(props: AiPanelProps) {
           recovery={[{ label: translate('ai.panel.dismiss'), run: dismissAiError }]}
         />
       )}
-      {!state.loaded ? (
-        <div className="ai-skeleton" role="status" aria-label={translate('ai.panel.loadingChats')}>
-          {[0, 1, 2].map((row) => (
-            <span key={row} className="ai-skeleton-row" />
-          ))}
-        </div>
-      ) : (
-        <PanelContent {...props} layout={layout} state={state} chat={chat} />
-      )}
+      {!state.loaded ? <ChatListSkeleton /> : <PanelContent {...props} layout={layout} state={state} chat={chat} />}
     </div>
   );
   return <>{props.renderFrame(header, body)}</>;
+}
+
+/** The panel's first paint, before the chat list is read: placeholders in the shape of its rows, an agent's mark and two lines. */
+function ChatListSkeleton() {
+  return (
+    <div className="ai-skeleton">
+      <SkeletonRows
+        count={4}
+        row={(widthPercent) => (
+          <div className="ai-skeleton-row">
+            <Skeleton width="16px" height="16px" />
+            <span className="ai-skeleton-lines">
+              <Skeleton width={`${widthPercent}%`} />
+              <Skeleton width="30%" height="8px" />
+            </span>
+          </div>
+        )}
+      />
+    </div>
+  );
 }
 
 /**
@@ -156,7 +174,11 @@ function PanelContent(props: AiPanelProps & { readonly layout: ChatLayout; reado
         <SessionsView chats={state.chats} selected={chat?.id} layout="split" />
       </nav>
       <div className="ai-main">
-        {chat === undefined ? (
+        {chat === undefined && state.chats.every((candidate) => candidate.archivedAt !== undefined) ? (
+          <div className="ai-pick">
+            <NoChats />
+          </div>
+        ) : chat === undefined ? (
           <div className="ai-pick">
             <p>{translate('ai.panel.pickChat')}</p>
             <button className="ai-primary ai-sessions-start" onClick={() => void newChat(preferredAgent())}>
@@ -208,8 +230,8 @@ function ChatPane(props: AiPanelProps & { readonly state: AiState; readonly chat
   const setup = state.setups.get(agent);
   const reading = useMemo(() => readSignInFailures(view.items), [view.items]);
   const stage = signInStage({ setup, expired: availability?.state === 'sign-in' });
-  const retryText = view.running === undefined && reading.interrupted ? view.lastPrompt?.text : undefined;
-  const moment = useSignedInMoment({ agent, needed: stage !== undefined, holdMs: retryText === undefined ? SIGNED_IN_MS : SIGNED_IN_RETRY_MS });
+  const retryPrompt = view.running === undefined && reading.interrupted ? view.lastPrompt : undefined;
+  const moment = useSignedInMoment({ agent, needed: stage !== undefined, holdMs: retryPrompt === undefined ? SIGNED_IN_MS : SIGNED_IN_RETRY_MS });
   const started = view.items.some((item) => item.kind === 'user');
   const [choosingAgents, setChoosingAgents] = useState(false);
   const badges = Object.fromEntries(
@@ -218,19 +240,23 @@ function ChatPane(props: AiPanelProps & { readonly state: AiState; readonly chat
       return badge === undefined ? [] : [[id, badge]];
     }),
   );
-  const blocked = !state.trusted ? translate('ai.panel.trustFirst') : composerBlock({ agent, availability, stage, started, translate });
+  const hold = useAiHold(); // Design mode (experimental): docs/design-mode/REMOVE.md
+  const blocked = hold ?? (!state.trusted ? translate('ai.panel.trustFirst') : composerBlock({ agent, availability, stage, started, translate }));
   const review = (turn: TurnId, path: string, action: 'keep' | 'undo'): Promise<void> => runReview(props, chatId, turn, path, action);
-  const retry = retryText === undefined ? undefined : (): void => void sendPrompt(chatId, retryText);
+  const retry = retryPrompt === undefined ? undefined : (): void => void resendMessage(chatId, retryPrompt);
   // Start the agent early, invisibly, once it is installed, signed in and allowed here; let go when the chat starts or the panel closes.
   usePrewarm({
     projectPath,
     agent,
-    eligible: state.trusted && availability?.state === 'ready' && setup?.step === 'ready' && stage === undefined && !started,
+    eligible: hold === undefined && state.trusted && availability?.state === 'ready' && setup?.step === 'ready' && stage === undefined && !started,
   });
   // Where the agent's CLI stands is read again each time a chat with it opens, and after each step.
   useEffect(() => {
-    void runSetup(agent, { kind: 'detect' });
-  }, [agent, chatId]);
+    if (hold === undefined) {
+      void runSetup(agent, { kind: 'detect' });
+    }
+  }, [agent, chatId, hold]);
+  useRecheckOnFocus(agent, hold === undefined && setup?.step === 'unchecked' ? 'while-unchecked' : 'never');
   return (
     <>
       <AgentChoiceNotices onChoose={() => setChoosingAgents(true)} />
@@ -245,7 +271,7 @@ function ChatPane(props: AiPanelProps & { readonly state: AiState; readonly chat
         onReview={review}
         onOpenFile={props.onOpenFile}
       />
-      {!state.trusted ? (
+      {hold !== undefined ? undefined : !state.trusted ? (
         <TrustCard />
       ) : moment.shown ? (
         <SignedInStrip
@@ -271,10 +297,30 @@ function ChatPane(props: AiPanelProps & { readonly state: AiState; readonly chat
           details={reading.interrupted ? reading.details : undefined}
         />
       )}
+      <McpSignInCard
+        projectPath={projectPath}
+        agent={agent}
+        items={view.items}
+        eligible={hold === undefined && state.trusted && availability?.state === 'ready'}
+      />
+      {/* A stopped turn's warning is the sign-in card itself; extra usage goes on, so its warning stands here. */}
+      {billingWarning(setup) === 'extra-usage' && <BillingWarning kind="extra-usage" />}
       <RunningChip view={view} chatId={chatId} projectPath={projectPath} />
       <ChatComposer chat={chatId} agent={agent} view={view} draft={draft} projectPath={projectPath} disabled={blocked} state={state} />
     </>
   );
+}
+
+/** While the sign-in could not be checked, coming back to the window checks it again. */
+function useRecheckOnFocus(agent: AgentId, recheck: 'while-unchecked' | 'never'): void {
+  useEffect(() => {
+    if (recheck === 'never') {
+      return undefined;
+    }
+    const detect = (): void => void runSetup(agent, { kind: 'detect' });
+    window.addEventListener('focus', detect);
+    return () => window.removeEventListener('focus', detect);
+  }, [agent, recheck]);
 }
 
 /** Why the composer cannot send, in words that say what to do; undefined when it can. */
@@ -296,19 +342,6 @@ function composerBlock({
     return started ? translate('ai.panel.signInToKeep', { agent: label }) : translate('ai.panel.signInToStart', { agent: label });
   }
   return availability?.state === 'ready' ? undefined : translate('ai.panel.setUpToStart', { agent: label });
-}
-
-function TrustCard() {
-  const translate = useTranslate();
-  return (
-    <div className="ai-gate">
-      <strong>{translate('ai.trust.title')}</strong>
-      <p>{translate('ai.trust.text')}</p>
-      <button className="ai-primary" onClick={() => void trustProject()}>
-        {translate('ai.trust.allow')}
-      </button>
-    </div>
-  );
 }
 
 function AgentGate(
@@ -333,7 +366,8 @@ function AgentGate(
     return <SignInCard agent={agent} stage={stage} details={props.details} onOpenExternal={props.onOpenExternal} onOpenTerminal={props.onOpenTerminal} />;
   }
   // The person's own CLI first (install), by buttons; then Stacki's connector.
-  if (setup !== undefined && setup.step !== 'ready' && setup.step !== 'signed-out' && setup.step !== 'signing-in') {
+  // A sign-in that could not be checked is no gate: the note under the composer says so, and the person can send.
+  if (setup !== undefined && setup.step !== 'ready' && setup.step !== 'signed-out' && setup.step !== 'unchecked' && setup.step !== 'signing-in') {
     return <SetupCard setup={setup} />;
   }
   if (availability === undefined || availability.state === 'ready') {

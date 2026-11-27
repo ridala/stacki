@@ -296,7 +296,7 @@ async function install(
   const options = { signal: context.controller.signal, timeoutMs: EMDASH_INSTALL_LIMITS.runMsMax };
   try {
     context.onLog(`> ${plan.command}\n\n`);
-    await context.deps.runCommand(windows ? `${plan.manager}.cmd` : plan.manager, addArguments(plan.manager), root, context.onLog, options);
+    await context.deps.runCommand(plan.manager, addArguments(plan.manager), root, context.onLog, options);
     writeLiveConfigIfAbsent(root);
     appendIgnoreLines(root);
     config = registerInAstroConfig(root, context.deps.verifyConfig);
