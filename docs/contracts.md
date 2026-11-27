@@ -1053,6 +1053,11 @@ A failed disk write applies only to the current session and is shown in the popu
 Disabling usage counts still aborts in-flight counting. Studio setup is available
 in the same popup when a project is open.
 
+The fork leaves `usageCountsURL` unset in `shared/core/desktopRelease.ts`.
+Desktop hides the count preference and sends no counts, even if an older
+saved preference enabled them. A release with its own counter asks users
+again before sending counts.
+
 `codeChips` (Settings > Editor > Code, "Show CSS chips in code"; default on, kept per person in
 `settings.json`) draws CSS values in the code editors as chips: variables as the purple chip, easings,
 clip-paths, shadows and gradients with a small preview that opens the Style panel's editor for that
@@ -1484,6 +1489,14 @@ metadata references too. The installed Studio CLI's
 
 
 ## Update popup
+
+The fork leaves `updateFeedURL` unset in `shared/core/desktopRelease.ts`.
+The File menu omits the update command, the renderer reads an idle state, and
+update actions have no effect.
+
+Before enabling updates for a branded distribution, configure its own feed
+and make the release workflow publish the matching installer and update
+metadata there.
 
 Auto-update never opens a native dialog. `electron/app/autoUpdate.ts` turns electron-updater's events into
 `UpdateEvent`s (`shared/ipc/updateState.ts`) and sends them on `update:state`; the renderer's popup

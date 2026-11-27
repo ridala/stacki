@@ -157,7 +157,7 @@ test('the tabs show their own panel and carry tab semantics', async () => {
   assert.equal(selectedTab().textContent.trim(), 'Editor settings', 'opens on the first tab with nothing remembered');
   assert.equal(visiblePanel().length, 1, 'one panel shows at a time');
   assert.match(visiblePanel()[0].textContent, /Interface sounds/);
-  assert.match(visiblePanel()[0].textContent, /Anonymous usage counts/);
+  assert.doesNotMatch(visiblePanel()[0].textContent, /Anonymous usage counts/);
 
   await act(async () => tab('Folders').click());
   assert.equal(visiblePanel()[0].textContent, 'Folders stub');

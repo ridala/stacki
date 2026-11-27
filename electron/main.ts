@@ -30,6 +30,7 @@ import { createNodeDocumentActors } from './documents/documentActors';
 import { documentHost, installDocumentHost } from './documents/documentWrites';
 import { isPathDescendant, sameFilesystemPath } from './lib/platform';
 import type { BrowserWindow as Window, MessageBoxOptions, OpenDialogOptions } from 'electron';
+import { DESKTOP_RELEASE } from '../shared/core/desktopRelease';
 import { toRecord } from '../shared/core/record';
 import { parseOptionalString, parseRecents, parseSettings } from './app/mainValidation';
 import type { AppSettings } from './app/mainValidation';
@@ -156,15 +157,19 @@ const thumbnails = new Thumbnails({
   devServers,
   userDataPath: () => app.getPath('userData'),
 });
-const autoUpdates = new AutoUpdates({
-  app,
-  autoUpdater,
-  beforeInstall: () => devServers.stop(),
-  send: (event) => send('update:state', event),
-});
-ipcMain.handle('update:read', () => autoUpdates.current());
+const autoUpdates =
+  DESKTOP_RELEASE.updateFeedURL === undefined
+    ? undefined
+    : new AutoUpdates({
+        app,
+        autoUpdater,
+        feedURL: DESKTOP_RELEASE.updateFeedURL,
+        beforeInstall: () => devServers.stop(),
+        send: (event) => send('update:state', event),
+      });
+ipcMain.handle('update:read', () => autoUpdates?.current() ?? { kind: 'idle' });
 ipcMain.handle('update:act', (_event, { action }) => {
-  autoUpdates.act(action);
+  autoUpdates?.act(action);
   return { ok: true as const };
 });
 
@@ -626,7 +631,7 @@ function buildMenu() {
     isDev,
     translate: translateMain,
     send: (channel) => send(channel),
-    checkForUpdates: () => void autoUpdates.checkFromMenu(),
+    checkForUpdates: autoUpdates === undefined ? undefined : () => void autoUpdates.checkFromMenu(),
     reload: (command) => runReload(command),
   });
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -812,10 +817,12 @@ app.whenReady().then(
     // Neither belongs to the first frame: the notice is a sheet on the window, which must be on screen
     // first, and the update check is a network call that would compete with the renderer's load.
     afterWindowShown(() => void showUsageNotice());
-    afterWindowShown(() => {
-      const timer = setTimeout(() => autoUpdates.start(), UPDATE_CHECK_DELAY_MS);
-      timer.unref();
-    });
+    if (autoUpdates !== undefined) {
+      afterWindowShown(() => {
+        const timer = setTimeout(() => autoUpdates.start(), UPDATE_CHECK_DELAY_MS);
+        timer.unref();
+      });
+    }
     // Version 1.0.22 kept photographs of components in userData; the palette now shows live frames.
     removeLegacyComponentShots(app.getPath('userData')).then(
       (removed) => {
@@ -1037,7 +1044,7 @@ function writeSettings(): boolean {
 // Preferences apply immediately; replies distinguish session changes from saved ones.
 const publicSettings = () => ({
   sound: settings.sound,
-  usageCountsEnabled: settings.usageCountsEnabled,
+  usageCountsEnabled: DESKTOP_RELEASE.usageCountsURL !== undefined && settings.usageCountsEnabled,
   appsPersonHidden: settings.appsPersonHidden,
   aiAskBeforeTrust: settings.aiAskBeforeTrust,
   aiTrackChanges: settings.aiTrackChanges,
@@ -1069,13 +1076,17 @@ ipcMain.handle('settings:set', (_event, { setting, enabled }) => {
     // Running apps hear what `person.get` answers now.
     send('apps:personChanged', {});
   } else {
-    saved = setUsageCountsEnabled(enabled);
+    saved = setUsageCountsEnabled({ enabled });
   }
   return { ...publicSettings(), saved };
 });
 
-function setUsageCountsEnabled(enabled: boolean): boolean {
-  if (!enabled) {
+function setUsageCountsEnabled({ enabled }: { readonly enabled: boolean }): boolean {
+  if (enabled) {
+    if (DESKTOP_RELEASE.usageCountsURL === undefined) {
+      return false;
+    }
+  } else {
     usageCountInFlight?.abort();
   }
   settings = { ...settings, usageCountsEnabled: enabled };
@@ -1095,6 +1106,10 @@ function setUsageCountsEnabled(enabled: boolean): boolean {
 }
 
 function noteUsageActivity(): void {
+  const endpoint = DESKTOP_RELEASE.usageCountsURL;
+  if (endpoint === undefined) {
+    return;
+  }
   const day = usageDay(new Date());
   if (
     !shouldCountUsage(
@@ -1121,7 +1136,7 @@ function noteUsageActivity(): void {
     usageCountInFlight = undefined;
     return;
   }
-  void sendUsageCount({ signal: controller.signal }, fetch).finally(() => {
+  void sendUsageCount({ endpoint, signal: controller.signal }, fetch).finally(() => {
     if (usageCountInFlight === controller) {
       usageCountInFlight = undefined;
     }
@@ -1141,6 +1156,9 @@ function usageNoticeOptions(): MessageBoxOptions {
 }
 
 async function showUsageNotice(): Promise<void> {
+  if (DESKTOP_RELEASE.usageCountsURL === undefined) {
+    return;
+  }
   if (!app.isPackaged || settings.usageNoticeVersion >= USAGE_NOTICE_VERSION) {
     return;
   }

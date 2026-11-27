@@ -15,7 +15,7 @@ export interface ApplicationMenuOptions {
   readonly translate: (key: MainMessageKey) => string;
   /** Forwards a menu command to the renderer, which decides between app-level actions and native ones. */
   readonly send: (channel: string) => void;
-  readonly checkForUpdates: () => void;
+  readonly checkForUpdates: (() => void) | undefined;
   /** Runs a reload; `main.ts` asks `routeReload` (reloadRouting.ts) whether there is a preview to refresh. */
   readonly reload: (command: ReloadCommand) => void;
 }
@@ -26,6 +26,9 @@ export interface ApplicationMenuOptions {
 export function buildApplicationMenuTemplate(options: ApplicationMenuOptions): MenuItemConstructorOptions[] {
   const translate = options.translate;
   const send = options.send;
+  const checkForUpdates = options.checkForUpdates;
+  const updateItems: readonly MenuItemConstructorOptions[] =
+    checkForUpdates === undefined ? [] : [{ label: translate('menu.file.checkForUpdates'), click: checkForUpdates }, { type: 'separator' }];
   return [
     ...(options.isMac ? [appMenu(translate)] : []),
     {
@@ -40,8 +43,7 @@ export function buildApplicationMenuTemplate(options: ApplicationMenuOptions): M
         { label: translate('menu.file.openProject'), accelerator: 'CmdOrCtrl+O', click: () => send('menu:openProject') }, // i18n-ignore: keyboard accelerator.
         { label: translate('menu.file.closeProject'), accelerator: 'Shift+CmdOrCtrl+W', click: () => send('menu:closeProject') }, // i18n-ignore: keyboard accelerator.
         { type: 'separator' },
-        { label: translate('menu.file.checkForUpdates'), click: () => options.checkForUpdates() },
-        { type: 'separator' },
+        ...updateItems,
         options.isMac ? { role: 'close', label: translate('menu.file.closeWindow') } : { role: 'quit', label: translate('menu.file.quit') },
       ],
     },

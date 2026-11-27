@@ -12,10 +12,12 @@ const { AutoUpdates, updateStateOf } = require('#dist/electron/app/autoUpdate.js
 const { NO_DOWNLOAD_PROGRESS } = require('#dist/shared/ipc/updateState.js');
 
 const MEGABYTE = 1024 * 1024;
+const FEED_URL = 'https://updates.example.test/desktop/';
 
 function fakeUpdater(overrides = {}) {
   const updater = new EventEmitter();
   Object.assign(updater, {
+    setFeedURL: () => undefined,
     // The scheduled check stays in flight, as it does while a download runs.
     checkForUpdatesAndNotify: () => new Promise(() => undefined),
     checkForUpdates: () => new Promise(() => undefined),
@@ -34,6 +36,7 @@ function start({ updater = fakeUpdater(), isPackaged = true } = {}) {
   const host = {
     app: { isPackaged, isReady: () => false, getPath: () => '', getVersion: () => '1.4.9' },
     autoUpdater: updater,
+    feedURL: FEED_URL,
     beforeInstall: () => steps.push('beforeInstall'),
     send: (event) => events.push(event),
   };
@@ -52,6 +55,22 @@ function start({ updater = fakeUpdater(), isPackaged = true } = {}) {
 }
 
 const turnEventLoop = () => new Promise((resolve) => setImmediate(resolve));
+
+test('a packaged updater sets the configured feed before its first scheduled check', () => {
+  const calls = [];
+  const updater = fakeUpdater({
+    setFeedURL: (feed) => calls.push(feed),
+    checkForUpdatesAndNotify: async () => {
+      calls.push('check');
+    },
+  });
+  const { restore } = start({ updater });
+  try {
+    assert.deepEqual(calls, [{ provider: 'generic', url: FEED_URL, useMultipleRangeRequest: false }, 'check']);
+  } finally {
+    restore();
+  }
+});
 
 test('a download reaches the popup with live progress, only when the display would change', () => {
   const { updater, events, restore } = start();

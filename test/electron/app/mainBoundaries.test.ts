@@ -10,6 +10,7 @@ import * as net from 'node:net';
 import { createHash } from 'node:crypto';
 import { mainHarness } from '../../helpers/mainHarness.ts';
 import { IPC_PAYLOADS } from '#dist/shared/ipc/ipcPayloads.js';
+import { parseUpdateState } from '#dist/shared/ipc/updateState.js';
 import { toArray, toRecord } from '#dist/shared/core/record.js';
 import { parseMarkdownPage } from '#dist/electron/parse/markdownParser.js';
 import { parsePageModel } from '#dist/shared/page/pageNode.js';
@@ -574,7 +575,12 @@ test('popup preferences persist independently and reject invalid changes', async
   const harness = fixture();
   context.after(harness.dispose);
   await harness.invoke('settings:set', { setting: 'sound', enabled: true });
+  assert.equal(toRecord(harness.call('readSettings'))?.['usageCountsEnabled'], true, 'the stored preference is preserved');
+  assert.equal(toRecord(await harness.invoke('settings:get'))?.['usageCountsEnabled'], false, 'the endpoint is required');
   await harness.invoke('settings:set', { setting: 'usageCountsEnabled', enabled: false });
+  const refused = toRecord(await harness.invoke('settings:set', { setting: 'usageCountsEnabled', enabled: true }));
+  assert.equal(refused?.['usageCountsEnabled'], false);
+  assert.equal(refused?.['saved'], false);
   const result = toRecord(await harness.invoke('settings:get'));
   assert.equal(result?.['sound'], true);
   assert.equal(result?.['usageCountsEnabled'], false);
@@ -584,4 +590,15 @@ test('popup preferences persist independently and reject invalid changes', async
   await assert.rejects(harness.invoke('settings:set', { setting: 'sound', enabled: 'yes' }));
   await assert.rejects(harness.invoke('settings:set', { setting: 'unknown', enabled: true }));
   assert.equal(toRecord(harness.call('readSettings'))?.['sound'], true);
+});
+
+test('the unconfigured updater stays idle across IPC actions', async (context) => {
+  const harness = fixture();
+  context.after(harness.dispose);
+  assert.deepEqual(parseUpdateState(await harness.invoke('update:read')), { kind: 'idle' });
+  for (const action of ['retry', 'install']) {
+    const result = toRecord(await harness.invoke('update:act', { action }));
+    assert.equal(result?.['ok'], true);
+  }
+  assert.deepEqual(parseUpdateState(await harness.invoke('update:read')), { kind: 'idle' });
 });

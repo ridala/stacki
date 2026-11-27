@@ -70,6 +70,7 @@ test('the application menu is built from translate and keeps its shape in every 
     ]);
     const file = template[1];
     const submenu = Array.isArray(file?.submenu) ? file.submenu : [];
+    assert.ok(submenu.some((item) => item.label === loaded.translate('menu.file.checkForUpdates')));
     const settings = submenu.find((item) => item.accelerator === 'CmdOrCtrl+,');
     assert.equal(settings?.label, loaded.translate('menu.file.settings'));
     assert.equal(typeof settings?.click, 'function');
@@ -78,19 +79,20 @@ test('the application menu is built from translate and keeps its shape in every 
   }
 });
 
-test('a packaged non-Mac menu spells out the View menu and ends File with Quit', () => {
+test('a packaged non-Mac menu without an updater leaves out the check and ends File with Quit', () => {
   const template = buildApplicationMenuTemplate({
     isMac: false,
     isDev: false,
     translate: MAIN_ENGLISH.translate,
     send: () => undefined,
-    checkForUpdates: () => undefined,
+    checkForUpdates: undefined,
     reload: () => undefined,
   });
   assert.equal(template[0]?.label, 'File');
   assert.equal(template[2]?.label, 'View');
   assert.equal(template[3]?.label, 'Window');
   const submenu = Array.isArray(template[0]?.submenu) ? template[0].submenu : [];
+  assert.ok(submenu.every((item) => item.label !== MAIN_ENGLISH.translate('menu.file.checkForUpdates')));
   assert.equal(submenu[submenu.length - 1]?.role, 'quit');
 });
 
