@@ -1,3 +1,4 @@
+import { assert } from '../core/assert';
 import { boolean, object, record, text } from '../core/boundary';
 import { err, ok, type Result } from '../core/result';
 import { parseAbsolutePath } from './astroCopy';
@@ -14,13 +15,21 @@ export type ShadcnSettingsReply = Result<ShadcnSettings | undefined, { readonly 
 export function parseShadcnSettingsReply(input: unknown): ShadcnSettingsReply {
   const fields = record(input);
   if (!boolean(fields['ok'])) {
-    return err(parseError(fields['error']));
+    const error = parseError(fields['error']);
+    assert(typeof error.message === 'string', 'Shadcn settings error must carry a message');
+    return err(error);
   }
-  return ok(fields['value'] === undefined ? undefined : parseSettings(fields['value']));
+  const value = fields['value'] === undefined ? undefined : parseSettings(fields['value']);
+  if (value !== undefined) {
+    assert(typeof value.pointer === 'boolean', 'Shadcn pointer setting must be boolean');
+    assert(typeof value.rtl === 'boolean', 'Shadcn rtl setting must be boolean');
+  }
+  return ok(value);
 }
 
 function parseSetting(input: unknown): 'pointer' | 'rtl' {
   if (input === 'pointer' || input === 'rtl') {
+    assert(input.length > 0, 'Shadcn setting key must be non-empty');
     return input;
   }
   throw new Error('Unknown shadcn setting.');

@@ -1,4 +1,5 @@
 // Folder setup reports only project-owned files. Dependencies and runtime routes are outside the inventory.
+import { assert } from '../core/assert';
 import { boolean, count, digest, object, optional, pathText, record, text } from '../core/boundary';
 import { parseAbsolutePath } from './astroCopy';
 import { toArray } from '../core/record';
@@ -69,6 +70,8 @@ function parseReport(input: unknown): ProjectSetupReport {
       throw new Error('Project setup suggestions require a complete report and editable settings');
     }
   }
+  assert(report.desktopPages <= PROJECT_SETUP_ENTRIES_MAX, 'Desktop page count must stay within setup limit');
+  assert(report.studioPages <= PROJECT_SETUP_ENTRIES_MAX, 'Studio page count must stay within setup limit');
   return report;
 }
 
@@ -79,6 +82,7 @@ function parsePagesFolder(input: unknown): string {
   }
   // The source path is bounded by the folder contract. Astro appends one more segment.
   parseProjectFolder(folder.slice(0, -'/pages'.length));
+  assert(folder.endsWith('/pages'), 'Pages folder must keep its /pages suffix');
   return folder;
 }
 
@@ -101,6 +105,7 @@ function discoveryCount(input: unknown): number {
   if (value > PROJECT_SETUP_ENTRIES_MAX) {
     throw new Error('Project setup discovery count exceeds limit');
   }
+  assert(Number.isSafeInteger(value), 'Discovery count must be a safe integer');
   return value;
 }
 
@@ -114,12 +119,14 @@ function parseKind(input: unknown): ProjectSetupKind {
 function parseKinds(input: unknown): readonly ProjectSetupKind[] {
   const kinds = boundedArray(input, PROJECT_SETUP_KINDS.length).map(parseKind);
   assertUniqueKinds(kinds);
+  assert(kinds.length <= PROJECT_SETUP_KINDS.length, 'Project setup kinds must not exceed known kinds');
   return kinds;
 }
 
 function parseSuggestions(input: unknown): readonly ProjectSetupSuggestion[] {
   const suggestions = boundedArray(input, PROJECT_SETUP_KINDS.length).map(parseSuggestion);
   assertUniqueKinds(suggestions.map(({ kind }) => kind));
+  assert(suggestions.length <= PROJECT_SETUP_KINDS.length, 'Project setup suggestions must not exceed known kinds');
   return suggestions;
 }
 
@@ -146,20 +153,26 @@ function parseSuggestion(input: unknown): ProjectSetupSuggestion {
   if (accepted.length === 0) {
     throw new Error('Expected suggested project folders');
   }
+  assert(accepted.length === suggestion.folders.length, 'Accepted folders must match suggestion folders');
+  assert(accepted.length <= PROJECT_FOLDER_LIMITS.foldersPerKindMax, 'Suggested folders must stay within limit');
   return suggestion;
 }
 
 function parseCatalogExamples(input: unknown): readonly string[] {
-  return boundedArray(input, PROJECT_SETUP_EXAMPLES_MAX).map((value) => {
+  const examples = boundedArray(input, PROJECT_SETUP_EXAMPLES_MAX).map((value) => {
     const file = pathText(value);
     if (!(file.startsWith('src/') || file.startsWith('public/')) || !file.endsWith('.astro') || /(?:^|\/)\.{0,2}(?:\/|$)/.test(file)) {
       throw new Error('Expected a project-relative Astro catalog file');
     }
     return file;
   });
+  assert(examples.length <= PROJECT_SETUP_EXAMPLES_MAX, 'Catalog examples must stay within limit');
+  return examples;
 }
 
 function boundedArray(input: unknown, maximum: number): readonly unknown[] {
+  assert(Number.isSafeInteger(maximum), 'Bounded array maximum must be a safe integer');
+  assert(maximum >= 0, 'Bounded array maximum must be non-negative');
   const values = toArray(input);
   if (values === undefined || values.length > maximum) {
     throw new Error('Invalid project setup list');

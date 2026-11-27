@@ -16,7 +16,10 @@ test('the Dialog wrapper exposes editable content and inserts a named body slot'
   const [defaults, source] = await Promise.all([loadInsertionDefaults(root), readFile(path.join(root, pageFile), 'utf8')]);
   const wrapper = defaults.imports.find((component) => component.file === wrapperFile);
   assert.ok(wrapper);
-  assert.deepEqual(defaults.imports.map((component) => component.file), [wrapperFile]);
+  assert.deepEqual(
+    defaults.imports.map((component) => component.file),
+    [wrapperFile],
+  );
   assert.equal(wrapper.fields.find((field) => field.name === 'label')?.type, 'string');
   assert.deepEqual(wrapper.slots, ['body']);
   assert.deepEqual(defaultsIssues(defaults.config, defaults.catalog), []);

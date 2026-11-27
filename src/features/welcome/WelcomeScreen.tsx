@@ -16,11 +16,17 @@ import { ShadcnStarterLogo } from '../../ui/ShadcnStarterLogo';
 import AstroCopyDialog, { announceAstroCopy, type AstroCopySource } from './AstroCopyDialog';
 import { FolderDropHost, useFolderChoiceRoute } from './FolderDropHost';
 import { hasProjectSetupChannels } from '../../ipc/projectSetupBridge';
-import { ProjectSetupDialog } from '../projectSetup/ProjectSetupDialog';
+
+export interface WelcomeSetupDialogProps {
+  readonly projectPath: string;
+  readonly onClose: () => void;
+  readonly onContinue: () => void;
+}
 
 interface WelcomeScreenProps {
   readonly onOpen: (projectPath: string) => void;
   readonly showToast: (message: string, kind: 'success' | 'error' | 'info') => void;
+  readonly renderSetupDialog?: (props: WelcomeSetupDialogProps) => React.ReactNode;
 }
 
 const PROJECT_WIZARDS = { astro: NewProjectWizard, lumos: StarterWizard, shadcn: ShadcnStarterWizard, heroui: HeroUIStarterWizard };
@@ -30,7 +36,7 @@ interface ProjectCreation {
   readonly parentPath: string;
 }
 
-export default function WelcomeScreen({ onOpen, showToast }: WelcomeScreenProps) {
+export default function WelcomeScreen({ onOpen, showToast, renderSetupDialog }: WelcomeScreenProps) {
   const translate = useTranslate();
   const [cloning, setCloning] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -38,7 +44,7 @@ export default function WelcomeScreen({ onOpen, showToast }: WelcomeScreenProps)
   const [copySource, setCopySource] = useState<AstroCopySource | undefined>(undefined);
   const [setupPath, setSetupPath] = useState<string | undefined>(undefined);
   const recent = useRecentProjects(showToast);
-  const actions = useWelcomeActions(hasProjectSetupChannels() ? setSetupPath : onOpen, setError, setCreation, setCopySource);
+  const actions = useWelcomeActions(renderSetupDialog !== undefined && hasProjectSetupChannels() ? setSetupPath : onOpen, setError, setCreation, setCopySource);
   const ProjectWizard = PROJECT_WIZARDS[creation?.kind ?? 'lumos'];
   // Drop and recent paths open first. Only the native picker grants setup access before a project opens.
   const routeFolder = useFolderChoiceRoute({ open: onOpen, offerCopy: setCopySource, showToast });
@@ -62,17 +68,15 @@ export default function WelcomeScreen({ onOpen, showToast }: WelcomeScreenProps)
         }}
         showToast={showToast}
       />
-      {setupPath !== undefined && (
-        <ProjectSetupDialog
-          mode="welcome"
-          projectPath={setupPath}
-          onClose={() => setSetupPath(undefined)}
-          onContinue={() => {
+      {setupPath !== undefined &&
+        renderSetupDialog?.({
+          projectPath: setupPath,
+          onClose: () => setSetupPath(undefined),
+          onContinue: () => {
             setSetupPath(undefined);
             onOpen(setupPath);
-          }}
-        />
-      )}
+          },
+        })}
       {cloning && (
         <CloneRepositoryModal
           onClose={() => setCloning(false)}

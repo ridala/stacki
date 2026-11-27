@@ -4,8 +4,7 @@ import ts from 'typescript';
 import { record } from '../../shared/core/boundary';
 import { assert } from '../../shared/core/assert';
 import { err, ok, type Result } from '../../shared/core/result';
-import { PAGE_MD_RE } from '../documents/pageRequests';
-import { readFence } from '../parse/astroFence';
+import { PAGE_MD_RE, readFence } from '../documents/pageRequests';
 import {
   PAGES_FOLDER,
   folderChoiceProblem,

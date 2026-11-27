@@ -582,6 +582,11 @@ export { subscribeErrorToasts } from './src/ui/errorNotices';`,
   {
     const parentPath = '/tmp/sites';
     const projectPath = parentPath + '/heroui-site';
+    const errorNotices = [];
+    const stopErrorNotices = subscribeErrorToasts(
+      (notice) => errorNotices.push(notice),
+      () => {},
+    );
     let parentRequests = 0;
     let receiveLog;
     let finishCreate;
@@ -654,8 +659,8 @@ export { subscribeErrorToasts } from './src/ui/errorNotices';`,
     );
     await act(async () => failCreate(new Error('pnpm install failed')));
     check(
-      'the failed step is shown in the HeroUI wizard and inputs are kept for retry',
-      dialog.querySelector('[role=alert]')?.textContent === 'pnpm install failed' &&
+      'the failed step is reported as an error toast and inputs are kept for retry',
+      errorNotices.at(-1)?.message === 'pnpm install failed' &&
         submit.textContent === 'Try again' &&
         !submit.disabled &&
         siteName.value === 'heroui-site' &&
@@ -666,7 +671,7 @@ export { subscribeErrorToasts } from './src/ui/errorNotices';`,
     check(
       'HeroUI retry sends the same request and clears the old output',
       JSON.stringify(attempts[1]) === JSON.stringify(expected) &&
-        !dialog.querySelector('[role=alert]') &&
+        errorNotices.length === 1 &&
         !dialog.querySelector('.create-log')?.textContent.includes('Installing HeroUI dependencies'),
     );
     await act(async () => finishCreate({ ok: true, projectPath }));
@@ -675,6 +680,7 @@ export { subscribeErrorToasts } from './src/ui/errorNotices';`,
     const openCount = opened.length;
     await act(async () => all('.actions button')[0].click());
     check('Open from folder also opens the HeroUI project', opened.length === openCount + 1 && opened.at(-1) === projectPath);
+    stopErrorNotices();
   }
 
   // A first run has nothing to return to, so starting a site is the answer

@@ -1,3 +1,4 @@
+import { assert } from '../core/assert';
 import { boolean, object, optional, pathText, record, text } from '../core/boundary';
 import { err, ok, type Result } from '../core/result';
 import { parseCreatePackageManager, type CreatePackageManager } from '../properties/packageManager';
@@ -70,9 +71,11 @@ export function parseStarterRequest(input: unknown): StarterRequest {
 
 /** Checks the bare argument before it can reach a shell. The shadcn CLI validates the code itself. */
 export function parseShadcnPresetCode(input: unknown): string {
+  assert(SHADCN_PRESET_CODE_LENGTH_MAX > 0, 'Preset code limit must be positive');
   const code = text(input);
   if (code.length <= SHADCN_PRESET_CODE_LENGTH_MAX) {
     if (/^[ab][0-9A-Za-z]+$/.test(code)) {
+      assert(code.length > 0, 'Validated preset code must be non-empty');
       return code;
     }
   }
@@ -111,9 +114,11 @@ export const parseShadcnIconSelection = object({ iconLibrary: parseShadcnIconLib
 const parsePresetError = object({ message: text });
 
 export function parseStarterName(input: unknown): string {
+  assert(SITE_NAME_LENGTH_MAX > 0, 'Site name limit must be positive');
   const name = text(input).trim();
   if (name.length <= SITE_NAME_LENGTH_MAX) {
     if (/^(?!-)(?!\.{1,2}$)[A-Za-z0-9._-]+$/.test(name)) {
+      assert(name.length > 0, 'Validated starter name must be non-empty');
       return name;
     }
   }
@@ -125,6 +130,7 @@ function parseShadcnBase(input: unknown): ShadcnBase {
   if (base === undefined) {
     throw new Error('Choose a supported shadcn base.');
   }
+  assert(SHADCN_BASES.includes(base), 'Parsed shadcn base must be in supported bases');
   return base;
 }
 
@@ -133,6 +139,7 @@ function parseShadcnStyle(input: unknown): ShadcnStyle {
   if (style === undefined) {
     throw new Error('Choose a supported shadcn style.');
   }
+  assert(SHADCN_STYLES.includes(style), 'Parsed shadcn style must be in supported styles');
   return style;
 }
 
@@ -141,5 +148,6 @@ function parseShadcnIconLibrary(input: unknown): ShadcnIconLibrary {
   if (library === undefined) {
     throw new Error('Choose a supported shadcn icon library.');
   }
+  assert(SHADCN_ICON_LIBRARIES.includes(library), 'Parsed shadcn icon library must be in supported libraries');
   return library;
 }

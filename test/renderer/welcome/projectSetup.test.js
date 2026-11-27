@@ -120,7 +120,15 @@ export { ProjectSetupDialog } from './src/features/projectSetup/ProjectSetupDial
   const checkboxes = () => [...dialog().querySelectorAll('input[type="checkbox"]')];
   const welcome = () => control('Open from folder', document);
 
-  await act(async () => root.render(createElement(WelcomeScreen, { onOpen: (directory) => open.push(directory), showToast: assert.fail })));
+  await act(async () =>
+    root.render(
+      createElement(WelcomeScreen, {
+        onOpen: (directory) => open.push(directory),
+        showToast: assert.fail,
+        renderSetupDialog: (setup) => createElement(ProjectSetupDialog, { mode: 'welcome', ...setup }),
+      }),
+    ),
+  );
   welcome().focus();
   await click(welcome());
   assert.equal(dialog().getAttribute('aria-label'), 'Review setup');

@@ -65,8 +65,8 @@ test('component builder confirms only for the current project and role', async (
         }),
       );
     });
-  const build = () => document.querySelector('button[aria-label="Build a component with AI"]');
-  const dialog = () => document.querySelector('dialog[open]');
+  const build = () => document.querySelector('button[aria-label="Build a component with AI"]') ?? undefined;
+  const dialog = () => document.querySelector('dialog[open]') ?? undefined;
   const click = (button) => act(async () => button.click());
 
   try {
@@ -80,7 +80,7 @@ test('component builder confirms only for the current project and role', async (
     assert.deepEqual(calls, []);
 
     await act(async () => dialog().dispatchEvent(new dom.window.Event('cancel', { cancelable: true })));
-    assert.equal(dialog(), null);
+    assert.equal(dialog(), undefined);
     assert.equal(document.activeElement, build());
     assert.deepEqual(calls, []);
 
@@ -93,7 +93,7 @@ test('component builder confirms only for the current project and role', async (
     await click(build());
     const staleConfirm = dialog().querySelector('button.primary');
     await render('project-two', 'clipboard');
-    assert.equal(dialog(), null);
+    assert.equal(dialog(), undefined);
     await click(staleConfirm);
     assert.equal(calls.length, 1);
 
@@ -108,8 +108,8 @@ test('component builder confirms only for the current project and role', async (
 
     await click(build());
     await act(async () => setActualRole(roleViewOf(DEFAULT_PROJECT_ROLES, CLIENT_ROLE_ID)));
-    assert.equal(dialog(), null);
-    assert.equal(build(), null);
+    assert.equal(dialog(), undefined);
+    assert.equal(build(), undefined);
     assert.equal(calls.length, 2);
   } finally {
     await act(async () => root.unmount());

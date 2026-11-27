@@ -3,6 +3,7 @@ import type { Attr } from '../../../shared/page/pageNode';
 import { LIMITS } from '../../../shared/core/limits';
 import { useTranslate } from '../../lib/i18n/useTranslate';
 import Dropdown from '../../ui/Dropdown';
+import { ErrorToast } from '../../ui/ErrorToast';
 import { validSeoText, type Indexing, type SeoField, type SeoRole } from './pageSeo';
 
 const LABELS = {
@@ -111,7 +112,7 @@ function TextField({
         maxLength={LIMITS.attrCharsMax}
         placeholder={field.optional ? translate('pages.settings.seo.inherit') : undefined}
         aria-invalid={invalid}
-        aria-describedby={invalid ? id + '-error' : undefined}
+        title={invalid ? translate('pages.settings.seo.invalidCanonical') : undefined}
         onChange={(event) => setDraft(event.currentTarget.value)}
         onBlur={(event) => {
           if (resetButton.current !== null && event.relatedTarget === resetButton.current) {
@@ -127,11 +128,7 @@ function TextField({
           }
         }}
       />
-      {invalid && (
-        <div id={id + '-error'} className="page-settings-note">
-          {translate('pages.settings.seo.invalidCanonical')}
-        </div>
-      )}
+      <ErrorToast message={invalid ? translate('pages.settings.seo.invalidCanonical') : undefined} />
       {field.optional && text !== undefined && write !== undefined && (
         <button type="button" className="page-settings-add-prop" ref={resetButton} onClick={() => write(field.name, undefined)}>
           {translate('pages.settings.seo.inherit')}

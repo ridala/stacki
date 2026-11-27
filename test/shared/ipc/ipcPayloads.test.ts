@@ -478,6 +478,8 @@ const metadataSamples: Readonly<Record<string, unknown>> = {
   'project:readShadcnSettings': { projectPath: '/site' },
   'project:changeShadcnSetting': { projectPath: '/site', setting: 'rtl', enabled: true },
   'project:inspectShadcnPreset': { preset: 'b1QGlW' },
+  'project:setupScan': { projectPath: '/site' },
+  'project:setupApply': { projectPath: '/site', revision: 'a'.repeat(64), kinds: ['components'] },
   'project:createAstroCopy': { sourcePath: '/sites/shop', parentPath: '/sites', name: 'shop-astro' },
   // The interface language mirrored to main: a shipped locale or "system".
   'locale:set': { preference: 'de' },

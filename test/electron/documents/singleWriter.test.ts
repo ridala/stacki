@@ -283,6 +283,19 @@ const ALLOWED: Readonly<Record<string, Readonly<Record<string, Allowed>>>> = {
       reason: 'writes the starter pages, layout, components and insertion defaults in private staging before the new project can be opened',
     },
   },
+  'electron/project/herouiStarterCatalog.ts': {
+    writeFile: {
+      count: 5,
+      reason:
+        'creates HeroUI catalog Astro adapters, React islands, styles and insertion defaults exclusively in private staging before the project can be opened',
+    },
+  },
+  'electron/project/herouiStarterSite.ts': {
+    writeFile: {
+      count: 1,
+      reason: 'writes the HeroUI starter pages and layout exclusively in private staging before the new project can be opened',
+    },
+  },
   // The AI chat panel's own files, all in userData or the system temp folder, never in the project.
   // The project files an agent's edit is undone in go through the document actors (aiHandlers.ts).
   'electron/handlers/ai/agentInstaller.ts': {

@@ -5,6 +5,7 @@ import { applyProjectSetup, scanProjectSetup } from '../../ipc/projectSetupBridg
 import { cleanError } from '../../lib/cleanError';
 import { useFormat, useTranslate, useTranslateDescribed } from '../../lib/i18n/useTranslate';
 import { holdWindow } from '../../ui/busyLock';
+import { ErrorToast } from '../../ui/ErrorToast';
 import Popup from '../../ui/Popup';
 import './projectSetup.css';
 
@@ -147,9 +148,13 @@ export function ProjectSetupDialog(props: ProjectSetupProps) {
                 {needsPermission ? setupError(state.message) : translate('settings.folders.setup.scanError', { message: setupError(state.message) })}
               </p>
             )}
-            {state.kind === 'review' && state.saveError !== undefined && (
-              <p role="alert">{translate('settings.folders.setup.saveError', { message: setupError(state.saveError) })}</p>
-            )}
+            <ErrorToast
+              message={
+                state.kind === 'review' && state.saveError !== undefined
+                  ? translate('settings.folders.setup.saveError', { message: setupError(state.saveError) })
+                  : undefined
+              }
+            />
             {(state.kind === 'review' || state.kind === 'saving') && (
               <SetupReport report={state.report} selected={state.selected} select={state.kind === 'review' && canSave ? select : undefined} />
             )}

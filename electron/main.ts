@@ -507,9 +507,9 @@ function createWindow() {
     bootStore?.flush();
   });
   mainWindow.on('closed', () => {
+    openProjectRoot = undefined;
     projectSetupAccess.activate(undefined);
     projectSetupAccess.resetView();
-    openProjectRoot = undefined;
     folderQueue.hold();
     stopWatchingProject();
     fileExplorer.stopWatching();

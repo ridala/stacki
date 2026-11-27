@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CreatePackageManager } from '../../../shared/properties/packageManager';
 import { useTranslate } from '../../lib/i18n/useTranslate';
+import { ErrorToast } from '../../ui/ErrorToast';
 import { createStarterProject } from './welcomeBridge';
 import {
   CreateLog,
@@ -65,11 +66,7 @@ export default function HeroUIStarterWizard({ parentPath, onClose, onDone }: Wiz
       />
       <PackageManagerField value={manager} disabled={running} change={setManager} />
       {(running || log.text !== '') && <CreateLog log={log.text || translate('welcome.project.starting')} running={running} elementRef={log.elementRef} />}
-      {state.kind === 'error' && (
-        <div className="starter-creation-error" role="alert">
-          {state.message}
-        </div>
-      )}
+      <ErrorToast message={state.kind === 'error' ? state.message : undefined} />
     </WizardFrame>
   );
 }
