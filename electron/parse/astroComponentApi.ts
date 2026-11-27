@@ -213,6 +213,36 @@ function destructuredTag(frontmatter: string, name: string): { prop: string; tag
 // scanning forward from its `{`: a rest element is always last, and looking
 // forward tripped over any `}` in front of it (`containerAttrs = {}, ...rest`).
 // The optional `: Type` covers an annotated destructure.
+// Whether the template sets an element's HTML from a value (`set:html={body}`): such a component takes a run of HTML
+// children through that prop, as a slot takes them, which is what lets it offer rich text editing.
+export function rendersHtml(source: string): boolean {
+  const fm = frontmatterOf(source);
+  const body = withoutComments(source).slice(fm ? fm.length : 0);
+  return /\sset:html\s*=\s*\{/.test(body);
+}
+
+// The props whose value the template sets as HTML (`set:html={body}` where `body` comes from Astro.props): an instance
+// writes that HTML as the prop's text, which rich text editing can edit when it is a literal.
+export function htmlPropsOf(source: string): string[] {
+  const fm = frontmatterOf(source);
+  const body = withoutComments(source).slice(fm ? fm.length : 0);
+  const destructured = /const\s*\{([^}]*)\}\s*=\s*Astro\.props/.exec(fm ? fm.code : '')?.[1] ?? '';
+  const names = new Set<string>();
+  for (const match of body.matchAll(/\sset:html\s*=\s*\{\s*([A-Za-z_$][\w$]*)\s*\}/g)) {
+    const name = match[1] ?? '';
+    // `body`, `body = ""` or `html: body` in the destructure: the prop is the name before a colon, if any.
+    const entry = destructured.split(',').find((part) => new RegExp(`(?:^|:)\\s*${name}\\s*(?:=|$)`).test(part.trim()));
+    const prop = entry?.split(':')[0]?.split('=')[0]?.trim();
+    if (prop) {
+      names.add(prop);
+    }
+    if (names.size >= 8) {
+      break;
+    }
+  }
+  return [...names];
+}
+
 export function forwardsRest(source: string): boolean {
   return /\.\.\.\s*\w+\s*\}\s*(?::[^=]+)?=\s*Astro\.props/.test(source);
 }

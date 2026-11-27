@@ -252,7 +252,7 @@
     },
     {
       "file": "src/features/audits/AuditsPanel.tsx",
-      "pattern": "<span className=\"audits-note-line\" title={note}>",
+      "pattern": "<span className=\"audits-note-line\" title={noteTitle}>",
       "reason": "Empty or clean state of the audits list, or a finding secondary line that also carries a title tooltip."
     },
     {
@@ -499,6 +499,21 @@
       "file": "src/features/welcome/FolderDropHost.tsx",
       "pattern": "className=\"folder-drop-hint\"",
       "reason": "The line of the full-window overlay shown only while a folder is dragged over Stacki: it is the overlay itself, replaces nothing on the page, and is gone on drop or leave."
+    },
+    {
+      "file": "src/features/projectSetup/ProjectSetupDialog.tsx",
+      "pattern": "<p role=\"alert\">",
+      "reason": "Replaces the whole setup dialog body when scanning the project fails or requires folder permission; no report or fields are shown beside it."
+    },
+    {
+      "file": "src/features/pages/PageSeoFields.tsx",
+      "pattern": "return <div className=\"page-settings-note\">{reason ?? translate('pages.settings.seo.unavailable')}</div>;",
+      "reason": "Empty state of the page SEO section when the layout exposes no editable SEO fields or the page could not be parsed."
+    },
+    {
+      "file": "src/features/pages/PageSeoFields.tsx",
+      "pattern": "<div className=\"page-settings-note\">{translate('pages.settings.seo.bound')}</div>",
+      "reason": "Read-only status standing in place of an input control when an SEO prop is bound to a code expression, not text appended under a field."
     }
   ]
 }

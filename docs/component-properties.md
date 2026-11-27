@@ -229,3 +229,17 @@ distinguish actual prop references from comments, text, or unrelated attributes.
 This adds the existing compiler packages (including Astro's WASM) to the packaged
 application, with no additional service or network dependency. Both run in the
 main process; they are not bundled into the renderer.
+
+## Page SEO fields
+
+Mark layout props with `@seo title`, `@seo description`, `@seo social-image`,
+`@seo social-image-alt`, `@seo canonical`, or `@seo noindex` to expose them
+in Desktop's **Page settings** under **SEO**. Use one prop per role. Declare
+`noindex` as a boolean and the other roles as strings. The layout must pass each
+marked value to the page head. Astro still renders the metadata.
+
+An optional field can return to its layout default by removing the page's prop.
+Indexing offers three choices. Inheritance leaves the prop unset, allowing
+indexing writes `false`, and requesting no indexing writes `true`. Page settings
+leaves computed values and layouts with spread attributes read-only. The section
+supports concrete Astro pages with a recognized layout.

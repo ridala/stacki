@@ -11,6 +11,12 @@ export const messages = {
   'palette.apps.empty.title': 'Aucune app pour l’instant',
   'palette.apps.loading': 'Chargement des apps…',
   'palette.apps.marketplace': 'Marketplace', // same
+  'palette.components.buildWithAI': 'Créer un composant avec l’IA',
+  'palette.components.buildWithAI.copyTask': 'Copier la tâche',
+  'palette.components.buildWithAI.description':
+    'La tâche demande à un agent de vérifier si ce projet prend en charge React 19 et de vous consulter avant de modifier les dépendances.',
+  'palette.components.buildWithAI.draftReady': 'Le brouillon est prêt dans le chat IA. Relisez-le avant de l’envoyer.',
+  'palette.components.buildWithAI.openDraft': 'Ouvrir le brouillon IA',
   'palette.create.folderRoot': '{folder} (racine)',
   'palette.create.taken': '{file} existe déjà.',
   'palette.create.hint': '{label} devient {tag}, enregistré sous {file}',
@@ -120,6 +126,7 @@ export const messages = {
   'palette.panel.noMatch': 'Aucun composant ne correspond à « {query} ».',
   'palette.panel.none': 'Aucun composant trouvé dans {folder}.',
   'palette.panel.search': 'Rechercher des composants',
+  'palette.panel.searchHidden': 'Masqué dans la recherche',
   'palette.panel.title': 'Composants',
   'palette.preview.clientOnly': 'Ce composant ne fonctionne que dans le navigateur ; il ne peut pas être dessiné à l’avance.',
   'palette.preview.loading': 'Chargement de l’aperçu…',

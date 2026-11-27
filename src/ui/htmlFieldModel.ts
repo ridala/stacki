@@ -1,5 +1,8 @@
 import { assert } from '../../shared/core/assert';
 import { BOUNDARY_LIMITS } from '../../shared/core/boundary';
+import { safeHTMLLink } from '../../shared/page/richPaste';
+
+export { safeHTMLLink };
 
 const TAGS = new Set(
   (
@@ -22,12 +25,13 @@ export function containsHTML(value: string): boolean {
   return /<\/?[a-z][a-z0-9-]*(?:\s[^<>]*|\s*\/?)>/i.test(value);
 }
 
-export function safeHTMLLink(value: string): boolean {
-  const text = value.trim();
-  if (/[\u0000-\u0020\u007f]/.test(text)) {
-    return false;
-  }
-  return /^(?:https?:\/\/|mailto:|tel:|#|\/|\.\.?\/)/i.test(text);
+// Video, for rich text a component's slot holds (HtmlField's `media`): its own attributes only, its address a project
+// path or a web address, as an image's is. Off for every other HTML field, which keeps the list it always had.
+const MEDIA_TAGS = new Set(['video', 'source']);
+const MEDIA_ATTRIBUTES = new Set(['controls', 'autoplay', 'muted', 'loop', 'playsinline', 'poster', 'preload', 'type']);
+
+export interface EditableOptions {
+  readonly media?: boolean;
 }
 
 export interface EditableHTML {
@@ -37,7 +41,7 @@ export interface EditableHTML {
 
 // Parse in an inert template, then allow only document content into the editor.
 // Opening a field never writes this projection back: original HTML stays intact.
-export function editableHTML(value: string, document: Document): EditableHTML {
+export function editableHTML(value: string, document: Document, options: EditableOptions = {}): EditableHTML {
   assert(value.length <= BOUNDARY_LIMITS.textLengthMax, 'HTML field: text limit exceeded');
   const template = document.createElement('template');
   template.innerHTML = value;
@@ -45,19 +49,27 @@ export function editableHTML(value: string, document: Document): EditableHTML {
   assert(elements.length <= BOUNDARY_LIMITS.itemsMax, 'HTML field: element limit exceeded');
   let restricted = false;
   for (const element of elements) {
-    if (!TAGS.has(element.localName)) {
+    const media = options.media === true && MEDIA_TAGS.has(element.localName);
+    if (!TAGS.has(element.localName) && !media) {
       element.remove();
       restricted = true;
       continue;
     }
     for (const attribute of Array.from(element.attributes)) {
-      if (!editableAttribute(element.localName, attribute)) {
+      if (!editableAttribute(element.localName, attribute) && !(media && mediaAttribute(attribute))) {
         element.removeAttribute(attribute.name);
         restricted = true;
       }
     }
   }
   return { html: template.innerHTML, restricted };
+}
+
+function mediaAttribute(attribute: Attr): boolean {
+  if (MEDIA_ATTRIBUTES.has(attribute.name)) {
+    return true;
+  }
+  return attribute.name === 'src' && /^(?:https?:\/\/|\/|\.\.?\/)/i.test(attribute.value);
 }
 
 function editableAttribute(tag: string, attribute: Attr): boolean {

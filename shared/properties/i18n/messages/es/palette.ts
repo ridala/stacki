@@ -11,6 +11,12 @@ export const messages = {
   'palette.apps.empty.title': 'Aún no hay apps',
   'palette.apps.loading': 'Cargando apps…',
   'palette.apps.marketplace': 'Marketplace', // same
+  'palette.components.buildWithAI': 'Crear un componente con IA',
+  'palette.components.buildWithAI.copyTask': 'Copiar tarea',
+  'palette.components.buildWithAI.description':
+    'La tarea pide a un agente de programación que compruebe si este proyecto admite React 19 y que te consulte antes de cambiar las dependencias.',
+  'palette.components.buildWithAI.draftReady': 'El borrador está listo en el chat de IA. Revísalo antes de enviarlo.',
+  'palette.components.buildWithAI.openDraft': 'Abrir borrador de IA',
   'palette.create.folderRoot': '{folder} (raíz)',
   'palette.create.taken': '{file} ya existe.',
   'palette.create.hint': '{label} se convierte en {tag}, guardado como {file}',
@@ -117,6 +123,7 @@ export const messages = {
   'palette.panel.noMatch': 'Ningún componente coincide con «{query}».',
   'palette.panel.none': 'No se encontraron componentes en {folder}.',
   'palette.panel.search': 'Buscar componentes',
+  'palette.panel.searchHidden': 'Oculto en la búsqueda',
   'palette.panel.title': 'Componentes',
   'palette.preview.clientOnly': 'Este componente solo funciona en el navegador, así que no se puede dibujar de antemano.',
   'palette.preview.loading': 'Cargando vista previa…',

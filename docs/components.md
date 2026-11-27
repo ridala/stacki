@@ -62,6 +62,20 @@ the component, never a component folder itself. Redo writes the file again and r
 - The Components panel groups by the scan's folder, so a new component appears in its folder's group after the rescan that
   follows creation.
 
+## Build a component with AI
+
+Open **Build a component with AI** in Components. In Desktop, choose **Open AI draft** to review and edit the prompt
+before sending it. In Studio, choose **Copy task** and review the prompt before pasting it into a coding agent with
+project access. The action is available to roles that can create components. Desktop also requires AI chat and code
+editing access.
+
+The prompt asks for a Dialog in an Astro wrapper with an editable label and body slot. UI SDK needs the Astro React
+integration and React 19. Review any setup with the agent and approve installation separately.
+
+After reviewing the changes, run your project's GitHub checks for the Astro build and `astro-studio check-project`.
+Find the wrapper in Components, insert it into a page, and edit the label and body. Open the page in interactive preview
+to check the Dialog with the keyboard.
+
 ## Deleting a component
 
 Delete in the Components panel's "…" menu is one step over the whole site, planned before anything is written
@@ -89,3 +103,38 @@ Delete in the Components panel's "…" menu is one step over the whole site, pla
   that is gone.
 - Duplicate's Undo deletes the copy with `uses: 'refuse'`: a copy something now uses is kept. The CLI's `components delete`
   refuses a used component the same way.
+
+## How a component's fields are typed in
+
+Each field of a component has two switches, off by default, as the last rows where the field's name and tooltip are
+set (the Properties panel of the open component): a prop in its settings form, a slot through its own row at the end
+of the list (the default slot is **Content**). Each writes `.stacki/components.json` at once, on the component's
+recipe under `editing`, keyed by the prop's name or `slot:<name>`, and only while on (`"editing": { "slot:default":
+{ "richText": true } }`); turning one off removes the key, then an empty field, `editing` and an empty recipe, so the
+file returns byte for byte. Older Stacki versions read recipes key by key and skip `editing`, so they keep reading the
+file; a defaults save made in an older version rewrites the file from what it parsed and drops it. A component rename
+or move carries it (`relinkDefaults`); a prop renamed or deleted in the Properties panel takes its settings with it
+(`withEditingFieldMoved`), as a separate write from the source edit. The CLI schema describes it (`stacki config set`).
+
+| Field | Allow line breaks | Allow rich text editing |
+|---|---|---|
+| Default slot (`slot:default`) inside a line of words (`<p><slot /></p>`) | Offered | Not offered: blocks inside `<p>` are invalid HTML |
+| Default slot otherwise, or a named slot | Offered | Offered |
+| A prop the template sets with `set:html={prop}` | Offered | Offered |
+| Any other prop (text printed as `{prop}`, an attribute such as href, alt or class, a number, a switch, an image, a choice) | Not offered: a `<br>` would be escaped or literal | Not offered |
+
+| Where | Line breaks on | Rich text on |
+|---|---|---|
+| Canvas | Enter and Shift Enter type a line break, saved as `<br />`; ⌘/Ctrl Enter finishes, Escape cancels, a click away saves | The instance's blocks become editable: Enter starts a new paragraph at once, Shift Enter a line break, Enter on an empty list item leaves the list, Backspace removes an empty block; a `+` beside an empty block chooses Heading 1–6, Paragraph, Quote, Image, Link, Video, lists, divider or code block; ⌘/Ctrl Enter or a click elsewhere saves the blocks as one edit, Escape restores them |
+| Properties panel | The Content field, which already wrote `<br>` for Enter, is unchanged | Content (or the set:html prop) becomes **Edit rich text**, opening the rich text editor in a dialog with the same `+`; image and video come from the asset picker or a typed address |
+
+With both on, rich text's Enter wins. A stored setting a field can no longer take is ignored and kept, and
+`check-project` names it. The rich text editor opens only content it can give back unchanged in meaning
+(`richTextView`, `src/features/props/richTextContent.ts`): native rich text tags with plain attributes. A component, an
+expression, a comment, a directive or an unknown tag or attribute shows the content as highlighted code instead, the
+`{}` beside the label locked on code with a tooltip saying why; a set:html prop given an expression is shown as code,
+read only, never turned into a literal. Code is written as one patch of the bytes between the instance's tags, when the
+code view loses focus, and refused when those bytes changed meanwhile.
+
+Not yet: Studio draws the same Properties panel and canvas `+` but its host passes no settings, so it edits as
+before; Enter on the canvas in text a set:html prop renders still finishes editing.

@@ -1,6 +1,7 @@
 name: Check
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -26,15 +27,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Check pull request commit messages
+        if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'sync/') && github.head_ref != 'dev'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node --experimental-strip-types scripts/policy/checkCommitRange.mts "$BASE_SHA" "$HEAD_SHA"
       - run: npm ci
       - run: npm --prefix studio ci
       - run: npm run format:check
       - run: npm run check:policy
       - run: npm run typecheck
+      - name: Build and inspect the UI SDK Dialog fixture
+        working-directory: studio/test/fixtures/ui-sdk-dialog
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          npm run build
+          node verifyOutput.mts
 
   # The full gate on every platform the app ships on, split so no job carries
   # more than about a quarter of it. One Linux job runs the builds and the

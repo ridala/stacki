@@ -3,15 +3,30 @@
 // pins the UTC boundary used for the local once-per-day guard.
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { sendUsageCount, shouldCountUsage, usageDay } = require('#dist/electron/app/usageCounts.js');
+const { DESKTOP_RELEASE } = require('#dist/shared/core/desktopRelease.js');
+const { sendUsageCount, shouldCountUsage, usageDay, USAGE_NOTICE_VERSION } = require('#dist/electron/app/usageCounts.js');
 
-test('a usage count sends only an empty POST to the first-party endpoint', async () => {
+const endpoint = 'https://usage.example.test/daily';
+
+test('the shipped release makes no request without a configured counter', async () => {
   const controller = new AbortController();
   let sent = 0;
-  const success = await sendUsageCount({ signal: controller.signal }, async (url, options) => {
+  const success = await sendUsageCount({ endpoint: DESKTOP_RELEASE.usageCountsURL, signal: controller.signal }, async () => {
     sent += 1;
-    assert.match(url, /^https:\/\/stacki-usage-counts\./);
+    return new Response(undefined, { status: 204 });
+  });
+  assert.equal(success, false);
+  assert.equal(sent, 0);
+});
+
+test('a usage count sends only an empty POST to the configured endpoint', async () => {
+  const controller = new AbortController();
+  let sent = 0;
+  const success = await sendUsageCount({ endpoint, signal: controller.signal }, async (url, options) => {
+    sent += 1;
+    assert.equal(url, endpoint);
     assert.equal(options.method, 'POST');
+    assert.equal(options.redirect, 'error');
     assert.equal(options.body, undefined);
     assert.equal(options.headers, undefined);
     return new Response(undefined, { status: 204 });
@@ -22,10 +37,10 @@ test('a usage count sends only an empty POST to the first-party endpoint', async
 
 test('offline and rejected requests cannot interrupt project editing', async () => {
   const controller = new AbortController();
-  const offline = await sendUsageCount({ signal: controller.signal }, async () => {
+  const offline = await sendUsageCount({ endpoint, signal: controller.signal }, async () => {
     throw new Error('offline');
   });
-  const rejected = await sendUsageCount({ signal: controller.signal }, async () => new Response(undefined, { status: 503 }));
+  const rejected = await sendUsageCount({ endpoint, signal: controller.signal }, async () => new Response(undefined, { status: 503 }));
   assert.equal(offline, false);
   assert.equal(rejected, false);
 });
@@ -39,12 +54,13 @@ test('development, opt-out, missing notice, and repeat openings send no count', 
   const active = {
     packaged: true,
     enabled: true,
-    noticeVersion: 1,
+    noticeVersion: USAGE_NOTICE_VERSION,
     lastAttemptDay: undefined,
   };
   assert.equal(shouldCountUsage(active, '2026-10-08'), true);
   assert.equal(shouldCountUsage({ ...active, packaged: false }, '2026-10-08'), false);
   assert.equal(shouldCountUsage({ ...active, enabled: false }, '2026-10-08'), false);
   assert.equal(shouldCountUsage({ ...active, noticeVersion: 0 }, '2026-10-08'), false);
+  assert.equal(shouldCountUsage({ ...active, noticeVersion: 1 }, '2026-10-08'), false, 'the upstream notice precedes the fork notice');
   assert.equal(shouldCountUsage({ ...active, lastAttemptDay: '2026-10-08' }, '2026-10-08'), false);
 });

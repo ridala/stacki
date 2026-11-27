@@ -32,6 +32,7 @@ const WRITE_APIS = [
   'renameSync',
   'linkSync',
   'symlinkSync',
+  'symlink',
   'truncateSync',
   'ftruncateSync',
   'replaceFileAtomic',
@@ -95,8 +96,36 @@ const ALLOWED: Readonly<Record<string, Readonly<Record<string, Allowed>>>> = {
   'electron/handlers/cmsHandlers.ts': {
     writeFileSync: { count: 2, reason: '.stacki/cms.json metadata' },
   },
+  // Design mode (experimental, docs/design-mode/REMOVE.md): its sandbox copy and drafts, in Stacki's data folder,
+  // never the project (the fence refuses that: electron/lib/designMode/designWriteGuard.ts).
+  'electron/handlers/designMode/designDrafts.ts': {
+    renameSync: { count: 1, reason: 'a draft written whole to a temporary file, then put in place' },
+    writeFileSync: { count: 1, reason: "the frames' draft, in the app's data folder" },
+  },
+  'electron/handlers/designMode/designFrames.ts': {
+    writeFile: { count: 1, reason: "a frame's file put into the sandbox copy when the frame is shown" },
+  },
+  'electron/handlers/designMode/designSandbox.ts': {
+    copyFile: { count: 1, reason: 'the project copied into the sandbox' },
+    symlink: { count: 1, reason: 'a link inside the project kept as a link in the sandbox copy' },
+  },
+  'electron/handlers/designMode/designSnapshots.ts': {
+    writeFile: { count: 1, reason: "a frame's snapshot written whole to a temporary file in the app's data folder" },
+  },
   'electron/handlers/devServers.ts': {
     writeFileSync: { count: 6, reason: 'the generated preview harness in node_modules/.avb, with the component preview recipe' },
+  },
+  'electron/preview/imageCacheConfig.ts': {
+    writeFileSync: { count: 1, reason: 'a generated dev server config in node_modules/.avb, never a page' },
+  },
+  'electron/project/explorerOps.ts': {
+    renameSync: {
+      count: 4,
+      reason:
+        'the Files panel renames and moves entries (a case-only rename passes through a free name in the same folder); a move writes no bytes, and a taken name is refused or answered first',
+    },
+    copyFileSync: { count: 1, reason: 'the Files panel copies a file to a new name with COPYFILE_EXCL, so nothing is ever replaced' },
+    symlinkSync: { count: 1, reason: 'a link inside a copied or imported folder is copied as a link, never followed' },
   },
   'electron/project/pageRelocationWrite.ts': {
     createFileExclusive: {
@@ -223,6 +252,9 @@ const ALLOWED: Readonly<Record<string, Readonly<Record<string, Allowed>>>> = {
     writeFileSync: { count: 1, reason: "the temporary copy of an app's stored values (.stacki/app-data/<id>.json or the local folder)" },
     renameSync: { count: 1, reason: 'puts that storage file in place whole (atomic save)' },
   },
+  'electron/project/publishSnapshot.ts': {
+    symlink: { count: 1, reason: "the publish snapshot's node_modules link, in a temporary checkout, never in the project" },
+  },
   'electron/project/starter.ts': {
     writeFileSync: { count: 1, reason: 'package.json of a new project from a starter' },
   },
@@ -231,6 +263,8 @@ const ALLOWED: Readonly<Record<string, Readonly<Record<string, Allowed>>>> = {
       count: 3,
       reason: 'creates the launcher package.json and pnpm-workspace.yaml exclusively in private staging, then pins the manager in the generated manifest',
     },
+  },
+  'electron/project/stagedStarter.ts': {
     renameSync: {
       count: 2,
       reason: 'moves staged entries into an exclusively created project directory and moves those same entries back on failure',
@@ -251,6 +285,19 @@ const ALLOWED: Readonly<Record<string, Readonly<Record<string, Allowed>>>> = {
       reason: 'writes the starter pages, layout, components and insertion defaults in private staging before the new project can be opened',
     },
   },
+  'electron/project/herouiStarterCatalog.ts': {
+    writeFile: {
+      count: 5,
+      reason:
+        'creates HeroUI catalog Astro adapters, React islands, styles and insertion defaults exclusively in private staging before the project can be opened',
+    },
+  },
+  'electron/project/herouiStarterSite.ts': {
+    writeFile: {
+      count: 1,
+      reason: 'writes the HeroUI starter pages and layout exclusively in private staging before the new project can be opened',
+    },
+  },
   // The AI chat panel's own files, all in userData or the system temp folder, never in the project.
   // The project files an agent's edit is undone in go through the document actors (aiHandlers.ts).
   'electron/handlers/ai/agentInstaller.ts': {
@@ -261,6 +308,13 @@ const ALLOWED: Readonly<Record<string, Readonly<Record<string, Allowed>>>> = {
     appendFileSync: { count: 1, reason: "a chat's transcript in userData/ai, append-only" },
     writeFileSync: { count: 1, reason: 'the temporary copy of the chat index or a reviews file in userData/ai' },
     renameSync: { count: 1, reason: 'puts that index or reviews file in place whole (atomic save)' },
+  },
+  'electron/handlers/ai/pinBoardStore.ts': {
+    writeFileSync: { count: 1, reason: "the temporary copy of a project's comment pins board or one of its images, in userData/ai" },
+    renameSync: { count: 1, reason: 'puts that board or image in place whole (atomic save)' },
+  },
+  'electron/handlers/ai/pinPictures.ts': {
+    writeFileSync: { count: 1, reason: "a pin's picture as an owner-only scratch file in userData/ai/pin-pictures, for the pin's subagent; removed after" },
   },
   'electron/handlers/ai/treeSnapshot.ts': {
     copyFileSync: { count: 1, reason: "a temporary copy of the project's git index in the system temp folder, for a snapshot; removed after" },

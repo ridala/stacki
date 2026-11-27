@@ -65,6 +65,10 @@ export function canvasEventSelectsSource(request: CanvasEventRequest, context: C
  *                                        path and this flag
  * @param {string|undefined} click.focusPath the instance being edited, or undefined
  * @param {string} click.scope            the open file's path prefix ('' for a page)
+ * @param {string|undefined} click.ownedRoot  set on the component defaults page: an ordinary page of which only
+ *                                        this instance and what is under it are edited. It is dimmed as an open
+ *                                        component is (focusPath), but its nodes are the open page's own, so a
+ *                                        node under the instance selects rather than reading as "nothing".
  * @returns {{ kind: 'inner'|'select'|'layout'|'close'|'nothing' }}
  *   inner   — a node in the component being edited: select it
  *   select  — a node in the open page: select it
@@ -77,12 +81,26 @@ export function canvasClickAction({
   outside = false,
   focusPath,
   scope = '',
+  ownedRoot,
 }: {
+  readonly ownedRoot?: string | undefined;
   readonly path?: string | undefined;
   readonly outside?: boolean;
   readonly focusPath?: string | undefined;
   readonly scope?: string;
 }): { readonly kind: 'inner' | 'select' | 'layout' | 'close' | 'nothing' } {
+  if (ownedRoot !== undefined) {
+    // The instance and its children at any depth select as on any page.
+    if (path === ownedRoot || (path?.startsWith(`${ownedRoot}.`) ?? false)) {
+      return { kind: 'select' };
+    }
+    // The dimmed page around it leaves, as clicking away from an open component does: the editor saves and
+    // closes. A click the canvas could not place at all changes nothing.
+    if (path === undefined) {
+      return { kind: outside ? 'close' : 'nothing' };
+    }
+    return { kind: 'close' };
+  }
   if (focusPath) {
     // The open file's own markup is marked in its namespace, so a path in that
     // namespace is a node in the file being edited.

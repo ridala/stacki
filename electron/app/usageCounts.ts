@@ -3,8 +3,8 @@
 
 import { assert } from '../../shared/core/assert';
 
-export const USAGE_NOTICE_VERSION = 1;
-export const USAGE_COUNTS_URL = 'https://stacki-usage-counts.timothymricks.workers.dev/daily';
+// A fork's counter needs its own notice before accepting counts from older installs.
+export const USAGE_NOTICE_VERSION = 2;
 const REQUEST_TIMEOUT_MS = 3_000;
 
 export function usageDay(date: Date): string {
@@ -32,12 +32,16 @@ export function shouldCountUsage(
 }
 
 export async function sendUsageCount(
-  options: { readonly signal: AbortSignal },
+  options: { readonly endpoint: string | undefined; readonly signal: AbortSignal },
   request: (url: string, options: RequestInit) => Promise<Response>,
 ): Promise<boolean> {
+  if (options.endpoint === undefined) {
+    return false;
+  }
   try {
-    const response = await request(USAGE_COUNTS_URL, {
+    const response = await request(options.endpoint, {
       method: 'POST',
+      redirect: 'error',
       signal: AbortSignal.any([options.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
     });
     return response.status === 204;

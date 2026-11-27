@@ -1,4 +1,3 @@
-import type { ShadcnSettingsReply } from './shadcnSettings';
 import type { MessageRef } from '../core/i18n/messageReference';
 import type { BreakpointSyncApplied, BreakpointSyncScan, BreakpointUsage } from '../properties/breakpointSyncPlan';
 import type { MicrophoneReport } from '../properties/microphone';
@@ -7,14 +6,16 @@ import type { ClassUsageReply } from '../properties/classUsage';
 import type { PendingStyleMove, StyleMoveResolution } from '../properties/styleMoveJournal';
 import type { AiResults } from './aiChat';
 import type { AgentResults } from './projectAgentChannels';
+import type { CodeIntelReply } from './codeIntel';
+import type { FileExplorerResults, FileGitState } from './fileExplorer';
+import type { DesignSessionResults } from './designSession'; // Design mode (experimental): docs/design-mode/REMOVE.md
 import type { AppFileAnswer } from '../properties/appFiles';
 import type { AppAccessToken, AppAuthStatus } from '../properties/appAuth';
 import type { AppNetResponse } from '../properties/appNet';
 import type { AccountState } from './publishAccount';
 import type { PreviewHealth } from './previewHealth';
 import type { DevNetworkReply, DevNetworkState } from './devNetwork';
-import type { AstroCopyCheck, AstroCopyReply, SiteFolderChoice } from './astroCopy';
-import type { ShadcnPresetReply } from './shadcnStarter';
+import type { AstroCopyCheck, AstroCopyReply, ProjectSetupReport, ShadcnPresetReply, ShadcnSettingsReply, SiteFolderChoice } from './astroCopy';
 import type { FolderOpenChoice } from './folderOpen';
 import type { CmsCheckResult, CmsConnectionList, CmsSaveResult, SanityLoginState } from '../properties/cmsConnections';
 import type { ConstantEditReply, ConstantListingReply } from '../properties/cmsConstants';
@@ -43,6 +44,7 @@ import type { RepositoryResult } from '../ipc/publishRepository';
 import type { PublishDiscovery } from '../properties/publishDiscovery';
 import type { DesktopPublishState, PublishAvailability } from '../properties/publishState';
 import type { WorkerSetupResult } from '../properties/publishWorkerSetup';
+import type { NetlifySiteResult } from '../properties/publishNetlify';
 import type { ComponentOpError } from '../properties/componentOps';
 import type { ComponentRenameSummary } from '../properties/componentRename';
 import type { PageSettingsApplied, PageSettingsSummary } from '../properties/pageSettings';
@@ -163,7 +165,9 @@ export type WirePageEdit =
     } & WirePageDiskRead)
   | { readonly ok: false; readonly error: WirePageEditError };
 
-export interface IpcResults extends AiResults, AgentResults {
+// DesignSessionResults: Design mode (experimental), docs/design-mode/REMOVE.md.
+export interface IpcResults extends AiResults, AgentResults, FileExplorerResults, DesignSessionResults {
+  readonly 'codeIntel:request': CodeIntelReply;
   readonly 'project:createDefaultsCanvas': { readonly file: string };
   readonly 'project:removeDefaultsCanvas': undefined;
   readonly 'instructions:create': InstructionWriteResult;
@@ -173,6 +177,8 @@ export interface IpcResults extends AiResults, AgentResults {
   readonly 'instructions:reveal': { readonly ok: true };
   readonly 'instructions:write': InstructionWriteResult;
   readonly 'project:metadata': Result<MetadataFile>;
+  readonly 'project:setupScan': Result<ProjectSetupReport>;
+  readonly 'project:setupApply': Result<ProjectSetupReport>;
   readonly 'project:writeMetadata': Result<MetadataFile>;
   /** A folder chosen in the system dialog, project-relative; `outside` when it is not in the project. */
   readonly 'project:pickFolder':
@@ -589,6 +595,7 @@ export interface IpcResults extends AiResults, AgentResults {
   readonly 'publish:discover': PublishDiscovery;
   readonly 'publish:account': AccountState;
   readonly 'publish:workerSetup': WorkerSetupResult;
+  readonly 'publish:netlifySite': NetlifySiteResult;
   readonly 'cmsConnections:list': CmsConnectionList;
   readonly 'cmsConnections:save': CmsSaveResult;
   readonly 'cmsConnections:remove': CmsConnectionList;
@@ -691,6 +698,8 @@ export interface IpcResults extends AiResults, AgentResults {
     WireStatusFile &
       WireFileDescription & {
         readonly from: undefined | string;
+        /** Absent from Studio, whose lists derive it from the letter (features/git/CommitFilePicker.tsx). */
+        readonly state?: FileGitState | undefined;
       }
   >;
   readonly 'git:unpark':

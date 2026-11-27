@@ -2,6 +2,8 @@
 // escape keys, routes, collections and their sample entries, cleaning up
 // queries, and composing the node edits (App.tsx).
 
+import { stepRichHistory } from '../../editor/canvasTextFocus';
+import { PREVIEW_SHORTCUT } from '../railShortcuts';
 import { useTranslate } from '../../lib/i18n/useTranslate';
 import { useCallback, useEffect, useRef } from 'react';
 import { assert } from '../../../shared/core/assert';
@@ -284,6 +286,11 @@ export function useKeyboard(
   ]);
 }
 
+// A field whose undo is the app's (data-app-undo).
+function appUndoField(target: unknown): boolean {
+  return target instanceof Element && target.closest('[data-app-undo]') !== null;
+}
+
 // Application-menu shortcuts.
 export function useMenuShortcuts(
   lifecycle: ReturnType<typeof useLifecycle>,
@@ -316,6 +323,19 @@ export function useMenuShortcuts(
       pasteNode,
       reportFailure,
     };
+    // The Content field writes the page at every keystroke, so its undo is the page's: the browser's own history of
+    // the box loses every step whenever the page's content is put back into it, and never held a typed line break.
+    // The key, where it reaches the page, is taken here; where the menu takes it first, below.
+    const onFieldUndo = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod || event.altKey || event.key.toLowerCase() !== 'z' || !appUndoField(event.target) || windowHeld()) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void (event.shiftKey ? redo() : undo());
+    };
+    document.addEventListener('keydown', onFieldUndo, true);
     const offs = [
       // ⌘Z is a menu accelerator, so the key never reaches the page: whatever
       // this decides is the only undo there is.
@@ -341,6 +361,13 @@ export function useMenuShortcuts(
         if (windowHeld()) {
           return;
         }
+        if (appUndoField(document.activeElement ?? undefined)) {
+          void undo();
+          return;
+        }
+        if (stepRichHistory('undo')) {
+          return;
+        }
         const route = appShortcutRoute('Mod+Z', document.activeElement ?? undefined);
         if (route === 'app') {
           return;
@@ -359,6 +386,13 @@ export function useMenuShortcuts(
       }),
       window.avb.onMenu('redo', () => {
         if (windowHeld()) {
+          return;
+        }
+        if (appUndoField(document.activeElement ?? undefined)) {
+          void redo();
+          return;
+        }
+        if (stepRichHistory('redo')) {
           return;
         }
         const route = appShortcutRoute('Mod+Shift+Z', document.activeElement ?? undefined);
@@ -397,7 +431,10 @@ export function useMenuShortcuts(
         }
       }),
     ];
-    return () => offs.forEach((off) => off());
+    return () => {
+      document.removeEventListener('keydown', onFieldUndo, true);
+      offs.forEach((off) => off());
+    };
   }, [
     translate,
     setRefreshKey,
@@ -565,10 +602,10 @@ export function useEscapeKeys(
   }, [inPreview, editStack.length, closeComponent]);
 }
 
-// ⌥P toggles the interactive preview: into it from the editor, back out of it
+// ⌥⇧P toggles the interactive preview: into it from the editor, back out of it
 // (or out of an older version) from either. Matched on the physical key, because
 // Option rewrites `event.key` on a Mac ("π" for P). A field keeps the key, so
-// typing ⌥P there still types its character.
+// typing ⌥⇧P there still types its character.
 export function usePreviewKey(
   navigation: ReturnType<typeof useNavigation>,
   interactivePreview: ReturnType<typeof useInteractivePreview>,
@@ -601,15 +638,15 @@ export function usePreviewKey(
   }, [inPreview, previewRef, enterPreview, exitPreview, exitCommitPreview]);
 }
 
-// Option and P alone: no Command, Control or Shift.
+// Option, Shift and P (railShortcuts.ts PREVIEW_SHORTCUT): no Command or Control. ⌥P alone opens Pages.
 export function isPreviewKey(event: Pick<KeyboardEvent, 'altKey' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'code'>): boolean {
   if (!event.altKey) {
     return false;
   }
-  if (event.metaKey || event.ctrlKey || event.shiftKey) {
+  if (event.metaKey || event.ctrlKey) {
     return false;
   }
-  return event.code === 'KeyP';
+  return event.shiftKey === PREVIEW_SHORTCUT.shift && event.code === `Key${PREVIEW_SHORTCUT.letter.toUpperCase()}`;
 }
 
 // Injected routes and a dynamic page’s entries.

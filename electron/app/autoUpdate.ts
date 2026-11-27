@@ -1,8 +1,8 @@
 // Auto update
 //
-// Feed is the GitHub releases repo configured under `build.publish` in
-// package.json. The appId must stay `com.stacki.editor` so installs from
-// earlier versions upgrade in place instead of landing beside themselves.
+// The Desktop release config supplies the feed explicitly to override the URL
+// packaged by electron-builder. The appId must stay `com.stacki.editor` so
+// existing installs upgrade in place.
 // One instance per main process, made by main.ts, which hands it electron's
 // app, the updater and a way to reach the window: this module imports no
 // electron values. It never opens a native dialog: every word and button the
@@ -28,6 +28,7 @@ import {
 export interface AutoUpdateHost {
   readonly app: Pick<Electron.App, 'isPackaged' | 'isReady' | 'getPath' | 'getVersion'>;
   readonly autoUpdater: AppUpdater;
+  readonly feedURL: string;
   /** Runs just before the app quits to install a downloaded update. */
   readonly beforeInstall: () => void;
   /** Pushes to the open window; a window that is not there yet reads `current()` when it mounts. */
@@ -71,7 +72,13 @@ export class AutoUpdates {
   // popup either way, so the error handler below leaves the talking to it.
   private manualCheck = false;
 
-  constructor(private readonly host: AutoUpdateHost) {}
+  constructor(private readonly host: AutoUpdateHost) {
+    if (host.app.isPackaged) {
+      host.autoUpdater.setFeedURL({ provider: 'generic', url: host.feedURL, useMultipleRangeRequest: false });
+      // The File menu can check while the first scheduled check is still waiting.
+      this.registerEvents();
+    }
+  }
 
   /** The state a window that has just mounted starts from. */
   current(): UpdateState {
@@ -85,7 +92,6 @@ export class AutoUpdates {
       return;
     }
 
-    this.registerEvents();
     void this.runCheck();
 
     if (this.interval) {
@@ -121,9 +127,7 @@ export class AutoUpdates {
   // who asks is owed an answer either way, "you already have the latest"
   // included. Otherwise the menu item looks broken every time it works.
   async checkFromMenu(): Promise<void> {
-    // Nothing to check against: electron-updater reads the feed the installer
-    // was built with, and a dev run has no installer. Saying so beats a check
-    // that silently does nothing.
+    // The updater checks installed builds. A development run still answers in the popup.
     if (!this.host.app.isPackaged) {
       this.notice('development');
       return;

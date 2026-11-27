@@ -1,0 +1,12 @@
+.content {
+  max-inline-size: min(30rem, 90vi);
+  margin: auto;
+  padding: 1rem;
+  border: 1px solid CanvasText;
+  background: Canvas;
+  color: CanvasText;
+}
+
+.content::backdrop {
+  background: rgb(0 0 0 / 45%);
+}

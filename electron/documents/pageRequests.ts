@@ -11,6 +11,7 @@ import { describeRejection } from '../../shared/engine/intent';
 import * as path from 'path';
 import { parsePage, locateSelection, resolveChunks } from '../parse/astroParser';
 import { parseMarkdownPage } from '../parse/markdownParser';
+export { readFence } from '../parse/astroFence';
 import { toPosix } from '../lib/mainHelpers';
 import { pagesDirectoryOf } from '../lib/astroConfig';
 import { translateMain } from '../lib/mainLocale';

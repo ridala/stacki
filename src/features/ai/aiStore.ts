@@ -20,9 +20,11 @@ import type {
   SectionAction,
   SetupAction,
   SetupState,
+  ChatSetting,
 } from '../../../shared/ipc/aiChat';
 import { AGENT_IDS, type AgentId } from '../../../shared/properties/ai/agentIds';
 import { AI_LIMITS } from '../../../shared/properties/ai/aiLimits';
+import { PIN_LIMITS, type PinBrief } from '../../../shared/properties/ai/commentPinBrief';
 import { applyRemember, NO_REMEMBERED_SETTINGS, type RememberedSettings } from '../../../shared/properties/ai/rememberedSettings';
 import type {
   ChatEvent,
@@ -35,10 +37,14 @@ import type {
   SectionId,
   TurnId,
   TurnStop,
+  SentPart,
 } from '../../../shared/properties/ai/chatModel';
+import { segmentsOfSent } from '../../../shared/properties/ai/sentMessage';
 import {
+  chipBoundProblem,
   plainTextOf,
   promptPartsOf,
+  type MentionChip,
   type BuiltinChipId,
   type ComposerSegments,
   type MentionCandidate,
@@ -152,23 +158,23 @@ export function isDraftEmpty(draft: ChatDraft): boolean {
 }
 
 /**
- * The segments cut to what a prompt can carry: at most `composerSegmentsMax` segments, `mentionsMax` chips
- * and `promptCharsMax` characters of text, the rest dropped from the end. An editor keeps within these; the
+ * The segments cut to what a prompt can carry: at most `composerSegmentsMax` segments, each kind of chip within
+ * its bound (chipBoundProblem) and `promptCharsMax` characters of text, the rest dropped from the end. An editor keeps within these; the
  * cut is the store's backstop so no path (a paste, a restored draft) can hand the parser an oversized prompt.
  */
 export function boundSegments(segments: ComposerSegments): ComposerSegments {
   const kept: ComposerSegments[number][] = [];
   let characters = 0;
-  let chips = 0;
+  const chips: MentionChip[] = [];
   for (const segment of segments) {
     if (kept.length >= AI_LIMITS.composerSegmentsMax) {
       break;
     }
     if (segment.kind === 'chip') {
-      if (chips >= AI_LIMITS.mentionsMax) {
+      if (chipBoundProblem([...chips, segment.chip]) !== undefined) {
         continue;
       }
-      chips += 1;
+      chips.push(segment.chip);
       kept.push(segment);
     } else {
       const room = AI_LIMITS.promptCharsMax - characters;
@@ -220,6 +226,8 @@ export interface AiState {
   /** The project's chats in display order (pinned first within a section, then by rank), archived ones included. */
   readonly chats: readonly ChatSummary[];
   readonly sections: readonly ChatSection[];
+  /** Whether `chats` and `sections` are what the project holds; meaningful once `loaded`. A failed read is not an empty project. */
+  readonly chatsRead: 'ok' | 'failed';
   readonly filter: ChatListFilter;
   readonly visibility: PanelVisibility;
   /** Each agent's own CLI: installed, signed in (the guided setup, agentSetup.ts). */
@@ -238,8 +246,21 @@ export interface AiState {
   readonly composerFocusRequests: number;
 }
 
-/** Chats whose transcripts stay in memory at once; the oldest others are read again when opened. */
+/**
+ * Chats whose transcripts stay in memory at once; the oldest others are read again when opened. Beyond them are kept
+ * the chats a reply is running in and the chats a holder asks for (comment pins): their events are folded as they
+ * arrive, so a transcript let go would never say how its work went.
+ */
 const VIEWS_MAX = 16;
+/** Running replies (one a request, `pendingRequestsMax`) and held chats (one a pin of a full board) kept beyond `VIEWS_MAX`. */
+const VIEWS_KEPT_MAX = AI_LIMITS.pendingRequestsMax + PIN_LIMITS.pinsMax;
+
+let viewHolder: (() => ReadonlySet<ChatId>) | undefined;
+
+/** Registers who needs transcripts kept in memory: the chats it answers with are never let go. */
+export function holdChatViews(holder: () => ReadonlySet<ChatId>): void {
+  viewHolder = holder;
+}
 
 const INITIAL: AiState = {
   projectPath: undefined,
@@ -250,6 +271,7 @@ const INITIAL: AiState = {
   remembered: NO_REMEMBERED_SETTINGS,
   chats: [],
   sections: [],
+  chatsRead: 'ok',
   filter: DEFAULT_CHAT_FILTER,
   visibility: 'hidden',
   setups: new Map(),
@@ -264,11 +286,17 @@ const INITIAL: AiState = {
 };
 
 let state: AiState = INITIAL;
+let projectSession = Symbol();
 const listeners = new Set<() => void>();
 let unsubscribe: (() => void) | undefined;
 
 export function aiState(): AiState {
   return state;
+}
+
+/** Identifies one visit to a project, including a switch away and back to the same path. */
+export function aiProjectSession(): symbol {
+  return projectSession;
 }
 
 export function useAiState(): AiState {
@@ -293,10 +321,12 @@ export async function loadAiProject(projectPath: string): Promise<void> {
   listen();
   if (state.projectPath !== projectPath) {
     flushDrafts(); // The old project's last words are stored before its state goes.
+    projectSession = Symbol();
     update(() => ({ ...INITIAL, projectPath, visibility: state.visibility }));
   }
+  const session = projectSession;
   const [agents, chats] = await Promise.all([aiAgents(projectPath), aiChats(projectPath)]);
-  if (state.projectPath !== projectPath) {
+  if (projectSession !== session) {
     return; // Another project opened meanwhile.
   }
   update((current) => ({
@@ -308,6 +338,8 @@ export async function loadAiProject(projectPath: string): Promise<void> {
     remembered: agents.ok ? agents.value.remembered : current.remembered,
     chats: chats.ok ? chats.value.chats : current.chats,
     sections: chats.ok ? chats.value.sections : current.sections,
+    // A failed re-read keeps the list already shown; only a first read that fails leaves it unknown.
+    chatsRead: chats.ok || (current.loaded && current.chatsRead === 'ok') ? 'ok' : 'failed',
     drafts: chats.ok ? withStoredDrafts(current.drafts, chats.value.chats, readStoredDrafts(projectPath)) : current.drafts,
     ...failureFields(firstFailure(agents, chats)),
   }));
@@ -321,20 +353,23 @@ export function resetAiStore(): void {
     clearTimeout(persistTimer);
     persistTimer = undefined;
   }
+  projectSession = Symbol();
   state = INITIAL;
 }
 
 /** Re-reads the chat list from the main process; for changes whose reply is one chat but which move others (pin, archive, create). */
 export async function refreshChatList(): Promise<void> {
   const projectPath = requireProject();
+  const session = projectSession;
   const reply = await aiChats(projectPath);
+  if (projectSession !== session) {
+    return;
+  }
   if (!reply.ok) {
     fail(reply.error);
     return;
   }
-  if (state.projectPath === projectPath) {
-    applyList(reply.value);
-  }
+  applyList(reply.value);
 }
 
 export function setChatListFilter(filter: ChatListFilter): void {
@@ -350,13 +385,21 @@ export function setPanelVisibility(visibility: PanelVisibility): void {
   }
 }
 
+/**
+ * Allows agents in the open project. A refusal is shown as the panel's error toast; so is a yes that did not hold (the
+ * project read again still not allowed), so pressing Allow never ends in nothing.
+ */
 export async function trustProject(): Promise<void> {
   const projectPath = requireProject();
   const reply = await aiTrust(projectPath);
   update((current) => ({ ...current, trusted: reply.ok ? true : current.trusted, ...failureFields(reply.ok ? undefined : reply.error) }));
-  if (reply.ok) {
-    // Trusted now: main may ask the agents for their real models and efforts.
-    await loadAiProject(projectPath);
+  if (!reply.ok) {
+    return;
+  }
+  // Trusted now: main may ask the agents for their real models and efforts.
+  await loadAiProject(projectPath);
+  if (!state.trusted && state.projectPath === projectPath) {
+    fail({ code: 'invalid', ...described('ai.trust.notSaved') });
   }
 }
 
@@ -368,11 +411,21 @@ export async function installAgent(agent: AgentId): Promise<void> {
 }
 
 /** A new chat with `agent`. It starts with the settings last used for that agent: the main process applies them when its session starts. */
-export async function newChat(agent: AgentId, surface: AgentSurface = 'chat'): Promise<ChatId | undefined> {
+export async function newChat(agent: AgentId, surface: AgentSurface = 'chat', canOpen: () => boolean = () => true): Promise<ChatId | undefined> {
+  if (!canOpen()) {
+    return undefined;
+  }
   const projectPath = requireProject();
+  const session = projectSession;
   // The project agent chosen for this surface rides with the chat; main applies it once the session exists.
   const settings = agentSettingsForSurface(surface, agent);
   const reply = await aiChatCreate(settings.length === 0 ? { projectPath, agent } : { projectPath, agent, settings });
+  if (projectSession !== session) {
+    return undefined;
+  }
+  if (!canOpen()) {
+    return undefined;
+  }
   if (!reply.ok) {
     fail(reply.error);
     return undefined;
@@ -387,6 +440,40 @@ export async function newChat(agent: AgentId, surface: AgentSurface = 'chat'): P
   // The new chat shows at once; where it ranks among pinned chats and sections is the main process's to say.
   void refreshChatList();
   return chat.id;
+}
+
+/**
+ * A new chat that is not opened: the person stays where they are. For work sent while the open chat is still
+ * answering (comment pins), which gets a chat of its own with `settings` on top of the ones last used. `made` hears
+ * of the chat before its transcript is kept, so a holder (holdChatViews) names it before any other chat arrives.
+ */
+export async function newBackgroundChat(agent: AgentId, settings: readonly ChatSetting[], made: (chat: ChatId) => void): Promise<ChatId | undefined> {
+  const projectPath = requireProject();
+  const chosen = new Map([...agentSettingsForSurface('chat', agent), ...settings].map((setting) => [setting.option, setting.value]));
+  const merged = [...chosen].map(([option, value]) => ({ option, value }));
+  const reply = await aiChatCreate(merged.length === 0 ? { projectPath, agent } : { projectPath, agent, settings: merged });
+  if (!reply.ok) {
+    fail(reply.error);
+    return undefined;
+  }
+  const chat = reply.value;
+  if (state.projectPath !== projectPath) {
+    return undefined;
+  }
+  made(chat.id);
+  update((current) => ({
+    ...current,
+    chats: [chat, ...current.chats.filter((other) => other.id !== chat.id)],
+    views: withView(current.views, chat.id, EMPTY_CHAT),
+  }));
+  // Not waited for: the caller holds the chat's transcript from this moment (holdChatViews).
+  void refreshChatList();
+  return chat.id;
+}
+
+/** Whether `chat` can take a message of its own now: no reply running in it and nothing waiting to be sent to it. */
+export function isChatIdle(chat: ChatId): boolean {
+  return state.views.get(chat)?.running === undefined && (state.queue.get(chat) ?? []).length === 0;
 }
 
 export async function openChat(chat: ChatId | undefined): Promise<void> {
@@ -405,6 +492,22 @@ export async function openChat(chat: ChatId | undefined): Promise<void> {
   if (!reply.ok) {
     fail(reply.error);
     return;
+  }
+  update((current) => ({ ...current, views: withView(current.views, chat, reduceChat(EMPTY_CHAT, reply.value.events)) }));
+}
+
+/**
+ * Reads chat `chat`'s transcript into memory without opening it: comment pins read how their pins stand from it
+ * (a pin whose work finished well is deleted). A chat already read, or not in this project's list, is left as it is.
+ */
+export async function loadChatView(chat: ChatId): Promise<void> {
+  const projectPath = state.projectPath;
+  if (projectPath === undefined || state.views.has(chat) || !state.chats.some((candidate) => candidate.id === chat)) {
+    return;
+  }
+  const reply = await aiChatRead({ projectPath, chat });
+  if (!reply.ok || state.projectPath !== projectPath || state.views.has(chat)) {
+    return; // Unread, or another project opened meanwhile: the pins wait as they are.
   }
   update((current) => ({ ...current, views: withView(current.views, chat, reduceChat(EMPTY_CHAT, reply.value.events)) }));
 }
@@ -594,8 +697,14 @@ function contentOf(draft: ChatDraft): PromptContent | undefined {
     fail({ code: 'invalid', ...described('ai.store.mentionInvalid', { names: invalid.join(', ') }) });
     return undefined;
   }
+  const text = draftText(draft);
+  if (text.length > AI_LIMITS.promptCharsMax) {
+    // Typed words and selected code together: refused whole, never cut.
+    fail({ code: 'invalid', ...described('ai.store.messageTooLong', { max: AI_LIMITS.promptCharsMax }) });
+    return undefined;
+  }
   return {
-    text: draftText(draft),
+    text,
     parts: hasChip ? promptPartsOf(draft.segments, builtinTextOf) : undefined,
     attachments: draft.attachments.map((entry) => entry.attachment),
   };
@@ -624,7 +733,75 @@ function reportSendFailure(error: AiFailure): void {
   }
 }
 
-/** Sends the chat's draft, or `text` when given (Retry, a hand-off). True when the agent took it. */
+/** How a send of pins fared: its reply started; the chat could not take a message just now; or it was refused, and why was shown. */
+export type PinMessageOutcome = { readonly kind: 'sent'; readonly turn: TurnId } | { readonly kind: 'taken' } | { readonly kind: 'refused' };
+
+/**
+ * Sends a message of comment pins (pins/pinStore.ts): their instructions travel as `pins`, their images as the
+ * attachments, and `text` is the plain words the transcript keeps. A pin's `@` chips reach the agent as the chat's
+ * would: a reference is in the pin's words, and the files, skills and instructions it mentions (`mentions`) travel as
+ * parts; a component mention that no longer matches the project refuses the send, as it refuses the chat's. `taken`
+ * (the chat is answering, or full) shows nothing: the caller sends to a chat of its own. Any other refusal is shown as
+ * any send's is.
+ */
+export async function sendPinMessage(
+  chat: ChatId,
+  message: {
+    readonly text: string;
+    readonly attachments: readonly PromptAttachment[];
+    readonly pins: PinBrief;
+    readonly drafts: readonly ComposerSegments[];
+    readonly mentions: ComposerSegments;
+  },
+): Promise<PinMessageOutcome> {
+  assert(message.pins.pins.length >= 1, 'sendPinMessage: a message of pins has a pin');
+  const invalid = mentionCheck === undefined ? [] : message.drafts.flatMap((draft) => mentionCheck?.(draft) ?? []);
+  if (invalid.length > 0) {
+    fail({ code: 'invalid', ...described('ai.store.mentionInvalid', { names: [...new Set(invalid)].join(', ') }) });
+    return { kind: 'refused' };
+  }
+  const parts = message.mentions.length === 0 ? undefined : promptPartsOf([{ kind: 'text', text: `${message.text}\n\n` }, ...message.mentions], builtinTextOf);
+  const reply = await aiPrompt({
+    projectPath: requireProject(),
+    chat,
+    text: message.text,
+    attachments: message.attachments,
+    pins: message.pins,
+    ...(parts === undefined ? {} : { parts }),
+  });
+  if (!reply.ok) {
+    if (reply.error.code === 'busy' || reply.error.code === 'read-only') {
+      return { kind: 'taken' };
+    }
+    reportSendFailure(reply.error);
+    return { kind: 'refused' };
+  }
+  return { kind: 'sent', turn: reply.value.turn };
+}
+
+/** Tells `listener` after every change of the store; returns the unsubscribe. For stores that follow chats (comment pins). */
+export function subscribeAiState(listener: () => void): () => void {
+  return subscribe(listener);
+}
+
+/**
+ * Sends an earlier message again (Resend, Retry), with its chips as they were sent: a code chip sends the code it
+ * captured then. A component mention that no longer matches the project refuses it, as it refuses any send.
+ */
+export async function resendMessage(chat: ChatId, message: { readonly text: string; readonly parts?: readonly SentPart[] | undefined }): Promise<boolean> {
+  const content = contentOf({ segments: segmentsOfSent(message.text, message.parts), attachments: [] });
+  if (content === undefined || content.text.trim() === '') {
+    return false;
+  }
+  const reply = await submitPrompt(chat, content);
+  if (!reply.ok) {
+    reportSendFailure(reply.error);
+    return false;
+  }
+  return true;
+}
+
+/** Sends the chat's draft, or `text` when given (a quick reply, a hand-off). True when the agent took it. */
 export async function sendPrompt(chat: ChatId, text?: string): Promise<boolean> {
   const draft = state.drafts.get(chat) ?? EMPTY_DRAFT;
   const content = text === undefined ? contentOf(draft) : { text, parts: undefined, attachments: [] };
@@ -679,6 +856,35 @@ export async function steerPrompt(chat: ChatId): Promise<boolean> {
     return true;
   }
   setDraft(chat, () => draft);
+  reportSendFailure(reply.error);
+  return false;
+}
+
+/**
+ * Sends a reply the panel wrote for the person (a choice picked for a pin's question), leaving their draft as it
+ * is. Idle: a message of its own. While the agent works: into the running turn (`whileRunning: 'steer'`) or after
+ * it (`'queue'`); a refused steer queues too, so the answer is never lost. True when it was sent or is waiting.
+ */
+export async function sendReply(chat: ChatId, text: string, options: { readonly whileRunning: 'steer' | 'queue' }): Promise<boolean> {
+  assert(text.trim() !== '', 'sendReply: a reply has words');
+  if (state.views.get(chat)?.running === undefined) {
+    return sendPrompt(chat, text);
+  }
+  const draft = draftFromText(text);
+  if (options.whileRunning === 'queue') {
+    return enqueue(chat, draft);
+  }
+  const reply = await submitSteer(chat, { text, parts: undefined, attachments: [] });
+  if (reply.ok || reply.error.code === 'delivered') {
+    return true;
+  }
+  const queueable = reply.error.code === 'unsupported' || reply.error.code === 'agent-failed' || reply.error.code === 'busy';
+  if (queueable && enqueue(chat, draft)) {
+    if (state.views.get(chat)?.running === undefined) {
+      void sendNextQueued(chat); // The turn ended while the steer was in flight.
+    }
+    return true;
+  }
   reportSendFailure(reply.error);
   return false;
 }
@@ -834,17 +1040,19 @@ export async function answerPermission(chat: ChatId, request: PermissionRequestI
   }
 }
 
-export async function setChatOption(chat: ChatId, option: string, value: string): Promise<void> {
+/** Changes one of the chat's settings. True when the agent took it; a refusal is shown as a toast. */
+export async function setChatOption(chat: ChatId, option: string, value: string): Promise<boolean> {
   const reply = await aiSetOption({ projectPath: requireProject(), chat, option, value });
   if (!reply.ok) {
     fail(reply.error);
-    return;
+    return false;
   }
   // The main process remembers a change that went through; this copy follows so the next new chat shows it at once.
   const agent = state.chats.find((candidate) => candidate.id === chat)?.agent;
   if (agent !== undefined) {
     update((current) => ({ ...current, remembered: applyRemember(current.remembered, agent, { kind: 'set', option, value }) }));
   }
+  return true;
 }
 
 /** A choice made before the chat has a session (or any pick in a menu): remembered for `agent`'s next new chats, last writer wins. */
@@ -950,7 +1158,8 @@ function listen(): void {
     // A "ready" push while the agent's sign-in has expired is runSetup's to apply, together with the fresh availability
     // (one update, no flash of the expired card between the two).
     const expired = state.agents.some((entry) => entry.agent === next.agent && entry.state === 'sign-in');
-    if (next.step === 'ready' && expired) {
+    // "Unchecked" after a sign-in that worked is read the same way: main may no longer hold the agent as signed out.
+    if ((next.step === 'ready' || next.step === 'unchecked') && expired) {
       // The sign-in finished on its own, long after the `signIn` request returned: nobody else will apply it.
       // Leaving this push to runSetup left the card waiting forever (the agent's saved sign-in had expired,
       // which is exactly when a person signs in again).
@@ -1007,7 +1216,7 @@ async function changeSections(action: SectionAction): Promise<ChatList | undefin
 
 /** The main process's list replaces the renderer's whole: replies to list changes are never merged. */
 function applyList(list: ChatList): void {
-  update((current) => ({ ...current, chats: list.chats, sections: list.sections }));
+  update((current) => ({ ...current, chats: list.chats, sections: list.sections, chatsRead: 'ok' }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1064,16 +1273,17 @@ function withView(views: ReadonlyMap<ChatId, ChatView>, chat: ChatId, view: Chat
   const next = new Map(views);
   next.delete(chat);
   next.set(chat, view);
+  const held = viewHolder?.() ?? new Set<ChatId>();
   // Oldest first in insertion order: the least recently changed transcripts leave first.
-  for (const key of next.keys()) {
+  for (const [key, kept] of next) {
     if (next.size <= VIEWS_MAX) {
       break;
     }
-    if (key !== state.open) {
+    if (key !== state.open && key !== chat && kept.running === undefined && !held.has(key)) {
       next.delete(key);
     }
   }
-  assert(next.size <= VIEWS_MAX + 1, 'withView: transcripts in memory are bounded');
+  assert(next.size <= VIEWS_MAX + 1 + VIEWS_KEPT_MAX, 'withView: transcripts in memory are bounded');
   return next;
 }
 
@@ -1168,7 +1378,19 @@ const OPEN_CHAT_KEY_PREFIX = 'stacki.ai.open.';
  * Opening the panel goes straight to a chat, never the list: the one open last
  * in this project, else the newest, else a new empty one with the preferred agent.
  */
-export async function openStartingChat(): Promise<void> {
+export function openStartingChat(): Promise<void> {
+  // The panel and a hand-off (Add to chat) can both ask as the panel opens: one answer, so no second chat is made.
+  if (starting === undefined) {
+    starting = startingChat().finally(() => {
+      starting = undefined;
+    });
+  }
+  return starting;
+}
+
+let starting: Promise<void> | undefined;
+
+async function startingChat(): Promise<void> {
   const projectPath = requireProject();
   if (state.open !== undefined) {
     return;
@@ -1188,8 +1410,11 @@ export async function openStartingChat(): Promise<void> {
     await openChat(chat.id);
     return;
   }
+  const session = projectSession;
   await newChat(preferredAgent());
-  assert(state.open !== undefined || state.error !== undefined, 'openStartingChat: a chat is open, or why not is shown');
+  if (projectSession === session) {
+    assert(state.open !== undefined || state.error !== undefined, 'openStartingChat: a chat is open, or why not is shown');
+  }
 }
 
 function rememberOpenChat(chat: ChatId): void {

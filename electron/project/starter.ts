@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { toRecord } from '../../shared/core/record';
 import { commandNeedsShell } from '../lib/platform';
 import { stopProcessTree } from '../lib/nodeTools';
+import { scaffolderManager, type PackageManager } from '../../shared/properties/packageManager';
 
 // Starting a site from a starter.
 //
@@ -36,8 +37,9 @@ const STARTERS: Record<string, Starter> = {
 };
 
 // A folder name has to be a folder name; the site can be renamed later, but not
-// out of a directory that already exists.
-const NAME_RE = /^[A-Za-z0-9._-]+$/;
+// out of a directory that already exists. It goes on a command line, so a leading
+// dash, which a scaffolder would read as one of its options, is refused.
+const NAME_RE = /^(?!-)[A-Za-z0-9._-]+$/;
 
 type OnLog = (text: string) => void;
 
@@ -63,7 +65,7 @@ const run = (cmd: string, args: readonly string[], cwd: string, onLog?: OnLog, o
     try {
       proc = spawn(cmd, [...args], {
         cwd,
-        // On Windows npm is a .cmd shim, which needs a shell to be found.
+        // On Windows a package manager needs a shell to be found (commandNeedsShell).
         shell: commandNeedsShell(cmd),
         // Its own process group, so a stalled run is stopped with what it started.
         detached: !isWin,
@@ -178,9 +180,22 @@ interface CreateStarterOptions {
   readonly starter?: string;
   readonly parentPath?: string;
   readonly name?: string;
-  /** The npm command to run, so a test can hand it one that needs no network. */
-  readonly npm?: string;
+  /** The manager the person chose; it decides what runs the scaffolder (scaffolderManager). */
+  readonly manager?: PackageManager;
+  /** Run instead of the scaffolding manager, so a test needs no network. */
+  readonly program?: string;
   readonly onLog?: OnLog;
+}
+
+// `--no-install`: the app installs afterwards, where a failure is an error the wizard can show rather than a line in
+// a log that scrolled past. npm needs `--yes` (nobody can answer its download question) and `--` before the
+// scaffolder's own flags. `bun create <name>` is `bunx create-<name>`, which passes everything after the template on
+// as it is, so either of those would reach the scaffolder as an argument.
+function scaffolderArguments(manager: 'npm' | 'bun', template: string, folder: string): readonly string[] {
+  if (manager === 'bun') {
+    return ['create', template, folder, '--no-install'];
+  }
+  return ['create', template, folder, '--yes', '--', '--no-install'];
 }
 
 /**
@@ -189,7 +204,10 @@ interface CreateStarterOptions {
  * caller's — this is the part that has to be right before anything is
  * installed into it.
  */
-async function createStarter({ starter = 'lumos', parentPath, name, npm, onLog }: CreateStarterOptions = {}): Promise<{ ok: boolean; projectPath: string }> {
+async function createStarter({ starter = 'lumos', parentPath, name, manager = 'npm', program, onLog }: CreateStarterOptions = {}): Promise<{
+  ok: boolean;
+  projectPath: string;
+}> {
   const template = STARTERS[starter];
   if (!template) {
     throw new Error(`${starter} is not a starter this app knows.`);
@@ -197,11 +215,9 @@ async function createStarter({ starter = 'lumos', parentPath, name, npm, onLog }
   const directory = newSiteDirectory(parentPath, name);
   const folder = path.basename(directory);
 
-  // `--no-install`: the app installs afterwards, where a failure is an error
-  // the wizard can show rather than a line in a log that scrolled past.
-  const args = ['create', template.create, folder, '--yes', '--', '--no-install'];
-  onLog?.(`> npm create ${template.create} ${folder}\n\n`);
-  await run(npm || (isWin ? 'npm.cmd' : 'npm'), args, path.dirname(directory), onLog);
+  const scaffolder = scaffolderManager(manager);
+  onLog?.(`> ${scaffolder} create ${template.create} ${folder}\n\n`);
+  await run(program ?? scaffolder, scaffolderArguments(scaffolder, template.create, folder), path.dirname(directory), onLog);
 
   if (!fs.existsSync(path.join(directory, 'package.json'))) {
     throw new Error('The starter finished but there is no package.json in it.');
@@ -270,7 +286,7 @@ function newSiteDirectory(parentPath: string | undefined, name: string | undefin
     throw new Error('Give the site a name.');
   }
   if (!NAME_RE.test(folder)) {
-    throw new Error('Use letters, numbers, dashes, dots or underscores for the folder name.');
+    throw new Error('Use letters, numbers, dashes, dots or underscores for the folder name, not starting with a dash.');
   }
   const directory = path.join(parentPath, folder);
   if (fs.existsSync(directory)) {

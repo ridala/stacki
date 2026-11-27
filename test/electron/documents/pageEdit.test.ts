@@ -24,6 +24,7 @@ import { parsePageDiskRead, parsePageEditResult, type PageDiskRead } from '#dist
 import { parsePageNode, type PageNode } from '#dist/shared/page/pageNode.js';
 import { toByteSpan, toUtf16Span } from '#dist/shared/core/span.js';
 import { wrappedTextHunk } from '#dist/shared/engine/planText.js';
+import { waitForSteady } from '../../helpers/waitFor.js';
 
 // Null as a boundary receives it, parsed from JSON: inputs may hold it; our values never do.
 const jsonNull: unknown = JSON.parse('null');
@@ -295,13 +296,32 @@ test('an edit that sets a value the source already holds writes nothing at all',
   watcher.on('change', (kind, name) => heard.push(`${kind} ${String(name)}`));
   context.after(() => watcher.close());
   // macOS delivers file events late, and a watcher opened after the seeding write can still hear it
-  // (the rename of index.astro that the fixture's own writeFileSync made). Let the watcher go quiet,
-  // within a bound, and forget those events: only what the edits themselves cause is judged below.
-  let heardBeforeTurn = -1;
-  for (let turn = 0; turn < 40 && heardBeforeTurn !== heard.length; turn += 1) {
-    heardBeforeTurn = heard.length;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
+  // (the rename of index.astro that the fixture's own writeFileSync made). A marker written now is
+  // delivered after what came before it: once it is heard and the watcher holds still, those events
+  // are forgotten, and only what the edits themselves cause is judged below.
+  // The watch also starts in its own time: on macOS the event stream is scheduled on another thread, and
+  // a write made before it runs is never reported (CI heard nothing for 10 s after one marker). So the
+  // marker is written again on every poll until it is heard, which also proves the watch is live before
+  // its silence is trusted below. The poll bound of waitForSteady bounds the writes.
+  const marker = 'watch-marker.txt';
+  const heardMarker = (events: readonly string[]): boolean => events.some((event) => event.endsWith(marker));
+  let markerWrites = 0;
+  const writeMarker = (): void => {
+    markerWrites += 1;
+    fs.writeFileSync(path.join(path.dirname(file), marker), String(markerWrites));
+  };
+  writeMarker();
+  await waitForSteady({
+    what: 'the watcher heard the marker and went quiet',
+    read: () => {
+      if (!heardMarker(heard)) {
+        writeMarker();
+      }
+      return { markerWrites, heard: [...heard] };
+    },
+    until: (observed: { readonly heard: readonly string[] }) => heardMarker(observed.heard),
+  });
+  assert.ok(markerWrites >= 1, 'the marker was written');
   heard.length = 0;
   // The default export is the module object the main process's CommonJS code calls into; the
   // namespace imported above is a frozen view of it and cannot be patched.
@@ -1126,5 +1146,141 @@ test('deleting a <style> block from the Navigator writes the file without it and
     const undone = await edit(harness, file, removed.value.checksum, { tag: 'revert', hunks: removed.value.inverse });
     assert.ok(undone.ok, `${name}: undone`);
     assert.equal(fs.readFileSync(file, 'utf8'), before, `${name}: undo restores every byte`);
+  }
+});
+
+// A component's content restated with line breaks, as the Content field and the canvas write it (setNodeInline: fresh
+// children, the node's own source dropped). Reported: Enter at the end of a long Paragraph's text was refused as an
+// editor error. Each shape a typed break makes is written here and read back.
+test('a component content restated with line breaks applies in every position', async (context) => {
+  const harness = fixture();
+  context.after(harness.dispose);
+  const file = path.join(harness.root, 'src/pages/index.astro');
+  const words = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse varius enim in eros elementum tristique.';
+  const page = (inner: string) => `---\nimport Paragraph from "../components/Paragraph.astro";\n---\n<Paragraph>\n  ${inner}\n</Paragraph>\n`;
+  let made = 0;
+  const id = () => `g${String(++made).padStart(32, '0')}`;
+  const text = (value: string) => ({ kind: 'text', id: id(), value });
+  const br = () => ({ kind: 'element', id: id(), name: 'br', props: {}, children: undefined });
+  const shapes: readonly (readonly [string, readonly unknown[]])[] = [
+    ['at the end', [text(words), br()]],
+    ['in the middle', [text('Lorem ipsum'), br(), text(' dolor')]],
+    ['at the start', [br(), text(words)]],
+    ['twice at the end', [text(words), br(), br()]],
+    ['two lines and a third', [text('One'), br(), text('Two'), br(), text('Three')]],
+    ['joined back', [text('OneTwo')]],
+    ['the canvas reading, template whitespace and all', [text(`\n    ${words} Panel line`), br(), text('Some text'), br()]],
+    ['a break after a break already written', [text(words), br(), text('Some text'), br(), text('Third')]],
+  ];
+  const shape = (nodes: readonly PageNode[]) =>
+    // Text as a reader sees it: template whitespace around the words is the printer's to lay out.
+    nodes.map((child) => (child.kind === 'text' ? child.value.replace(/\s+/g, ' ').trim() : child.kind === 'element' ? child.name : child.kind));
+  for (const [what, children] of shapes) {
+    fs.writeFileSync(file, page(words));
+    const shown = await read(harness, file);
+    const component = nodeAt(shown, [0]);
+    assert.ok(component.kind === 'component');
+    const restated = parsePageNode({ ...Object.fromEntries(Object.entries(component).filter(([key]) => key !== 'source')), children });
+    const applied = await edit(harness, file, shown.checksum, { tag: 'replace-node', target: refAt(shown, [0]), node: restated });
+    assert.ok(applied.ok, `${what} applies (${applied.ok ? '' : JSON.stringify(applied.error)})`);
+    const echo = nodeAt(await read(harness, file), [0]);
+    assert.ok(echo.kind === 'component');
+    assert.ok(restated.kind === 'component');
+    assert.deepEqual(shape(echo.children ?? []), shape(restated.children ?? []), what);
+  }
+});
+
+// A break already in the page, deleted on the canvas: the content comes back as the words joined, read from the
+// rendered element (template whitespace and all), and is written over the instance's children. Reported refused as an
+// editor error for a Lumos Paragraph whose break was saved earlier, beside a RichText sibling. Each source shape a
+// break can have in a page is tried, and each content the canvas can send for it.
+test('a break saved in the page and deleted on the canvas applies, whatever the source looks like', async (context) => {
+  const harness = fixture();
+  context.after(harness.dispose);
+  const file = path.join(harness.root, 'src/pages/index.astro');
+  const imports = '---\nimport Paragraph from "../components/Paragraph.astro";\nimport RichText from "../components/RichText.astro";\n---\n';
+  const sources: readonly (readonly [string, string])[] = [
+    ['one line', '<div><Paragraph>Lorem ipsum dolor sit amet.<br />Another paragraph</Paragraph><RichText><p>x</p></RichText></div>'],
+    [
+      'indented, break on its own line',
+      '<div>\n  <Paragraph>\n    Lorem ipsum dolor sit amet.\n    <br />\n    Another paragraph\n  </Paragraph>\n  <RichText><p>x</p></RichText>\n</div>',
+    ],
+    [
+      'indented, break inline',
+      '<div>\n  <Paragraph>\n    Lorem ipsum dolor sit amet. <br />Another paragraph\n  </Paragraph>\n  <RichText>\n    <p>x</p>\n  </RichText>\n</div>',
+    ],
+    ['open break', '<div><Paragraph>Lorem ipsum dolor sit amet.<br>Another paragraph</Paragraph></div>'],
+  ];
+  let made = 0;
+  const id = () => `g${String(++made).padStart(32, '0')}`;
+  const text = (value: string) => ({ kind: 'text', id: id(), value });
+  const br = () => ({ kind: 'element', id: id(), name: 'br', props: {}, children: undefined });
+  const contents: readonly (readonly [string, () => readonly unknown[]])[] = [
+    ['joined', () => [text('\n    Lorem ipsum dolor sit amet.\n    Another paragraph\n  ')]],
+    ['line two deleted', () => [text('Lorem ipsum dolor sit amet.')]],
+    ['break kept, line two deleted', () => [text('Lorem ipsum dolor sit amet.'), br()]],
+    ['joined, tight', () => [text('Lorem ipsum dolor sit amet.Another paragraph')]],
+  ];
+  for (const [shape, inner] of sources) {
+    for (const [what, children] of contents) {
+      fs.writeFileSync(file, `${imports}${inner}\n`);
+      const shown = await read(harness, file);
+      const component = nodeAt(shown, [0, 0]);
+      assert.ok(component.kind === 'component', `${shape}: the paragraph`);
+      const restated = parsePageNode({ ...Object.fromEntries(Object.entries(component).filter(([key]) => key !== 'source')), children: children() });
+      const applied = await edit(harness, file, shown.checksum, { tag: 'replace-node', target: refAt(shown, [0, 0]), node: restated });
+      assert.ok(applied.ok, `${shape}, ${what} applies (${applied.ok ? '' : JSON.stringify(applied.error)})`);
+    }
+  }
+});
+
+// Mixed inline content (text, <br />, more text) as people and earlier saves leave it: indented more or less than the
+// printer would, with tabs, CRLF, the closing tag on the last line, at depth. The printer reprints such a node at its
+// own indentation, so a change found between two printings may not be placeable on the file's bytes; the edit must
+// still apply (never an editor error) and change only this node. Each layout is crossed with each edit kind.
+test('mixed inline content applies every edit kind whatever its indentation', async (context) => {
+  const harness = fixture();
+  context.after(harness.dispose);
+  const file = path.join(harness.root, 'src/pages/index.astro');
+  const words = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor pariatur.';
+  const layouts: readonly (readonly [string, (eol: string) => string])[] = [
+    ['the reported one', (eol) => `<Paragraph>${eol}          ${words}${eol}        <br />Another paragraph</Paragraph>`],
+    ['under-indented', (eol) => `<Paragraph>${eol}${words}${eol}<br />${eol}Another paragraph${eol}</Paragraph>`],
+    ['tabs', (eol) => `<Paragraph>${eol}\t\t\t${words}${eol}\t\t\t<br />${eol}\t\t\tAnother paragraph${eol}\t\t</Paragraph>`],
+    ['one line', () => `<Paragraph>${words}<br />Another paragraph</Paragraph>`],
+    ['break opening the second line', (eol) => `<Paragraph>${eol}    ${words}${eol}    <br>Another paragraph${eol}  </Paragraph>`],
+  ];
+  let made = 0;
+  const id = () => `g${String(++made).padStart(32, '0')}`;
+  const text = (value: string) => ({ kind: 'text', id: id(), value });
+  const br = () => ({ kind: 'element', id: id(), name: 'br', props: {}, children: undefined });
+  const edits: readonly (readonly [string, () => readonly unknown[], RegExp])[] = [
+    ['break deleted from the end of line one', () => [text(`${words}Another paragraph`)], /pariatur\.Another paragraph/],
+    ['line two deleted, break and all', () => [text(words)], /pariatur\.\s*<\/Paragraph>/],
+    ['line two deleted, break kept', () => [text(words), br(), br()], /pariatur\.\s*<br \/>\s*<br \/>\s*<\/Paragraph>/],
+    ['a break added', () => [text('Lorem ipsum'), br(), text(' dolor'), br(), text('Another paragraph')], /Lorem ipsum<br \/> dolor<br \/>/],
+    ['the words edited', () => [text(`${words} More.`), br(), text('Another paragraph')], /More\.\s*<br \/>/],
+  ];
+  for (const eol of ['\n', '\r\n']) {
+    for (const [layout, inner] of layouts) {
+      for (const [what, children, written] of edits) {
+        const before = `---${eol}import Paragraph from "../components/Paragraph.astro";${eol}---${eol}<div>${eol}  <section>${eol}    <div>${eol}      ${inner(eol)}${eol}      <p>Kept</p>${eol}    </div>${eol}  </section>${eol}</div>${eol}`;
+        fs.writeFileSync(file, before);
+        const shown = await read(harness, file);
+        const component = nodeAt(shown, [0, 0, 0, 0]);
+        assert.ok(component.kind === 'component', `${layout}: the paragraph`);
+        const restated = parsePageNode({ ...Object.fromEntries(Object.entries(component).filter(([key]) => key !== 'source')), children: children() });
+        const applied = await edit(harness, file, shown.checksum, { tag: 'replace-node', target: refAt(shown, [0, 0, 0, 0]), node: restated });
+        const label = `${layout} (${eol === '\n' ? 'LF' : 'CRLF'}), ${what}`;
+        assert.ok(applied.ok, `${label} applies (${applied.ok ? '' : JSON.stringify(applied.error)})`);
+        const after = fs.readFileSync(file, 'utf8');
+        assert.match(after, written, label);
+        // Nothing outside the paragraph moved.
+        const start = before.indexOf('<Paragraph>');
+        const end = before.indexOf('</Paragraph>') + '</Paragraph>'.length;
+        assert.equal(after.slice(0, start), before.slice(0, start), `${label}: the bytes before it`);
+        assert.equal(after.slice(after.indexOf('</Paragraph>') + '</Paragraph>'.length), before.slice(end), `${label}: the bytes after it`);
+      }
+    }
   }
 });

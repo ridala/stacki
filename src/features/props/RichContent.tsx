@@ -13,7 +13,7 @@ import type { ImportNeed } from '../../editor/dataSample';
 import { resolvePick } from '../../editor/bindings';
 import { deleteChipAtCaret } from './chipKeys';
 import { insertAtRange } from './fieldFocus';
-import { LITERAL_ATTRIBUTE, nodesToHtml, isChippable } from './richContentModel';
+import { CARET_BREAK_ATTRIBUTE, LITERAL_ATTRIBUTE, isDOMElement, nodesToHtml, isChippable, withoutTrailingBreaks } from './richContentModel';
 import type { InlineNode } from './richContentModel';
 import { richApplyLink, richContentNodes, richExec, richReadStates, richWrapTag, type FormatState, type RichTarget } from './richFormat';
 import { RichFormatButtons, RichLinkField, richBubblePlace, type Bubble, type BubblePosition } from './RichFormatButtons';
@@ -65,6 +65,7 @@ export default function RichContent({ nodes, onChange, bindContext, insertRef }:
       <div
         ref={hostRef}
         className="rich-content"
+        data-app-undo=""
         contentEditable
         suppressContentEditableWarning
         spellCheck={false}
@@ -83,7 +84,7 @@ export default function RichContent({ nodes, onChange, bindContext, insertRef }:
           // Keep formatting shortcuts local; Enter inserts <br> (inline field).
           if (event.key === 'Enter') {
             event.preventDefault();
-            document.execCommand('insertHTML', false, '<br>');
+            richLineBreak(hostRef.current ?? undefined);
             emit();
             return;
           }
@@ -99,6 +100,57 @@ export default function RichContent({ nodes, onChange, bindContext, insertRef }:
       <RichBubble state={state} emit={emit} />
     </>
   );
+}
+
+/**
+ * A line break at the caret. At the very end of the content a break alone has no line to put the caret on (the
+ * browser shows a last empty line only with something after it), so the words typed next landed before it: the end
+ * gets a second break marked as the caret's (CARET_BREAK_ATTRIBUTE), which the field never reads back.
+ */
+export function richLineBreak(host: HTMLElement | undefined): void {
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : undefined;
+  if (host === undefined || range === undefined || !host.contains(range.endContainer)) {
+    document.execCommand('insertHTML', false, '<br>');
+    return;
+  }
+  const after = document.createRange();
+  after.setStart(range.endContainer, range.endOffset);
+  after.setEnd(host, host.childNodes.length);
+  const rest = Array.from(after.cloneContents().childNodes);
+  // Nothing follows the caret but the caret's own break and the empty ends of markup the caret sits in (`</strong>`).
+  const shows = (node: Node): boolean =>
+    (node.textContent ?? '') !== '' ||
+    (isDOMElement(node) &&
+      (node.tagName === 'BR' ? !node.hasAttribute(CARET_BREAK_ATTRIBUTE) : node.querySelector(`br:not([${CARET_BREAK_ATTRIBUTE}]), img`) !== null));
+  const atEnd = rest.every((node) => !shows(node));
+  const held = rest.some((node) => isDOMElement(node) && node.hasAttribute(CARET_BREAK_ATTRIBUTE));
+  if (atEnd && !held) {
+    // Built here rather than by insertHTML, which drops a second break at the end and leaves the caret before the first.
+    range.deleteContents();
+    // At the end of inline markup (the last word bold), the break and what is typed next go after the markup, not
+    // inside it: the next line is plain words, as it is after Enter anywhere else.
+    let outer: Node | undefined;
+    for (let node: Node | undefined = range.endContainer; node !== undefined && node !== host; node = node.parentNode ?? undefined) {
+      outer = node.parentNode === host ? node : outer;
+    }
+    if (outer !== undefined && isDOMElement(outer) && outer.tagName !== 'BR') {
+      range.setStartAfter(outer);
+      range.collapse(true);
+    }
+    const line = document.createElement('br');
+    const caret = document.createElement('br');
+    caret.setAttribute(CARET_BREAK_ATTRIBUTE, '');
+    range.insertNode(caret);
+    range.insertNode(line);
+    const next = document.createRange();
+    next.setStartAfter(line);
+    next.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(next);
+    return;
+  }
+  document.execCommand('insertHTML', false, '<br>');
 }
 
 function useRichState() {
@@ -153,11 +205,84 @@ function useRichSync(nodes: readonly InlineNode[], state: RichState) {
     if (!element) {
       return;
     }
-    if (html !== lastEmittedRef.current) {
-      element.innerHTML = html;
+    if (html === lastEmittedRef.current) {
+      return;
+    }
+    const focused = element.ownerDocument.activeElement === element;
+    // Our own edit coming back in the page's spelling of it (a space the browser typed as U+00A0, template whitespace,
+    // a break with nothing after it left out) is the same words: the field keeps what is typed, and the caret stays.
+    if (focused && sameWords(html, lastEmittedRef.current ?? '')) {
       lastEmittedRef.current = html;
+      return;
+    }
+    // A real change while typing (an undo, the file changed): the words are replaced and the caret kept where it was in them.
+    const caret = focused ? caretOffset(element) : undefined;
+    const before = element.textContent ?? '';
+    element.innerHTML = html;
+    lastEmittedRef.current = html;
+    if (caret !== undefined) {
+      placeCaret(element, caretAfterChange(before, element.textContent ?? '', caret));
     }
   }, [html, hostRef, lastEmittedRef]);
+}
+
+/** Whether two spellings of the field's HTML hold the same words and markup, whitespace and trailing breaks aside. */
+export function sameWords(left: string, right: string): boolean {
+  const words = (html: string) =>
+    html
+      .replace(/<br data-rich-caret="">/g, '')
+      .replace(/&nbsp;|\u00A0/g, ' ')
+      .replace(/(?:<br>\s*)+$/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  return words(left) === words(right);
+}
+
+/**
+ * Where the caret goes when the field's words are replaced: it stays where it was in the words, and one that was where
+ * the words changed (an undo, a redo) goes to the end of what changed, where typing goes on.
+ */
+export function caretAfterChange(before: string, after: string, caret: number): number {
+  const shorter = Math.min(before.length, after.length);
+  let prefix = 0;
+  while (prefix < shorter && before[prefix] === after[prefix]) {
+    prefix += 1;
+  }
+  let suffix = 0;
+  while (suffix < shorter - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) {
+    suffix += 1;
+  }
+  if (caret < prefix || before === after) {
+    return caret;
+  }
+  const behind = before.length - caret;
+  return behind < suffix ? after.length - behind : after.length - suffix;
+}
+
+// The caret as a count of characters before it, and back: the same place in the words after they are written again.
+function caretOffset(element: HTMLElement): number | undefined {
+  const selection = element.ownerDocument.getSelection();
+  if (!selection?.rangeCount || !element.contains(selection.getRangeAt(0).endContainer)) {
+    return undefined;
+  }
+  const range = element.ownerDocument.createRange();
+  range.selectNodeContents(element);
+  range.setEnd(selection.getRangeAt(0).endContainer, selection.getRangeAt(0).endOffset);
+  return range.toString().length;
+}
+
+function placeCaret(element: HTMLElement, offset: number): void {
+  const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let left = offset;
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const length = node.textContent?.length ?? 0;
+    if (left <= length) {
+      element.ownerDocument.getSelection()?.collapse(node, left);
+      return;
+    }
+    left -= length;
+  }
+  element.ownerDocument.getSelection()?.collapse(element, element.childNodes.length);
 }
 function richEmit(state: RichState, onChange: RichContentProps['onChange']): void {
   const { hostRef, lastEmittedRef } = state;
@@ -165,7 +290,9 @@ function richEmit(state: RichState, onChange: RichContentProps['onChange']): voi
   if (!element) {
     return;
   }
-  const next = richContentNodes(element);
+  // A break with nothing after it shows nothing on the page: it is not written, however the words after it went. The
+  // field keeps its empty last line while it is being typed in, and the break comes back with the next word.
+  const next = withoutTrailingBreaks(richContentNodes(element));
   // Canonical, not el.innerHTML: the app hands the nodes back with ids
   // added and the browser normalises markup as you type, so only the
   // serialised form is comparable on the way back in.

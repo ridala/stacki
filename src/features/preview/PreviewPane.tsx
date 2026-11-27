@@ -21,11 +21,10 @@ import { useProjectBreakpoints } from '../../ipc/useProjectBreakpoints';
 import { usePreviewRuntime, type CanvasSelectInfo, type JudgeCanvasEvent, type PreviewRuntimeProps } from './previewRuntime';
 import type { CanvasNoticeEvent } from './canvasClickRetry';
 import type { PreviewReloadReason } from './previewMessages';
-import { FLUID_FRAME_WIDTH } from './previewViewport';
 import './previewViewport.css';
 import type { LiveValue } from '../../ui/liveValue';
 import { GuideOverlay } from './GuideOverlay';
-import { useColumnGuide, type ShownGuide } from './guideSettings';
+import { useColumnGuide, type GuideSubject, type ShownGuide } from './guideSettings';
 
 export { deviceForWidth } from './PreviewToolbar';
 
@@ -50,6 +49,7 @@ interface PreviewPaneProps {
   readonly onRestart?: () => void;
   readonly selPath?: string | undefined;
   readonly navigatorSelectionTick?: number;
+  readonly unhidePath?: string | undefined;
   readonly navHoverPath?: string | undefined;
   /** The ::before or ::after row hovered in the navigator, of `navHoverPath`. */
   readonly navHoverPseudo?: PseudoLayer | undefined;
@@ -57,6 +57,12 @@ interface PreviewPaneProps {
   readonly selPseudo?: PseudoLayer | undefined;
   readonly overlayInfo?: (path: string) => OverlayInfo | undefined;
   readonly onSelectPath?: (path: string | undefined, info: CanvasSelectInfo) => void;
+  readonly canvasPathOf?: PreviewRuntimeProps['canvasPathOf'];
+  /**
+   * A node that stands for the whole page as shown (the component canvas's <html> root): it is outlined around the
+   * pane's viewport at every hover, selection and re-measure, never around the box the frame measures for it.
+   */
+  readonly canvasWholePath?: string | undefined;
   readonly onContextPath?: NonNullable<PreviewRuntimeProps['onContextPath']>;
   readonly onOpenPath?: (path: string | undefined, occurrence: number) => void;
   readonly onEditImage?: PreviewRuntimeProps['onEditImage'];
@@ -92,6 +98,8 @@ interface PreviewPaneProps {
   readonly onViewportWidth?: ((widthPx: number | undefined) => void) | undefined;
   /** The open project: the column guide's settings are kept per project. */
   readonly projectPath?: string | undefined;
+  /** What the canvas is editing: a component has no column guide (guideSettings.ts). */
+  readonly guideSubject: GuideSubject;
   /** More paths for the canvas to measure (the elements app overlays anchor to). */
   readonly extraTrackPaths?: readonly string[] | undefined;
   /** A drag on the canvas, or one crossing into it (src/app/state/appCanvasDrag.ts decides the drop). */
@@ -119,7 +127,8 @@ export default function PreviewPane(props: PreviewPaneProps) {
   const ownDimensions = usePreviewDimensions();
   const dimensions = props.dimensions ?? ownDimensions;
   const { resolved: breakpoints, desktopFramePx } = useProjectBreakpoints(props.projectPath);
-  const sizing = usePreviewSizing(props.device, dimensions, breakpoints, { deviceShortcuts: true }, props.onDevice);
+  const viewKey = [props.projectPath ?? '', props.route ?? '', String(props.refreshKey ?? '')].join('\n');
+  const sizing = usePreviewSizing(props.device, dimensions, breakpoints, { deviceShortcuts: true, desktopFramePx, viewKey }, props.onDevice);
   useCanvasWidthRequest(props.canvasWidthRequest, dimensions.setCustomWidth);
   // A fluid canvas is 1px wide until its container is measured: that is not a width to follow.
   const measured = props.device !== 'canvas' && (sizing.width !== undefined || sizing.wrapWidth > 0);
@@ -129,6 +138,7 @@ export default function PreviewPane(props: PreviewPaneProps) {
     metrics: runtime.guide,
     available: props.device !== 'canvas',
     frame: runtime,
+    subject: props.guideSubject,
   });
   return (
     <>
@@ -137,7 +147,7 @@ export default function PreviewPane(props: PreviewPaneProps) {
         crumbs={props.crumbs ?? []}
         {...(props.onCrumb === undefined ? {} : { onCrumb: props.onCrumb })}
         activeDevice={sizing.activeDevice}
-        onDevice={props.onDevice}
+        onDevice={sizing.pickDevice}
         {...(props.device === 'canvas'
           ? {}
           : {
@@ -145,7 +155,7 @@ export default function PreviewPane(props: PreviewPaneProps) {
                 width: sizing.viewport.width,
                 scale: sizing.viewport.scale,
                 onWidth: sizing.setWidth,
-                onFit: () => props.onDevice('desktop'),
+                onFit: () => sizing.pickDevice('desktop'),
               },
             })}
         guide={columnGuide.menu}
@@ -256,13 +266,13 @@ function DesignPreview({
         style={
           width
             ? { width: sizing.viewport.width * scale, height: sizing.viewport.height * scale, borderRadius: 10 * scale }
-            : { width: FLUID_FRAME_WIDTH, height: '100%', borderRadius: 0 }
+            : { ...sizing.fillStyle, height: '100%', borderRadius: 0 }
         }
       >
         {/* First in the layer, so the outlines and spacing bands paint over it. */}
         {shownGuide && <GuideOverlay {...shownGuide} scale={scale} />}
         <PreviewOverlays
-          {...measuredOutlines(runtime)}
+          {...measuredOutlines(runtime, { path: props.canvasWholePath, viewport: sizing.viewport })}
           {...(dragging ? { hoverPath: undefined } : {})}
           scale={scale}
           viewport={{ w: sizing.viewport.width, h: sizing.viewport.height }}
@@ -284,9 +294,13 @@ function DesignPreview({
 }
 
 // What the frame measured and reports, as the outlines draw it.
-function measuredOutlines(runtime: Runtime) {
+function measuredOutlines(
+  runtime: Runtime,
+  whole: { readonly path: string | undefined; readonly viewport: { readonly width: number; readonly height: number } },
+) {
+  const viewportBox = { x: 0, y: 0, w: whole.viewport.width, h: whole.viewport.height };
   return {
-    rects: runtime.rects,
+    rects: whole.path === undefined ? runtime.rects : { ...runtime.rects, [whole.path]: [viewportBox] },
     spacing: runtime.spacing,
     // A click being judged is drawn as the selection already (previewRuntime.ts PendingSelection).
     selOcc: runtime.pendingSelection === undefined ? runtime.selOcc : runtime.pendingSelection.occurrence,

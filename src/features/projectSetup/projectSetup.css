@@ -1,0 +1,60 @@
+.modal.project-setup-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 560px;
+  max-height: calc(100vh - 48px);
+}
+.project-setup-dialog .modal-body {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+.project-setup-dialog :is(.modal-header, .modal-footer) {
+  flex-shrink: 0;
+}
+.project-setup-dialog .modal-footer {
+  flex-wrap: wrap;
+}
+.project-setup-dialog p {
+  margin: 0;
+}
+.project-setup-saved,
+.project-setup-pages {
+  display: grid;
+  gap: 4px;
+}
+.project-setup-suggestions {
+  width: 100%;
+  border-collapse: collapse;
+}
+.project-setup-suggestions :is(th, td) {
+  padding: 8px;
+  border-block-start: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.project-setup-suggestions :is(th, td):first-child {
+  padding-inline-start: 0;
+  width: 52%;
+}
+.project-setup-suggestions th {
+  color: var(--text);
+}
+.project-setup-suggestions ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  color: var(--text-dim);
+  font-weight: normal;
+}
+.project-setup-dialog .project-setup-suggestions label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+}

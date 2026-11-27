@@ -17,7 +17,12 @@
 //   skill     first in the message, for Claude, and a command the agent advertises:
 //             the leading `/name `; otherwise "Use the `name` skill." and a link to
 //             its SKILL.md;
-//   builtin   a text block of its own, wrapped in a tag, where the chip stood.
+//   builtin   a text block of its own, wrapped in a tag, where the chip stood;
+//   reference the chip's words join the running text; the transcript keeps the chip;
+//   code      a text block of its own, where the chip stood: the captured code, fenced
+//             (mentions.ts), never read again from disk. It is never the message's
+//             LAST text block: an agent may read that one as what the person typed and
+//             expand `@` mentions in it, and mention-like text in selected code is code.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -28,7 +33,10 @@ import type { AiFailure, PromptAttachment } from '../../../shared/ipc/aiChat';
 import type { AgentId } from '../../../shared/properties/ai/agentIds';
 import { AI_LIMITS } from '../../../shared/properties/ai/aiLimits';
 import type { SentPart } from '../../../shared/properties/ai/chatModel';
-import { isProjectRelativePath, type PromptPart } from '../../../shared/properties/ai/mentions';
+import { codeAgentText, isProjectRelativePath, promptBoundProblem, type PromptPart } from '../../../shared/properties/ai/mentions';
+import { PIN_LIMITS, sentPinsOf, type PinBrief } from '../../../shared/properties/ai/commentPinBrief';
+import { pinInstructions } from './pinInstructions';
+import type { PinPictureFiles } from './pinPictures';
 
 /** What building a prompt needs to know about the project, the person's home and the agent. */
 export interface PromptSource {
@@ -49,10 +57,16 @@ export interface PromptContent {
   readonly attachments: readonly PromptAttachment[];
   /** Absent: the message is just `text`. */
   readonly parts: readonly PromptPart[] | undefined;
+  /** Comment pins sent with "Send all"; absent for any other message. */
+  readonly pins?: PinBrief | undefined;
+  /** Each pin's pictures as files, for pins that run each in a subagent (pinPictures.ts). */
+  readonly pinPictures?: PinPictureFiles | undefined;
 }
 
 export interface BuiltPrompt {
   readonly blocks: readonly unknown[];
+  /** The attachments the transcript keeps, when they are not all of the message's: a send of pins keeps one picture a pin. */
+  readonly shown?: readonly PromptAttachment[] | undefined;
   /** What the transcript keeps of the parts; absent when the message had none. */
   readonly sent: readonly SentPart[] | undefined;
 }
@@ -61,6 +75,42 @@ export interface BuiltPrompt {
 const TEXT_HASH_CHARS = 16;
 
 export function buildPrompt(source: PromptSource, content: PromptContent): Result<BuiltPrompt, AiFailure> {
+  // Pins that run each in a subagent get their pictures as files (a subagent never sees the message's images), so the
+  // message carries none: a full board of them would be far more images than one message may hold.
+  const asFiles = content.pins !== undefined && content.pinPictures !== undefined;
+  const built = buildPartsPrompt(source, asFiles ? { ...content, attachments: [] } : content);
+  const pins = content.pins;
+  if (pins === undefined || !built.ok) {
+    return built;
+  }
+  return withPins(built.value, pins, content);
+}
+
+// Comment pins come before everything else the message holds: their instructions are the message, and the
+// images after them are theirs. The transcript keeps the pins as one part, after the message's own.
+function withPins(built: BuiltPrompt, pins: PinBrief, { attachments, pinPictures }: PromptContent): Result<BuiltPrompt, AiFailure> {
+  if (pins.pins.some((pin) => pin.images.some((index) => index >= attachments.length || attachments[index]?.kind !== 'image'))) {
+    return err(invalid('A pin names an image the message does not carry.'));
+  }
+  assert(attachments.length <= PIN_LIMITS.sendImagesMax, 'withPins: the attachments are bounded');
+  // The transcript draws one picture a pin, its first: those are kept, and each pin names its place among them.
+  const shown: PromptAttachment[] = [];
+  const cards = sentPinsOf(pins).map((pin) => {
+    const first = pin.image === undefined ? undefined : attachments[pin.image];
+    if (first === undefined) {
+      return { ...pin, image: undefined };
+    }
+    shown.push(first);
+    return { ...pin, image: shown.length - 1 };
+  });
+  assert(shown.length <= pins.pins.length, 'withPins: at most one picture a pin is kept');
+  const sent: SentPart[] = [...(built.sent ?? []), { kind: 'pins', mode: pins.mode, pins: cards }];
+  const blocks = [{ type: 'text', text: pinInstructions(pins, pinPictures) }, ...built.blocks];
+  assert(blocks.length === built.blocks.length + 1, 'withPins: one block of instructions');
+  return ok({ blocks, sent, shown });
+}
+
+function buildPartsPrompt(source: PromptSource, content: PromptContent): Result<BuiltPrompt, AiFailure> {
   const attachmentBlocks = attachmentBlocksOf(source.root, content.attachments);
   const parts = content.parts;
   if (parts === undefined) {
@@ -70,9 +120,9 @@ export function buildPrompt(source: PromptSource, content: PromptContent): Resul
   if (parts.length > AI_LIMITS.promptPartsMax) {
     return err(invalid('A message has too many parts.'));
   }
-  const chips = parts.filter((part) => part.kind !== 'text').length;
-  if (chips > AI_LIMITS.mentionsMax) {
-    return err(invalid(`A message can mention at most ${AI_LIMITS.mentionsMax} things.`));
+  const problem = promptBoundProblem(parts);
+  if (problem !== undefined) {
+    return err(invalid(`This message has ${problem}.`));
   }
   const blocks: unknown[] = [];
   const trailing: unknown[] = [];
@@ -80,9 +130,12 @@ export function buildPrompt(source: PromptSource, content: PromptContent): Resul
   const linked = new Set<string>();
   let buffer = '';
   let embeddedChars = 0;
+  // Whether the last text block pushed so far is selected code.
+  let endsInCode = false;
   const flush = (): void => {
     if (buffer.trim() !== '') {
       blocks.push({ type: 'text', text: buffer });
+      endsInCode = false;
     }
     buffer = '';
   };
@@ -127,8 +180,21 @@ export function buildPrompt(source: PromptSource, content: PromptContent): Resul
         sent.push({ kind: 'skill', name: part.name, source: part.source, path: part.path });
         break;
       }
+      case 'reference': {
+        buffer += part.text;
+        sent.push({ kind: 'chip', chip: part.chip });
+        break;
+      }
+      case 'code': {
+        flush();
+        blocks.push({ type: 'text', text: codeAgentText(part.chip) });
+        sent.push({ kind: 'chip', chip: part.chip });
+        endsInCode = true;
+        break;
+      }
       case 'builtin': {
         flush();
+        endsInCode = false;
         blocks.push({ type: 'text', text: `<app-builder-instructions>\n${part.text}\n</app-builder-instructions>` });
         sent.push({ kind: 'builtin', id: part.id, textHash: createHash('sha256').update(part.text).digest('hex').slice(0, TEXT_HASH_CHARS) });
         break;
@@ -140,9 +206,13 @@ export function buildPrompt(source: PromptSource, content: PromptContent): Resul
     }
   }
   flush();
+  if (endsInCode) {
+    // i18n-ignore: sent to the agent, never shown.
+    blocks.push({ type: 'text', text: '(End of the selected code.)' });
+  }
   const all = [...blocks, ...trailing, ...attachmentBlocks];
   assert(
-    all.length <= parts.length + content.attachments.length * 2 + AI_LIMITS.promptBlocksExtraMax,
+    all.length <= parts.length * 2 + content.attachments.length * 2 + AI_LIMITS.promptBlocksExtraMax,
     'buildPrompt: blocks stay within the parts, attachments (each with its note) and the extras',
   );
   assert(sent.length === parts.length, 'buildPrompt: one sent part per part');

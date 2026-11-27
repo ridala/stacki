@@ -6,7 +6,7 @@ export type PackageManager = (typeof PACKAGE_MANAGERS)[number];
 
 // The managers a new site can be created with: those tested end to end so far. Yarn's newer
 // versions skip node_modules by default, which the preview has not been checked against.
-export const CREATE_PACKAGE_MANAGERS = ['npm', 'pnpm'] as const satisfies readonly PackageManager[];
+export const CREATE_PACKAGE_MANAGERS = ['npm', 'pnpm', 'bun'] as const satisfies readonly PackageManager[];
 export type CreatePackageManager = (typeof CREATE_PACKAGE_MANAGERS)[number];
 
 const FIELD_CHARS_MAX = 256;
@@ -14,9 +14,15 @@ const FIELD_CHARS_MAX = 256;
 export function parseCreatePackageManager(input: unknown): CreatePackageManager {
   const manager = CREATE_PACKAGE_MANAGERS.find((candidate) => candidate === input);
   if (manager === undefined) {
-    throw new Error(`Package manager: expected ${CREATE_PACKAGE_MANAGERS.join(' or ')}`);
+    throw new Error(`Package manager: expected one of ${CREATE_PACKAGE_MANAGERS.join(', ')}`);
   }
   return manager;
+}
+
+// Which manager runs a starter's scaffolder. Bun runs it with its own `create`; every other choice goes through npm,
+// which comes with Node. The wizard shows the same command main runs.
+export function scaffolderManager(manager: PackageManager): 'npm' | 'bun' {
+  return manager === 'bun' ? 'bun' : 'npm';
 }
 
 // The name people know each manager by, for messages.

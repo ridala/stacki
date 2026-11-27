@@ -1,11 +1,14 @@
 import { useTranslate } from '../../lib/i18n/useTranslate';
+import { useDefaultsMenu } from './defaultsMenu';
+import { useUnlinkMenu } from './unlinkMenu';
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import Popup from '../../ui/Popup';
 import { ChevronRightIcon } from '../../ui/Icons';
 import { currentDesktopPlatform, shortcutLabel } from '../../lib/shortcutLabel';
 import { useShortcutTip } from '../../ui/shortcutTip';
 
-export type ContextAction = 'defaults' | 'open' | 'cut' | 'copy' | 'paste' | 'duplicate' | 'delete' | 'div' | 'a' | 'convert-div' | 'convert-span';
+export type ContextAction =
+  'defaults' | 'open' | 'canvas' | 'add-to-chat' | 'unlink' | 'cut' | 'copy' | 'paste' | 'duplicate' | 'delete' | 'div' | 'a' | 'convert-div' | 'convert-span';
 export interface ContextPosition {
   readonly left: number;
   readonly top: number;
@@ -16,6 +19,8 @@ interface MenuProps {
   readonly position: ContextPosition;
   readonly component: boolean;
   readonly canOpen: boolean;
+  /** "Open in canvas": absent where there is no component canvas (Studio), so the row is left out. */
+  readonly openCanvas: 'enabled' | 'disabled' | 'absent';
   readonly canSetDefaults: boolean;
   readonly canWrapBox: boolean;
   readonly canWrapLink: boolean;
@@ -27,11 +32,14 @@ interface MenuProps {
   readonly canCut: boolean;
   readonly canChange: boolean;
   readonly protectedNode: boolean;
+  /** "Add to chat": absent where there is no AI panel (Studio), so the row is left out. */
+  readonly addToChat: 'enabled' | 'disabled' | 'absent';
   readonly onClose: () => void;
   readonly onAction: (action: ContextAction) => void;
 }
 
 export function ContextMenu(props: MenuProps) {
+  const defaultsMenu = useDefaultsMenu();
   const translate = useTranslate();
   const ref = useRef<HTMLDivElement>(null);
   useMenuPosition(ref, props.position);
@@ -57,6 +65,17 @@ export function ContextMenu(props: MenuProps) {
       }}
     >
       {props.component && <ComponentMenuHeader {...props} />}
+      {props.addToChat !== 'absent' && (
+        <>
+          <MenuItem
+            label={translate('workspace.code.addToChat')}
+            shortcut={shortcut('L')}
+            disabled={props.addToChat === 'disabled'}
+            onSelect={() => props.onAction('add-to-chat')}
+          />
+          <div className="ctx-divider" role="separator" />
+        </>
+      )}
       {props.plainText ? <ConvertMenu {...props} /> : <WrapMenu {...props} />}
       <div className="ctx-divider" role="separator" />
       <MenuItem label={translate('structure.menu.cut')} disabled={!props.canCut} onSelect={() => props.onAction('cut')} />
@@ -74,7 +93,7 @@ export function ContextMenu(props: MenuProps) {
         disabled={!props.canChange}
         onSelect={() => props.onAction('delete')}
       />
-      {props.component && (
+      {props.component && defaultsMenu === 'offered' && (
         <>
           <div className="ctx-divider" role="separator" />
           <MenuItem label={translate('structure.menu.setDefaults')} disabled={!props.canSetDefaults} onSelect={() => props.onAction('defaults')} />
@@ -84,11 +103,16 @@ export function ContextMenu(props: MenuProps) {
   );
 }
 
-function ComponentMenuHeader(props: Pick<MenuProps, 'canOpen' | 'onAction'>) {
+function ComponentMenuHeader(props: Pick<MenuProps, 'canOpen' | 'openCanvas' | 'canChange' | 'onAction'>) {
   const translate = useTranslate();
+  const unlink = useUnlinkMenu();
   return (
     <>
       <MenuItem label={translate('structure.menu.openComponent')} disabled={!props.canOpen} onSelect={() => props.onAction('open')} />
+      {props.openCanvas !== 'absent' && (
+        <MenuItem label={translate('componentCanvas.menu.open')} disabled={props.openCanvas === 'disabled'} onSelect={() => props.onAction('canvas')} />
+      )}
+      {unlink !== undefined && <MenuItem label={unlink.label} disabled={!props.canChange} onSelect={() => props.onAction('unlink')} />}
       <div className="ctx-divider" role="separator" />
     </>
   );

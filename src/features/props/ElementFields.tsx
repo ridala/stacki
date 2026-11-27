@@ -24,21 +24,43 @@ import { canvasDraftInline } from './canvasDraftInline';
 import { classListOfferOf } from './classListProp';
 import { assert } from '../../../shared/core/assert';
 import type { FieldFocus } from './fieldFocus';
+import { RichTextContentField } from './ComponentEditingFields';
+import { plainChildrenHTML } from './richTextContent';
+import { CAPTION_LABEL_FOR } from '../../ui/captionLabel';
+import { provenanceResets, type PropFieldProvenance } from './propFieldExtras';
+import './propFieldExtras.css';
 
 export function ElementContent({ state }: { readonly state: ElementState }) {
   const translate = useTranslate();
   const draft = useCanvasTextDraft(state);
   const { node, loopContext, bindContext, onSetInline, showContentField, isSlot, contentPicker, setContentPicker, contentInsertRef } = state;
-  const contentSet = (node.children?.length ?? 0) > 0;
+  const held = state.contentValue;
+  const contentSet = held === undefined ? (node.children?.length ?? 0) > 0 : held.own;
+  if (state.richTextContent === true && node.kind === 'component') {
+    return (
+      <RichTextContentField
+        label={translate('props.element.content')}
+        key={node.id}
+        provenance={held?.provenance}
+        own={held?.own}
+        onReset={held?.onReset}
+        source={state.contentSource ?? plainChildrenHTML(node.children)}
+        shown={state.contentShown}
+        onSetNodes={onSetInline}
+        onSetSource={state.onSetContentSource}
+      />
+    );
+  }
   return (
     <>
       {showContentField && (
         <div className="props-field" key="content">
-          <label onClick={noLabelActivation}>
+          <label htmlFor={CAPTION_LABEL_FOR} onClick={noLabelActivation}>
             <ContentLabel
               active={contentSet}
               name={isSlot ? translate('props.element.fallback') : translate('props.element.content')}
-              onReset={() => onSetInline([])}
+              onReset={held === undefined ? () => onSetInline([]) : held.onReset}
+              provenance={held?.provenance}
             />
             {/* Text can hold data too — the same handle, the same picker,
                   dropping the same chip in at the caret. Without it, putting a
@@ -48,7 +70,7 @@ export function ElementContent({ state }: { readonly state: ElementState }) {
           </label>
           <RichContent
             key={node.id}
-            nodes={canvasDraftInline(isInlineOnly(node.children) ? node.children : [], draft)}
+            nodes={held === undefined ? canvasDraftInline(isInlineOnly(node.children) ? node.children : [], draft) : isInlineOnly(held.nodes) ? held.nodes : []}
             {...richContextProp(bindContext || loopContext)}
             insertRef={contentInsertRef}
             onChange={onSetInline}
@@ -89,17 +111,23 @@ export function ElementContent({ state }: { readonly state: ElementState }) {
   );
 }
 
-function ContentLabel(props: { readonly active: boolean; readonly name: string; readonly onReset: () => void }) {
+function ContentLabel(props: {
+  readonly active: boolean;
+  readonly name: string;
+  readonly onReset: () => void;
+  readonly provenance?: PropFieldProvenance | undefined;
+}) {
   const translate = useTranslate();
   const [position, setPosition] = useState<FieldPosition>();
   return (
     <>
       <span
-        className={`prop-label${props.active ? ' set' : ''}`}
-        title={props.active ? translate('props.element.resetHint') : undefined}
+        className={`prop-label${props.provenance?.tone === 'inherited' ? ' inherited' : props.active ? ' set' : ''}`}
+        title={props.provenance?.tip ?? (props.active ? translate('props.element.resetHint') : undefined)}
         onClick={(event) => {
           event.preventDefault();
-          if (!props.active) {
+          // Words given from elsewhere (a canvas frame's component defaults) have nothing here to reset.
+          if (!props.active || !provenanceResets(props.provenance)) {
             return;
           }
           if (event.altKey) {
@@ -135,10 +163,24 @@ export function richContextProp(context: RichContext | undefined): {
   return context === undefined ? {} : { bindContext: context };
 }
 
+// HTML a prop holds (`html="<p>…</p>"`), edited as rich text while it is a literal: written back as the prop's text.
+// Data or an expression (`html={post.body}`) is never turned into a literal: it shows as code, read only, and changes
+// where it comes from.
+export function RichTextPropField({ state, prop }: { readonly state: ElementState; readonly prop: string }) {
+  const value = state.node.props?.[prop];
+  const literal = value === undefined || value.type === 'string';
+  const source = value === undefined ? '' : value.type === 'string' ? value.value : value.type === 'expr' ? `{${value.value}}` : `{${prop}}`;
+  const write = (html: string) => state.onSetProp(prop, { type: 'string', value: html });
+  return <RichTextContentField label={prop} source={source} onSetHTML={literal ? write : undefined} onSetSource={literal ? write : undefined} />;
+}
+
 export function ElementLooseText({ state }: { readonly state: ElementState }) {
   const translate = useTranslate();
   const draft = useCanvasTextDraft(state);
   const { node, onSetContent, showLooseTextField, looseText } = state;
+  if (state.richTextContent === true && node.kind === 'component') {
+    return undefined; // The rich text field above holds all of the content, loose words with it.
+  }
   return (
     <>
       {showLooseTextField && (
@@ -159,7 +201,7 @@ export function ElementLooseText({ state }: { readonly state: ElementState }) {
   );
 }
 
-export function ElementSchemaFields({ state }: { readonly state: ElementState }) {
+export function ElementSchemaFields({ state, hiddenFields }: { readonly state: ElementState; readonly hiddenFields?: ReadonlySet<string> | undefined }) {
   // Words typed on the canvas into text this instance's prop sets show here as
   // they are typed; the attribute itself is written when typing ends.
   const draft = useCanvasTextDraft(state);
@@ -184,9 +226,14 @@ export function ElementSchemaFields({ state }: { readonly state: ElementState })
   return (
     <>
       {schema
+        .filter((field) => !hiddenFields?.has(field.name))
         .filter(appliesNow)
         .filter((field) => field.name !== 'class' && !(styleField && field.name === 'style'))
         .map((field) => {
+          // A prop the component sets with set:html, with its rich text setting on: the rich text field in its place.
+          if (state.richTextProps?.includes(field.name) === true) {
+            return <RichTextPropField key={field.name} state={state} prop={field.name} />;
+          }
           const value = canvasDraftProp(node.id, field.name, draft) ?? node.props?.[field.name];
           const onChange: ValueChange = (next, immediate) => setPropCascading(field.name, next, immediate);
           const plain = (
@@ -253,7 +300,8 @@ export function ElementExtraFields({ state }: { readonly state: ElementState }) 
 
 export function ElementSettingsHeader({ state }: { readonly state: ElementState }) {
   const translate = useTranslate();
-  const { settingsOpen, setSettingsOpen, hasSettings, settingsCount } = state;
+  const { settingsOpen, setSettingsOpen, settingsCount } = state;
+  const { hasSettings } = state;
   return (
     <>
       {hasSettings && (
@@ -282,7 +330,7 @@ export function ElementTag({ state }: { readonly state: ElementState }) {
           // local name the page imported it under — that name is a detail of
           // this page, while the file is what you're choosing between.
           tag={layoutTag ? currentLayoutName || node.name : node.name}
-          options={layoutTag ? layouts.map((option) => ({ name: option.name, kind: 'layout' })) : tagOptions}
+          options={layoutTag ? layouts.filter((option) => option.unlisted !== true).map((option) => ({ name: option.name, kind: 'layout' })) : tagOptions}
           onChangeTag={layoutTag ? changeToLayout : (name) => onChangeTag?.(name)}
         />
       )}

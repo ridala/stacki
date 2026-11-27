@@ -6,15 +6,14 @@
 // makes "the site as it is now" true for a project that was last edited
 // somewhere else entirely. One instance per main process, made by main.ts.
 
-import * as path from 'path';
 import type { ChildProcess } from 'child_process';
 import * as thumbs from '../project/thumbs';
 import { sameFilesystemPath } from '../lib/platform';
 import { createSerialQueue } from '../lib/serialQueue';
-import { isWin } from '../lib/mainHelpers';
 import { findFreePort, spawnAstroServer, stopProcessTree } from '../lib/nodeTools';
-import { hasDependencies } from '../project/projectFiles';
+import { hasDependencies, localAstroBin } from '../project/projectFiles';
 import { serverAlive } from '../preview/devServerChecks';
+import { imageCacheConfigArgs } from '../preview/imageCacheConfig';
 import type { DevServers } from './devServers';
 import type { MainHost } from './mainHost';
 import { translateMain } from '../lib/mainLocale';
@@ -128,8 +127,7 @@ export function registerThumbnailHandlers({
 // A dev server of the project's own, for one capture: the canvas's server is
 // left alone, and the temporary one is stopped however the capture ends.
 async function withTemporaryServer(projectPath: string, signal: AbortSignal, capture: (url: string) => ReturnType<typeof thumbs.capture>) {
-  const binName = isWin ? 'astro.cmd' : 'astro';
-  const localBin = path.join(projectPath, 'node_modules', '.bin', binName);
+  const localBin = localAstroBin(projectPath);
   const port = await findFreePort(4400 + Math.floor(Math.random() * 200));
   if (signal.aborted) {
     return { ok: false as const, error: 'skipped' };
@@ -143,6 +141,8 @@ async function withTemporaryServer(projectPath: string, signal: AbortSignal, cap
     // Keep a temporary server in our process group. A detached Astro daemon
     // cannot be cancelled while it is still compiling and has no lock file yet.
     '--ignore-lock',
+    // The project's own config plus one thing: no picture is photographed from an image cached before it was replaced.
+    ...imageCacheConfigArgs(projectPath),
   ]);
   const spawnState: { error?: Error } = {};
   proc.on('error', (error) => {

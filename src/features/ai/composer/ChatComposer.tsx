@@ -11,14 +11,12 @@
 //
 // Stacki's own commands (`/clear`, `/export`, `/find`, builtinCommands.ts) head the `/` menu and run here,
 // never reaching the agent; so does a draft that is exactly one of them when Enter sends it.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { agentLabel, type AgentId } from '../../../../shared/properties/ai/agentIds';
 import { AI_LIMITS } from '../../../../shared/properties/ai/aiLimits';
 import type { ChatId } from '../../../../shared/properties/ai/chatModel';
-import type { VoiceAction } from '../../../../shared/properties/voice/voiceCommands';
-import { pushDictated, takeBackLast } from '../../../../shared/properties/voice/voiceHistory';
 import { centralIcon } from '../../../ui/central/CentralIcon';
-import { arrowCornerDownLeft as centralReturn, microphone as centralMicrophone } from '../../../ui/central/centralGeometry';
+import { arrowCornerDownLeft as centralReturn } from '../../../ui/central/centralGeometry';
 import { currentDesktopPlatform } from '../../../lib/shortcutLabel';
 import { AttachmentChips } from '../screenshot/AttachmentChips';
 import { appendAttachments, nextScreenshotNumber } from '../screenshot/draftAttachments';
@@ -26,12 +24,8 @@ import { ScreenshotButton } from '../screenshot/ScreenshotButton';
 import { useScreenshotCapture } from '../screenshot/useScreenshotCapture';
 import {
   draftText,
-  draftTrailingText,
-  draftWithAppendedText,
-  draftWithTrailingText,
   EMPTY_DRAFT,
   isDraftEmpty,
-  mentionCandidates,
   newChat,
   preferredAgent,
   queuePrompt,
@@ -48,27 +42,18 @@ import type { ChatView } from '../chatReducer';
 import { chatShortcut } from '../chatShortcuts';
 import { requestChatFind } from '../transcript/chatFind';
 import { hasExportableMessages, transcriptMarkdown } from '../transcript/chatExport';
-import { COPY_LIMITS, copyText } from '../transcript/copyText';
+import { COPY_LIMITS, copyText } from '../../../ui/copyText';
 import { builtinCommandNamed, builtinCommandOfDraft, builtinCommands, withBuiltinCommands, type BuiltinCommandName } from './builtinCommands';
-import { useDictation } from '../useDictation';
-import { dictationToast } from './dictationToasts';
-import { correctedWord } from '../../../../shared/properties/voice/dictationVocabulary';
-import { withParagraphBreak } from '../../../../shared/properties/voice/voiceCommands';
-
-/** How long after a dictated piece a fix by hand counts as correcting it. */
-const LEARN_WINDOW_MS = 60_000;
-import { reportActionToast, reportErrorToast } from '../../../ui/errorNotices';
-import { ProgressRing } from '../../../ui/ProgressRing';
+import { reportErrorToast } from '../../../ui/errorNotices';
 import { ComposerInput, type ComposerHandle, type SendKey } from './ComposerInput';
-import { createPortal } from 'react-dom';
-import FittedTooltip from '../../../ui/FittedTooltip';
-import { tooltipHost, useDelayedTooltip } from '../../../ui/delayedTooltip';
 import { ComposerStatusLine } from './ComposerStatusLine';
 import type { Translator } from '../../../lib/i18n/localeContext';
-import { useLocale, useTranslate, useTranslateRef } from '../../../lib/i18n/useTranslate';
+import { useTranslate } from '../../../lib/i18n/useTranslate';
 import { PlusMenu } from './PlusMenu';
-import { addSelectionToDraft } from '../mentions/selectionMention';
-import { VoiceLine } from './VoiceLine';
+import { composerCaretMemory, registerComposerTarget } from '../composerTargets';
+import { DictationLine } from './VoiceLine';
+import { MicButton } from './MicButton';
+import { useComposerVoice } from './useComposerVoice';
 import { QueuedPrompts } from './QueuedPrompts';
 import './composer.css';
 
@@ -95,7 +80,6 @@ export function ChatComposer({
   readonly state: AiState;
 }) {
   const translate = useTranslate();
-  const translateRef = useTranslateRef();
   // A quiet line under the box after a built-in command ("Copied the chat as Markdown"), gone after a moment.
   const [note, setNote] = useState<string | undefined>(undefined);
   const noteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -108,6 +92,9 @@ export function ChatComposer({
   const [dragging, setDragging] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
   const input = useRef<ComposerHandle>(null);
+  // "Add to chat" puts its chips in at this box's caret while it is open, and finds the caret again after it closed.
+  useEffect(() => registerComposerTarget(chat, (change) => input.current?.editBeforeCaret(change)), [chat]);
+  const caretMemory = useMemo(() => composerCaretMemory(chat), [chat]);
   // The composer takes the keyboard when a chat opens, new or not, so the person can just type.
   useEffect(() => {
     input.current?.focus();
@@ -118,89 +105,16 @@ export function ChatComposer({
       input.current?.focus();
     }
   }, [state.composerFocusRequests]);
-  const { locale } = useLocale();
   // The newest draft, for the voice callbacks: speech arrives between renders.
   const draftNow = useRef(draft);
   draftNow.current = draft;
-  // What each dictated piece added, newest last, so "scratch that" takes back that piece and never typing.
-  const dictated = useRef<readonly string[]>([]);
-  // The last piece dictated, so a word the person fixes in it right after can be offered for the vocabulary.
-  const lastDictation = useRef<{ readonly text: string; readonly atMs: number; offered: boolean } | undefined>(undefined);
-  const applyVoice = (action: VoiceAction): void => {
-    if (action.kind === 'insert') {
-      dictated.current = pushDictated(dictated.current, action.text);
-      lastDictation.current = { text: action.text, atMs: Date.now(), offered: false };
-      setDraft(chat, (current) => draftWithAppendedText(current, action.text));
-    } else if (action.kind === 'newline') {
-      // A paragraph break: trailing spaces go, and the box ends in exactly one blank line (withParagraphBreak).
-      setDraft(chat, (current) => draftWithTrailingText(current, withParagraphBreak(draftTrailingText(current))));
-    } else if (action.kind === 'deleteLast') {
-      const taken = takeBackLast(dictated.current, draftTrailingText(draftNow.current));
-      dictated.current = taken.history;
-      if (taken.removed) {
-        setDraft(chat, (current) => draftWithTrailingText(current, taken.text));
-      }
-    } else if (action.kind === 'send') {
-      voice.stop();
-      submit('send');
-    }
-    // A 'stop' action was already handed to the session by the hook.
-  };
-  // The microphone's tip is the app's own (FittedTooltip keeps it inside the window), never a native `title`.
-  const micTip = useDelayedTooltip();
-  const voice = useDictation({
-    textBefore: () => draftTrailingText(draftNow.current),
-    onAction: applyVoice,
-    language: recognitionLanguage(locale),
-    loadPaths: useCallback(async () => {
-      const reply = await mentionCandidates('', ['file']);
-      return reply.ok ? reply.value.flatMap((candidate) => (candidate.kind === 'file' ? [candidate.path] : [])) : [];
-    }, []),
+  const dictation = useComposerVoice({
+    read: () => draftNow.current,
+    write: (change) => setDraft(chat, change),
+    onSend: () => submit('send'),
+    draft,
   });
-  // A word fixed by hand in what was just dictated: offered once, as a toast, for the vocabulary (Flow's "learns").
-  const draftTail = draftTrailingText(draft);
-  useEffect(() => {
-    const last = lastDictation.current;
-    const store = voice.whisperStore;
-    if (last === undefined || last.offered || store === undefined || Date.now() - last.atMs > LEARN_WINDOW_MS) {
-      return;
-    }
-    const fixed = correctedWord(last.text, draftTail);
-    if (fixed === undefined) {
-      return;
-    }
-    last.offered = true;
-    reportActionToast(translate('dictation.words.learn', { word: fixed.corrected }), 'info', [
-      {
-        label: translate('dictation.words.learnAction'),
-        run: () => {
-          const words = store.snapshot().words;
-          if (!words.vocabulary.some((entry) => entry.word.toLowerCase() === fixed.corrected.toLowerCase())) {
-            store.setWords({ ...words, vocabulary: [...words.vocabulary, { word: fixed.corrected, misheard: fixed.heard }] });
-          }
-        },
-      },
-    ]);
-    // Only the draft's words decide; the store and the translator are read when a fix is seen.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-  }, [draftTail]);
-
-  // Dictation's notices are toasts, never rows under the box (dictationToasts.ts): each is shown once, then cleared.
-  const voiceNotice = voice.notice;
-  useEffect(() => {
-    if (voiceNotice === undefined) {
-      return;
-    }
-    const toast = dictationToast(
-      voiceNotice,
-      { translate, translateRef },
-      { openSettings: voice.openSettings, retry: voice.retryDownload, useSmall: voice.useSmallModel },
-    );
-    reportActionToast(toast.message, toast.kind, toast.recovery);
-    voice.dismiss();
-    // The actions are read when the notice arrives; a new notice is the only thing that shows another toast.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-  }, [voiceNotice]);
+  const { voice } = dictation;
   const dictating = voice.listening || voice.transcribing;
   const running = view.running !== undefined;
   const text = draftText(draft);
@@ -316,6 +230,8 @@ export function ChatComposer({
       <QueuedPrompts chat={chat} queued={queued} paused={state.queuePaused.has(chat)} />
       <form
         className={`ai-composer${dragging ? ' is-dragging' : ''}${disabled === undefined ? '' : ' is-blocked'}`}
+        // Why the box takes nothing, whole on hover: a long language can cut the placeholder at the narrowest panel.
+        title={disabled}
         onSubmit={(event) => {
           event.preventDefault();
           send('send');
@@ -384,7 +300,6 @@ export function ChatComposer({
             onFind={() => requestChatFind(chat)}
             onCopyChat={copyChat}
             canCopyChat={hasExportableMessages(view.items)}
-            onAddSelection={() => void addSelectionToDraft(chat)}
           />
           <ComposerInput
             agent={agent}
@@ -397,6 +312,7 @@ export function ChatComposer({
               runBuiltin(name);
               return true;
             }}
+            caretMemory={caretMemory}
             segments={draft.segments}
             placeholder={placeholder}
             inputRef={input}
@@ -432,62 +348,8 @@ export function ChatComposer({
             {screenshot.overlay}
             {/* The microphone is the capture bar's bottom segment: hovering or focusing it reveals Screenshot and Record above. */}
             <ScreenshotButton disabled={disabled !== undefined} busy={screenshot.busy} active={screenshot.active} onCapture={screenshot.start}>
-              <button
-                type="button"
-                className={`ghost ai-tool-button${voice.listening ? ' is-listening' : ''}${voice.downloadPercent === undefined ? '' : ' is-downloading'}${voice.decoding && voice.interim === '' ? ' is-decoding' : ''}`}
-                aria-label={
-                  voice.downloadPercent !== undefined
-                    ? translate('dictation.mic.downloading', { percent: voice.downloadPercent })
-                    : voice.listening
-                      ? translate('ai.composer.dictate.stop')
-                      : translate('ai.composer.dictate')
-                }
-                aria-pressed={voice.listening}
-                onMouseEnter={micTip.show}
-                onMouseLeave={micTip.hide}
-                onBlur={micTip.hide}
-                onPointerDown={(event) => {
-                  // Keep the button's own pointer until it comes up, even if the pointer leaves it: that is how a hold ends.
-                  if (typeof event.currentTarget.setPointerCapture === 'function' && event.pointerId !== undefined) {
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                  }
-                  dictated.current = [];
-                  voice.press();
-                }}
-                onPointerUp={voice.release}
-                onPointerCancel={voice.release}
-                onClick={(event) => {
-                  // A pointer's press and release already happened; a click with no pointer (Space or Enter on the focused button) toggles.
-                  if (event.detail === 0) {
-                    dictated.current = [];
-                    voice.toggle();
-                  }
-                }}
-              >
-                {voice.downloadPercent === undefined ? (
-                  <MicGlyph />
-                ) : (
-                  // The model downloading for this press: real bytes as a ring where the microphone was; a press cancels.
-                  <ProgressRing
-                    value={voice.downloadPercent / 100}
-                    tone="neutral"
-                    sizePx={16}
-                    label={translate('dictation.mic.downloading', { percent: voice.downloadPercent })}
-                  />
-                )}
-              </button>
+              <MicButton dictation={dictation} />
             </ScreenshotButton>
-            {micTip.value !== undefined &&
-              createPortal(
-                <FittedTooltip role="tooltip" anchor={micTip.value} preferred="left">
-                  {voice.downloadPercent !== undefined
-                    ? translate('dictation.mic.downloading', { percent: voice.downloadPercent })
-                    : voice.supported
-                      ? translate('ai.composer.dictate.title')
-                      : translateRef(voice.unavailableTitle)}
-                </FittedTooltip>,
-                tooltipHost(undefined),
-              )}
           </div>
         </div>
       </form>
@@ -500,13 +362,7 @@ export function ChatComposer({
         </div>
         {dictating && (
           <div className="ai-compose-footer-voice">
-            <VoiceLine
-              feed={voice.feed}
-              starting={voice.starting || voice.transcribing}
-              latch={voice.state.kind === 'idle' || voice.state.kind === 'stopping' ? 'pending' : voice.state.latch}
-              interim="" // The words being spoken are drawn in the box itself (dictationDraft.ts); the line keeps its hint.
-              commands={voice.commands}
-            />
+            <DictationLine voice={voice} />
           </div>
         )}
       </div>
@@ -531,11 +387,5 @@ async function attachmentFor(file: File, projectPath: string, translate: Transla
   throw new Error(translate('ai.composer.attach.unsupported'));
 }
 
-const MicGlyph = centralIcon(centralMicrophone);
 // Send is the return arrow (Central's arrow-corner-down-left), as in Claude's composer.
 const ReturnGlyph = centralIcon(centralReturn);
-
-/** The tag the recognizer listens for: the interface language, English as the United States'. */
-function recognitionLanguage(locale: string): string {
-  return locale === 'en' ? 'en-US' : locale;
-}

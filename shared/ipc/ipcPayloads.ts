@@ -1,4 +1,6 @@
-import { parseShadcnSettingsChange, parseShadcnSettingsRequest } from './shadcnSettings';
+import { parseCodeIntelRequest } from './codeIntel';
+import { FILE_EXPLORER_PAYLOADS } from './fileExplorer';
+import { DESIGN_SESSION_PAYLOADS } from './designSession'; // Design mode (experimental): docs/design-mode/REMOVE.md
 import { parseLocaleSet } from './localeChannel';
 import { parseMergeResolution } from './mergeResolution';
 import { parseAccountRequest } from './publishAccount';
@@ -60,11 +62,19 @@ import { parseAstroRemoteEdit, parseAstroRemoteRead } from '../properties/astroC
 import { parseStudioAuth } from './studioAuth';
 import { parseRepositoryRequest } from '../ipc/publishRepository';
 import { parseDevNetworkRequest } from './devNetwork';
-import { parseAstroCopyRequest } from './astroCopy';
-import { parseShadcnPresetRequest, parseStarterRequest } from './shadcnStarter';
+import {
+  parseAstroCopyRequest,
+  parseProjectSetupApply,
+  parseProjectSetupScan,
+  parseShadcnPresetRequest,
+  parseShadcnSettingsChange,
+  parseShadcnSettingsRequest,
+  parseStarterRequest,
+} from './astroCopy';
 import { parseCanvasCreate, defaultsCanvasFile } from '../properties/defaultsCanvas';
 import { parseDiscoveryRequest } from '../properties/publishDiscovery';
 import { parseWorkerSetupRequest } from '../properties/publishWorkerSetup';
+import { parseNetlifySiteRequest } from '../properties/publishNetlify';
 import { parsePublishCommitMessage, parsePublishTarget } from '../properties/publishConfig';
 import { metadataKind, parseMetadataWrite } from '../properties/projectMetadata';
 import { parseInstructionFilePath, parseInstructionPath } from '../properties/instructions';
@@ -312,6 +322,11 @@ export const IPC_PAYLOADS = {
   ...AI_PAYLOADS,
   // Settings > Agents (shared/ipc/projectAgentChannels.ts).
   ...AGENT_PAYLOADS,
+  // The Files panel (shared/ipc/fileExplorer.ts).
+  ...FILE_EXPLORER_PAYLOADS,
+  ...DESIGN_SESSION_PAYLOADS, // Design mode (experimental): docs/design-mode/REMOVE.md
+  // The code editor's suggestions, hover and squiggles (shared/ipc/codeIntel.ts).
+  'codeIntel:request': parseCodeIntelRequest,
   'instructions:create': object({ ...project, file: parseInstructionFilePath, source: text }),
   'instructions:createFolder': object({ ...project, folder: parseInstructionPath }),
   'instructions:list': object({ ...project }),
@@ -502,6 +517,7 @@ export const IPC_PAYLOADS = {
   'publish:discover': object({ ...project, request: parseDiscoveryRequest }),
   'publish:account': object({ ...project, request: parseAccountRequest }),
   'publish:workerSetup': object({ ...project, worker: parseWorkerSetupRequest }),
+  'publish:netlifySite': object({ ...project, site: parseNetlifySiteRequest }),
   'cmsConnections:list': object({ ...project }),
   'cmsConnections:save': object({ ...project, draft: parseCmsConnectionDraft }),
   'cmsConnections:remove': object({ ...project, id: parseConnectionId }),
@@ -775,6 +791,8 @@ export const IPC_PAYLOADS = {
   'project:pending': nothing,
   'project:resolveImport': object({ ...source }),
   'project:scan': pathText,
+  'project:setupScan': parseProjectSetupScan,
+  'project:setupApply': parseProjectSetupApply,
   'recents:add': pathText,
   'recents:list': nothing,
   'recents:refreshThumb': pathText,

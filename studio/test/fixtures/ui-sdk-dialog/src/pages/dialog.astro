@@ -1,0 +1,23 @@
+---
+import ProjectDialog from '../components/ProjectDialog.astro';
+
+const canonical = new URL(Astro.url.pathname, Astro.site);
+---
+
+<html lang="en">
+  <head>
+    <title>Project details</title>
+    <meta name="description" content="Project details and review notes." />
+    <link rel="canonical" href={canonical} />
+  </head>
+  <body>
+    <main>
+      <h1>Project details</h1>
+      <p>The project is open for review.</p>
+      <a href="/">Back to the overview</a>
+      <ProjectDialog label="Review notes">
+        <p slot="body">The team is reviewing the project this week.</p>
+      </ProjectDialog>
+    </main>
+  </body>
+</html>

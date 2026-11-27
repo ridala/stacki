@@ -1,0 +1,13 @@
+---
+import DialogIsland from './DialogIsland';
+
+interface Props {
+  readonly label: string;
+}
+
+const { label } = Astro.props;
+---
+
+<DialogIsland label={label} client:load>
+  <div slot="body"><slot name="body" /></div>
+</DialogIsland>

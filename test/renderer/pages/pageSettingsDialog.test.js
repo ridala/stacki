@@ -21,7 +21,10 @@ buildSync({
   stdin: {
     contents: `export { PageSettingsDialog } from './src/features/pages/PageSettingsDialog';
     export { default as PagesPanel } from './src/features/pages/PagesPanel';
-    export { default as PropsPanel, InstancePropFields } from './src/features/props/PropsPanel';`,
+    export { default as PropsPanel, InstancePropFields } from './src/features/props/PropsPanel';
+    export { pageSeoFields, validSeoText } from './src/features/pages/pageSeo';
+    export { PageSeoFields } from './src/features/pages/PageSeoFields';
+    export { componentReference, importedComponent } from './src/app/model/componentReference';`,
     resolveDir: ROOT,
     loader: 'tsx',
   },
@@ -417,4 +420,112 @@ test('the Folder dropdown shows a folder icon on every row and makes a new folde
   // Cancelled: the folder is gone back to the page's own, and nothing was written.
   assert.equal(document.querySelector('.page-settings-folder .dd-label').textContent, 'Pages (root)');
   assert.equal(setup.applied.length, 0);
+});
+
+test('SEO uses explicit layout roles and preserves bindings and inheritance', () => {
+  const { pageSeoFields, validSeoText } = require(output);
+  const { parsePropSchema } = require(repoPath('dist/electron/parse/astroPropSchema.js'));
+  const layout = fs.readFileSync(repoPath('studio/test/fixtures/site/src/layouts/BaseLayout.astro'), 'utf8');
+  const imported = fs.readFileSync(repoPath('studio/test/fixtures/site/src/types.ts'), 'utf8');
+  const schema = parsePropSchema(layout, imported);
+  const props = { title: { type: 'expr', value: 'entry.title' }, noindex: { type: 'expr', value: 'false' } };
+  const node = { kind: 'component', id: 'layout', name: 'Layout', props };
+  const fields = pageSeoFields(schema, node);
+  assert.deepEqual(
+    fields.map(({ role, value }) => [role, value]),
+    [
+      ['title', { kind: 'bound' }],
+      ['description', { kind: 'text', text: undefined }],
+      ['social-image', { kind: 'text', text: undefined }],
+      ['noindex', { kind: 'indexing', indexing: 'index' }],
+    ],
+  );
+  assert.deepEqual(pageSeoFields(schema, { ...node, props: {} }).at(-1)?.value, { kind: 'indexing', indexing: 'inherit' });
+  assert.deepEqual(pageSeoFields(schema, { ...node, props: { noindex: { type: 'bare' } } }).at(-1)?.value, {
+    kind: 'indexing',
+    indexing: 'noindex',
+  });
+  const spread = { type: 'spread', value: 'entry' };
+  assert.ok(pageSeoFields(schema, { ...node, props: { ...props, '...entry': spread } }).every(({ value }) => value.kind === 'bound'));
+  assert.equal(
+    pageSeoFields([...schema, { name: 'other', type: 'string', doc: '@seo title' }], node).some(({ role }) => role === 'title'),
+    false,
+  );
+  assert.equal(pageSeoFields([{ name: 'image', type: 'string' }], node).length, 0);
+  assert.equal(validSeoText('canonical', 'https://example.test/about'), true);
+  assert.equal(validSeoText('canonical', 'https://user@example.test/about'), false);
+  assert.equal(validSeoText('canonical', 'https://example.test/about#'), false);
+  assert.equal(validSeoText('canonical', '/about'), false);
+});
+
+test('the SEO section keeps bound values read-only and resets optional fields through the host', async (context) => {
+  const setup = fixture(context);
+  const writes = [];
+  await setup.show('about.astro', {
+    seo: React.createElement(setup.components.PageSeoFields, {
+      owner: '/site/src/layouts/Default.astro',
+      fields: [
+        { role: 'canonical', name: 'url', optional: true, value: { kind: 'text', text: 'https://example.test/about' } },
+        { role: 'title', name: 'title', optional: true, value: { kind: 'bound' } },
+      ],
+      write: (...args) => writes.push(args),
+    }),
+    layoutProps: React.createElement('div', {}, 'Other layout properties'),
+  });
+  const headings = [...document.querySelectorAll('.page-settings-section h3')].map((heading) => heading.textContent);
+  assert.equal(headings[1], 'SEO');
+  assert.equal(headings[2], 'Layout props');
+  const input = document.querySelector('.page-settings-seo-input');
+  assert.equal(input.value, 'https://example.test/about');
+  assert.equal(input.getAttribute('aria-invalid'), 'false');
+  assert.equal(document.querySelectorAll('.page-settings-seo-input').length, 1);
+  assert.deepEqual(writes, []);
+  await setup.click(button('Use layout default'));
+  assert.deepEqual(writes, [['url', undefined]]);
+});
+
+test('SEO refuses the name fallback when the layout import cannot be resolved', () => {
+  const { componentReference, importedComponent } = require(output);
+  const component = { name: 'Layout', path: '/site/src/layouts/Layout.astro' };
+  const reference = {
+    name: 'Layout',
+    project: '/site',
+    file: '/site/src/pages/about.astro',
+    imports: [{ name: 'Layout', path: 'custom:unresolved/Layout.astro' }],
+    components: [component],
+  };
+  assert.equal(componentReference(reference), component);
+  assert.equal(importedComponent(reference), undefined);
+  assert.equal(importedComponent({ ...reference, imports: [{ name: 'Layout', path: '../layouts/Layout.astro' }] }), component);
+});
+
+test('a different layout owner remounts an SEO text field even when its value and prop name match', async (context) => {
+  const setup = fixture(context);
+  const writes = [];
+  const show = (owner) =>
+    setup.show('about.astro', {
+      seo: React.createElement(setup.components.PageSeoFields, {
+        owner,
+        fields: [{ role: 'title', name: 'title', optional: true, value: { kind: 'text', text: 'Current title' } }],
+        write: (...args) => writes.push(args),
+      }),
+    });
+  await show('/site/src/layouts/One.astro');
+  const previous = document.querySelector('.page-settings-seo-input');
+  previous.value = 'Unsaved title';
+  await show('/site/src/layouts/Two.astro');
+  const current = document.querySelector('.page-settings-seo-input');
+  assert.notEqual(current, previous);
+  assert.equal(current.value, 'Current title');
+  assert.deepEqual(writes, []);
+});
+
+test('the SEO section shows the refusal for a page that could not be parsed', async (context) => {
+  const setup = fixture(context);
+  const reason = 'Duplicate title attribute';
+  await setup.show('about.astro', {
+    seo: React.createElement(setup.components.PageSeoFields, { owner: 'about', fields: [], reason, write: undefined }),
+  });
+  assert.ok(text().includes(reason));
+  assert.equal(document.querySelector('.page-settings-seo-input') ?? undefined, undefined);
 });

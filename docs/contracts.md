@@ -739,6 +739,30 @@ How the scan reads the disk:
 - A save never replaces a read-only file: `replaceFileAtomic` answers a `filesystem` failure naming
   the file (renaming over it would succeed and quietly override the protection).
 
+## Existing Astro project setup
+
+Desktop offers setup before starting the preview for an Astro project selected in the folder
+picker. An open project can request another setup report in Settings → Folders. The setup scan
+uses a bounded local inventory. It reads Astro configuration as text and never installs
+dependencies or executes project code. The project's ordinary open and preview still follow
+their existing lifecycle when the user continues to the editor.
+
+Only the main app frame can request setup. A native picker selection grants access to that
+directory identity. If a project opened through Recents, a drop or the command line has no
+grant, Settings asks the user to select the same folder before scanning.
+
+The setup report shows page discovery in Desktop and Studio separately. Its folder suggestions
+are limited to settings the editors already understand. The report includes before and after
+counts so a user can see when changing a folder choice would reduce an editor's catalog. A
+partial scan or an unresolved configuration is visible in the report. These counts describe
+source discovery rather than the URLs or metadata a host serves in production.
+
+Saving selected suggestions writes `.stacki/folders.json` through the project's witnessed metadata
+writer. The setup report carries a revision that must still match when the user saves. A stale
+report needs another scan and review. Existing explicit folder choices, CMS settings and
+unknown metadata keys are preserved. Setup does not move files, rewrite Astro configuration,
+build, publish or deploy the site.
+
 ## Other shared contracts
 
 - `brand.ts` constructs `NodeId`, `FilePath`, `ProjectPath`, `Digest`,
@@ -792,9 +816,29 @@ transport (`project:metadata` / `project:writeMetadata`, `/studio/api/metadata`)
 ```
 
 - Built-in `admin` and `client` are always present, admin first. Admin has every feature, stores no
-  `access`, and must name at least one member: the parser refuses a file that would leave no admin,
-  and the Roles tab refuses a save that would make the person saving it non-admin. `developer`
-  (Studio's old label) and `designer` (its old stored value) read as admin.
+  `access`, and must name a member as soon as any other role does: the parser refuses a file where
+  another role lists a member while admin lists none (`adminMembershipRefusal`), and the Roles tab
+  refuses a save that would make the person saving it non-admin. `developer` (Studio's old label)
+  and `designer` (its old stored value) read as admin.
+- Unclaimed: a file in which no role lists any member, admin included, is valid (`rolesClaimed` is
+  false), so a framework can ship its roles without naming a real person to every user. Its role
+  definitions, `defaultRole`, access, app permissions, pins and component rules load and are kept,
+  but access is exactly that of no file: `resolveRole` gives everyone the file's admin role (its pins
+  and component rules apply), the default role restricts nobody, the CLI's MCP server needs no
+  `--role`, and Studio's sign-in policy keeps `AUTH_BOOTSTRAP_ADMIN` as it does with no file
+  (`editorPolicy.ts`). It never changes who may sign in or edit. The first admin added claims it.
+  Editing one: Desktop's Roles tab and the Components panel change it as read and never add the
+  signed-in login (that happens only when creating a new file while signed in); the last admin may
+  be removed only while no other role has members; adding a member to another role while admin is
+  empty is refused (`roles.error.adminFirst`), and hosted Studio's invite form starts on admin.
+  Example:
+  `{ "version": 1, "defaultRole": "client", "roles": [{ "id": "admin", "name": "Admin", "members": [] },
+  { "id": "client", "name": "Client", "members": [], "access": ["panel:pages", "panel:cms", "publish"] }] }`.
+- Older versions refuse an unclaimed file as invalid (`At least one person must be an admin`):
+  Desktop still acts as admin, but its Roles tab reports the file unreadable and its next change
+  replaces the file with the built-in roles (losing the shipped definitions); hosted Studio keeps
+  the same sign-in rules as with no file, but every hosted write acts as the built-in Client role,
+  the owner's included; every `stacki` command refuses with `invalid-file`. Nobody gains access.
 - `client` without `access` gets `CLIENT_DEFAULT_ACCESS`, Studio's former Client mode: Pages,
   Navigator, Components, Assets, CMS, Git and the Settings panel; creating, renaming and deleting
   pages; publishing; Editor settings. It lacks `page:layout`, so its edits stay inside the page layout.
@@ -832,10 +876,14 @@ transport (`project:metadata` / `project:writeMetadata`, `/studio/api/metadata`)
   deny-list: no rule means visible, so new, moved and renamed components are enabled for every role with no
   migration. The most specific rule wins (component, then the nearest folder above it); a `show` rule
   re-enables one component inside a hidden folder. A rule for a path that no longer exists is kept, listed as
-  missing in the Roles tab and ignored. It only stops ADDING: the palette's All and Components results, folder
-  pills and counts, the Components panel, Desktop's `addComponent` and apps' `node.insert`, and Studio's room
-  (`insert` actions, and a text edit that newly imports a hidden component, refused with a typed
-  `component-hidden` Result before any write). Instances already on a page stay, stay editable, show in the
+  missing in the Roles tab and ignored. What a rule takes away depends on who holds it, and one rule answers
+  for every surface (`componentOffer`, same module). An **admin's** hidden component leaves only what searches
+  for something to add (the insert palette that ⌘K and every canvas "+" open, and the Tag and layout fields'
+  suggestions); the Components panel (its own filter box too) and the new-page layout dropdowns still list it,
+  its row dimmed with a "Hidden from search" tip, and adding it by hand is allowed. **Every other role** loses
+  it from all of those and may not add it: Desktop's `addComponent`, layout and kind changes, apps'
+  `node.insert`, and Studio's room (`insert` actions, and a text edit that newly imports a hidden component,
+  refused with a typed `component-hidden` Result before any write). Add elements lists no project components. Instances already on a page stay, stay editable, show in the
   Navigator, and may be copied, pasted or duplicated. It never changes `can()`, so a restricted admin keeps
   Settings. Nothing in the app moves or renames a component yet; `moveComponentRules` is ready for the
   rename that does, and until then a moved path shows as missing.
@@ -862,7 +910,7 @@ role's UI. It changes only the renderer's active role (`src/lib/currentRole.ts`:
 ## Settings panel and secrets
 
 The Settings rail button (`projectSettings`, access feature `panel:projectSettings`, admin only until a
-role is granted it; shortcut ⌥S) sits directly above the AI button and opens a panel whose root is a short
+role is granted it; shortcut ⌥Z) sits directly above the AI button and opens a panel whose root is a short
 list of links (`SETTINGS_VIEW_IDS` in `src/lib/settingsSections.ts`): Secrets, MCP and Instructions. A link
 replaces the panel with that view under a back chevron and the view's title; back, or Escape outside a field,
 returns to the root, and the panel always opens on the root unless something asked for a view
@@ -874,11 +922,24 @@ which lists Secrets and MCP with honest unavailable states and no Instructions. 
 Instructions view also closes the instruction file opened from its list (its edits are saved as the reading
 view unmounts, as with its own close button).
 
-Rail chords live in one table, `src/app/railShortcuts.ts`, which the keys, the tooltips and the Settings root
-rows all read (a test holds it free of duplicates): letters alone P Z ⇧A K J C G E, and ⌥C CMS, ⌥V Variables,
-⌥H Git, ⌥A Audits, ⌥S Settings, ⌥I Instructions, ⌥L AI chat, ⌥E Secrets, ⌥M MCP. ⌥P is the interactive
-preview. ⌥I, ⌥E and ⌥M open Settings at their view, and toggle the panel closed when that view is showing;
-⌥L toggles the AI chat. Each follows the role (no access, no key) and is ignored while typing in a field. It is the project's settings,
+Rail chords live in one table, `src/app/railShortcuts.ts`, which Desktop's and Studio's keys, the tooltips and the
+Settings root rows all read (a test holds it free of duplicates, the preview toggle among them). Each is ⌥ (Alt) plus a
+letter, matched on the physical key: E Add elements, P Pages, N Navigator, K Assets, D CMS, V Variables, G Git,
+C Components, B Apps, O Code, F Files, S Style selectors, U Audits, Z Settings, A AI chat, R Secrets, M MCP,
+I Instructions, Q Agents. Properties alone is a plain K. ⌥⇧P is the interactive preview; the right panel's Style and
+Settings tabs are plain S and D (`src/app/inspectorTabKeys.ts`). ⌥I, ⌥R, ⌥M and ⌥Q open Settings at their view, and
+toggle the panel closed when that view is showing; ⌥A toggles the AI chat. Each follows the role (no access, no key)
+and is ignored while typing in a field, a code editor or canvas text, so macOS dead keys (⌥E, ⌥N, ⌥U, ⌥I) still type
+there. With keyboard focus in the canvas, outside interact mode, the frame forwards them (`avb:shortcut` `panel` in
+Desktop, `studio:key` in Studio).
+
+Desktop alone also has ⌥⇧G (Alt+Shift+G), pull from GitHub, under the same typing rule and forwarded from the canvas in
+both modes (`avb:shortcut` `pull`). The chord, the title bar's pull button (drawn only while there is something to pull)
+and the Git panel share one session and lock (`src/features/git/useGitSession.ts`), so one pull runs at a time and the
+merge review opens with the panel closed. A pull is refused over the component defaults page, the component canvas, a
+property save, Design mode and the busy cover, and a role without `panel:history` has neither. Nothing pulls by itself.
+
+Settings (⌥Z) is the project's settings,
 apart from the app's own Settings screen (`src/app/settings`). Its Secrets view edits one of the project's dev env files
 at a time (`SECRETS_FILE_NAMES`: `.env`, `.env.local`, `.env.development`, `.env.development.local`, the
 dev server's load order), picked in a dropdown that opens on `.env`. `.env.production` is not listed.
@@ -1029,6 +1090,11 @@ A failed disk write applies only to the current session and is shown in the popu
 Disabling usage counts still aborts in-flight counting. Studio setup is available
 in the same popup when a project is open.
 
+The fork leaves `usageCountsURL` unset in `shared/core/desktopRelease.ts`.
+Desktop hides the count preference and sends no counts, even if an older
+saved preference enabled them. A release with its own counter asks users
+again before sending counts.
+
 `codeChips` (Settings > Editor > Code, "Show CSS chips in code"; default on, kept per person in
 `settings.json`) draws CSS values in the code editors as chips: variables as the purple chip, easings,
 clip-paths, shadows and gradients with a small preview that opens the Style panel's editor for that
@@ -1124,10 +1190,10 @@ Opening a project without saved guide preferences uses defaults in memory. It do
 `.stacki/breakpoints.json` contains `{ version: 4, desktop: { value, unit }, breakpoints: [...] }`
 (`shared/properties/projectBreakpoints.ts`): Desktop's frame width and an ordered list of `{ id, name?, value, unit }`,
 `unit` `rem` or `px`. Desktop is 90rem (1440px) unless set. It is **never a media query**: its only uses are the width of the
-Desktop frame in the side-by-side (all breakpoints) view and the line that decides on which side of Desktop a breakpoint is. The
-single canvas's Desktop button is the full available width, never scaled: a pane narrower than a breakpoint's canvas draws the page
-at the pane's width (scale 1), so its media queries switch to that layout, and the preview bar and the style panel's follow read
-the device that width belongs to (`activeDeviceFor`), a Laptop-wide pane as Laptop, never as Desktop. A breakpoint has no stored direction: it is DERIVED from its
+Desktop frame in the side-by-side (all breakpoints) view, the single canvas's Desktop width, and the line that decides on which
+side of Desktop a breakpoint is. The single canvas is the pane's own width and reflows; it draws that Desktop width, framed
+and scaled to fit, only while a pick of Desktop made in a pane too narrow for the desktop layout is held, and the next resize
+of the pane ends the pick (`DesktopPick`, docs/style-follow-canvas.md). A breakpoint has no stored direction: it is DERIVED from its
 number against Desktop's (`directionOf`). Wider than Desktop it is `up`, the query `width >= X` (mobile first), and its canvas is
 exactly X (100rem is 1600px); narrower it is `down`, `width < X`, canvas X less 1px (64rem is 1023px); equal to Desktop is refused.
 The defaults, with no file, are the Lumos 64rem, 48rem and 30rem breakpoints (ids `laptop`, `tablet`, `phone`, names read in the
@@ -1461,6 +1527,14 @@ metadata references too. The installed Studio CLI's
 
 ## Update popup
 
+The fork leaves `updateFeedURL` unset in `shared/core/desktopRelease.ts`.
+The File menu omits the update command, the renderer reads an idle state, and
+update actions have no effect.
+
+Before enabling updates for a branded distribution, configure its own feed
+and make the release workflow publish the matching installer and update
+metadata there.
+
 Auto-update never opens a native dialog. `electron/app/autoUpdate.ts` turns electron-updater's events into
 `UpdateEvent`s (`shared/ipc/updateState.ts`) and sends them on `update:state`; the renderer's popup
 (`src/features/update/`) draws them. A state is `idle`, `downloading` (bytes transferred, total or unknown,
@@ -1684,7 +1758,8 @@ The Publish menu owns push status and its independent repository link; the Git p
 local branches and commits. Saves and refreshed Git state invalidate the menu's count.
 
 `publish:discover` accepts `{ projectPath, request: { provider, account } }`, where provider is
-Cloudflare, Vercel or GitHub and an empty account requests available connections/linked projects.
+Cloudflare, Vercel, Netlify or GitHub and an empty account requests available connections/linked projects.
+A Netlify project also names its `account` (team slug), which its saved destination, a site ID, does not.
 `shared/properties/publishDiscovery.ts` parses bounded account labels and hosting destinations.
 Failures carry a sanitized message, never provider credentials or command output. Studio exposes
 the same discovery service at `/studio/api/publish/discover`; both hosts preserve saved publish
@@ -1700,9 +1775,16 @@ Studio exposes the same contract at `/studio/api/publish/repository`; hosted dep
 their managed repository as read-only because deployment and synchronization share that binding.
 
 Cloudflare Workers have their own `cloudflare-workers` hosting variant. Discovery also accepts
-`linked` to inspect local Wrangler/Vercel destinations before settings exist. A discovered Worker
+`linked` to inspect local Wrangler, Vercel and Netlify destinations before settings exist. A discovered Worker
 may have an empty account ID when its local name is known but its account is unresolved; the saved
 publish-config parser rejects that incomplete value. This prevents assigning an unrelated account.
+
+`publish:netlifySite` accepts `{ projectPath, site: { team, name } }`, parsed by
+`shared/properties/publishNetlify.ts` (Netlify's subdomain rule, bounded team slug), creates that
+site with `netlify api createSiteInTeam`, and returns `ready` with its name and Netlify hosting or
+`failed` with a described sentence, never CLI output. The settings choose it; Save writes it. Design
+mode refuses the channel. Studio exposes it at `/studio/api/publish/netlify-site`; hosted
+deployments refuse it, as they refuse account sign-in.
 
 `publish:workerSetup` accepts `{ projectPath, worker: { accountId, project } }`, parsed by
 `shared/properties/publishWorkerSetup.ts` (Cloudflare's Worker name rule, bounded account), and returns
@@ -2274,7 +2356,10 @@ roles with `panel:ai` and `code:edit`.
 **Main process** (`electron/handlers/ai/`, in the `handlers` area so it may use `lib`, `documents` and
 `git`). `agentRegistry.ts` pins each adapter (`@agentclientprotocol/claude-agent-acp`,
 `@agentclientprotocol/codex-acp`; docs/dependencies.md) and finds the person's CLI on the shell PATH
-(`lib/shellEnvironment.ts`, shared with the terminal). `agentInstaller.ts` installs on request into
+(`lib/shellEnvironment.ts`, the app's environment with the common tool folders added, which the
+terminal's login shell also starts from). The agents alone also get the sign-in settings set only in
+shell startup files (`lib/loginShellSettings.ts`, "Sign-in settings from the shell" below).
+`agentInstaller.ts` installs on request into
 `userData/agents/<agent>-<version>/`: staged, `npm ci --omit=optional --ignore-scripts` against the
 shipped lockfile (its SHA-256 pinned), the entry's SHA-256 checked, then renamed into place; the
 digest is checked again at every start. `agentHost.ts` runs one adapter per agent per project as
@@ -2463,8 +2548,8 @@ right after a component chip, or after one of its member chips, lists that compo
 values (a choice's options, a switch's `true`/`false`: its variants), then its slots. A `component` chip carries the
 project-relative file (the scan's `file`, relative to the project root the agent runs in, whatever the components
 folder or the project's depth in its repository; a package component's path is made relative the same way); a
-`member` chip carries that file, `role` (`prop` or `slot`), `name` and, for a prop, an optional `value`. Neither is a
-prompt part: `promptPartsOf` and `plainTextOf` write each as its compact reference inside the text, and nothing else
+`member` chip carries that file, `role` (`prop` or `slot`), `name` and, for a prop, an optional `value`. The agent
+reads each as its compact reference inside the text (`plainTextOf` writes the same), and nothing else
 (no type, description, schema or file contents): `src/components/Hero.astro`, then `prop:variant=large`,
 `prop:title` or `slot:header`; a token that is empty or holds whitespace, `"`, `=` or a control character is a JSON
 string; a member not right after its component (only whitespace or that component's members between) carries the
@@ -2480,6 +2565,27 @@ feature may not import the props feature, so `src/app/shell/aiMemberField.tsx` r
 the component chip, a cleared one (or the default) removes it, and a row's include dot toggles `prop:name`. Each change
 is one isolated history event and leaves the caret where it was; Tab moves between controls and Escape returns focus
 to the composer.
+
+**Add to chat** (`shared/properties/ai/mentions.ts`, `src/features/ai/addToChat.ts`,
+`src/app/shell/aiAddToChat.ts`). A selection (the Code panel's selected text; or the selected element, from the
+composer's "+" menu "Add selected …", the canvas or Navigator menu, the Code panel or ⌘L / Ctrl+L) becomes two chips
+at the composer's caret: a `code` chip (path, lines, element name and the code as it read when added, unsaved text
+included) and a `page` chip (the file it is in: `page`, `layout`, `component` or `file`, plus `viewedOn`, the page on
+the canvas when that is another file). No route adds component or member chips; those come from `@`. Every element
+route is one function, which saves pending edits first and cuts the element, opening to closing tag with all its
+children, from the saved file; on the component canvas's generated page it is refused with a toast. Bounds
+(`AI_LIMITS`): `codeChipCharsMax` per selection, `codeChipsMax` and `codeChipsCharsMax` per message; a selection past
+one, or past `promptCharsMax`, is refused with a toast and never cut.
+
+**What a message keeps.** A prompt's parts are `text`, `file`, `skill`, `builtin`, `reference` (a component,
+element, member, CSS, asset or page chip with the words the agent reads) and `code`. The host sends a reference's
+words inside the text, and a code part as its own text block, fenced with more backticks than the code holds, never
+read from disk and never the message's last text block (`@` in selected code is not a mention). The stored `user`
+event keeps every chip (`SentPart` kind `chip`), so the transcript, a reopened chat, Edit, Resend and Retry have
+them; chats stored earlier hold reference chips as words and read as before. `sentMessage.ts` turns a stored message
+back into its draft and into the plain text Copy gives (the button and a selection, `chipCopy.ts`): each chip written
+out where it stood, code under a line with its path and lines. Every chip shows its value in a card on hover or
+keyboard focus (`useChipCard.tsx`).
 
 **Protocol capabilities Stacki declares.** The host declares only open ACP capabilities
 (`session.compaction`, `session.notices`, `_meta.terminal_output_delta`; not `jetbrains`, not
@@ -2527,6 +2633,82 @@ sign-in ends ready, failed (with the CLI's output), cancelled or timed out. Sign
 logout`, `codex logout`. The CLI stores the credentials; Stacki reads only what the status command
 prints, shows the account's name and plan, and the email only inside the account menu (held in
 memory, never stored or logged). Setup is detected again each time a chat opens and after each step.
+
+A status check answers `ready`, `signed-out` (the CLI said so) or `unchecked` (it timed out after
+`statusMsMax`, crashed, or printed something unreadable). Claude's answer is read from normal output
+only; Codex answers on the error stream, so both are read. `unchecked` blocks nothing: a quiet note
+under the composer checks again when pressed, as does focusing the window or opening the chat, and main
+retries on its own after each of `STATUS_RETRY_DELAYS_MS` and then stops. An agent that refuses a
+prompt still shows the sign-in card. A `ready` account carries `source` (`account`, `api-key`, `token`
+or `cloud`), the kind only; anything but `account` is named under the composer, because it may be
+billed differently. `api-key` and `cloud` are Codex's alone.
+
+**Claude on a subscription only** (`lib/claudeSubscriptionOnly.ts`, `agentSetup.ts`). Three layers, each failing closed.
+
+1. *Routes switched off.* Every Claude process the panel starts (status, token check, sign-in, sign-out, install, MCP
+   commands, the adapter, so chats, pin subagents, resumed and forked chats and model listing) has
+   `CLAUDE_BLOCKED_VARIABLES` removed (API key, bearer token, API address, extra headers, Unix socket, named and
+   federation profiles, the Bedrock, Mantle, AWS, Vertex, Google Cloud, Foundry and gateway switches),
+   `ANTHROPIC_CONFIG_DIR` pointed at the null device, and the flag settings `CLAUDE_SUBSCRIPTION_SETTINGS`: an empty
+   `apiKeyHelper`, the same variables empty and the same folder (`--settings`; through the adapter,
+   `_meta.claudeCode.options.settings` on every session request). Why both: a settings file's `env` block replaces the
+   inherited environment, and command-line settings rank above user, project and local files. With Claude Code 2.1.332,
+   made-up credentials and a local fake API, each route planted at each of those levels was neutralised. Commands the
+   agent runs inside a session see the same empty variables.
+2. *Proof of a subscription* (`readClaudeStatus`). Signed in needs `apiProvider` `firstParty` and either `authMethod`
+   `claude.ai` with `subscriptionType` `pro`, `max`, `team` or `enterprise`, or `authMethod` `oauth_token` that the
+   token check names `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`). `auth status` says `oauth_token` for every
+   token, so the check (`CLAUDE_TOKEN_CHECK_ARGS`) writes only the `initialize` control request, which sends nothing to
+   the model, and reads `account.tokenSource` (within `tokenCheckMsMax`; the CLI calls Anthropic first for a token, so
+   offline this is slow and then unchecked). Anything else, including a claude.ai sign-in without a plan and a method
+   not known here, is `signed-out` with `reason: "not-subscription"`: the card says a subscription sign-in is needed.
+   `permit` asks again for every message and new session (messages asking together share one check). While the status
+   cannot be checked the composer still takes typing, but the send is refused (`ai.error.signInUnchecked`).
+3. *What the running session says* (`shared/properties/ai/claudeBilling.ts`). Every session asks the adapter
+   (`_meta.claudeCode.emitRawSDKMessages`) for `system`/`init` and `rate_limit_event`, passed on as
+   `_claude/sdkMessage`. An `apiKeySource` other than `none` cancels the turn and holds Claude `signed-out` with
+   `reason: "billed"` until a sign-in or sign-out in Stacki (or a restart). `/login managed key` is also reported
+   beside a subscription that pays, so it asks the status again and stops only when that finds no proven subscription.
+   `rate_limit_info.isUsingOverage` puts `billing: "extra-usage"` on the `ready` state until a later event says
+   otherwise or `resetsAt` passes. Both billing states show `BillingWarning` or its card ("Billed per use, not your
+   subscription"), in the panel and, because pins start work without it, under the comment pins' bar.
+
+What this cannot see: managed (organisation) settings outrank the command line. A key, token or cloud provider they set
+fails the proof; a custom API address they set is reported nowhere. Extra usage is only known once a reply reports it,
+and an API key a session picks up is only known as its turn starts, so that one request may already be charged. Whether
+a `CLAUDE_CODE_OAUTH_TOKEN` was made by a subscription is taken from its documented meaning. `CLAUDE_CONFIG_DIR` is not
+a billing route; the sign-in in that folder is checked like any other. Codex and the built-in terminal are unchanged.
+
+**Sign-in settings from the shell** (`lib/loginShellSettings.ts`; macOS and Linux). An app opened from
+the Dock never runs shell startup files, so the person's shell is run once per app run, as a login and
+interactive shell (`-ilc`, as the terminal behaves), the first time an agent is checked or started:
+never at boot, asynchronously, within `LOGIN_SHELL_LIMITS`, and its `env -0` is read between two
+random marks. Only the names in `SIGN_IN_SETTINGS` are kept (for Claude, nothing that changes how it is billed), each
+agent gets only its own, and the app's own environment wins. They reach
+the agent's status, sign-in and sign-out commands and its adapter, never installers, the dev server,
+git or the window; values are never logged or stored. A read that fails leaves the app's environment.
+Windows reads nothing: user and system variables already reach the app, and variables set only in a
+PowerShell profile are not read. A custom Codex provider's own `env_key` variable cannot be listed.
+
+**MCP server sign-in** (`ai:mcpAuth`, push `ai:mcpAuthState`; `shared/properties/mcp.ts`,
+`mcpSignIn.ts`). The MCP tab and a note above the AI composer sign servers in through the agent's own
+CLI, in the project folder, with the environment the agent's sessions start in, so the token lands
+where they read it and lasts across chats and restarts; Stacki handles no token. Claude: status from
+the `Status:` line of `claude mcp get <name>`; sign in with `claude mcp login <name> --no-browser` in
+a pseudo-terminal (it gives up without one; nothing is typed); `claude mcp logout <name>`. Those
+refuse a `.mcp.json` server not yet approved in Claude's own screen, so each gets
+`--settings {"enabledMcpjsonServers":["<name>"]}` (with the subscription settings in the same argument): one server, one command, written nowhere; a
+rejected server stays rejected. Codex: `codex mcp list --json` (`auth_status`),
+`codex mcp login <name> [--no-browser]`, `codex mcp logout <name>`. A CLI whose help lists no
+`mcp login` is too old and says so. With `--no-browser` main opens the printed page itself, only an
+https address without a user name; the page never reaches the window or a log, and the CLI receives
+the localhost callback. States: `none` (local commands, servers with their own Authorization header,
+and whatever the CLI says needs none), `needs-sign-in`, `connected`, `signing-in` (at most
+`signInMsMax`), `unknown`, `not-checked` (the project may not run agents yet, so no Claude server is
+contacted until the person presses Check), `unsupported-cli`, `blocked`. After a sign-in or sign-out
+idle adapters are restarted. Only names the project's `.mcp.json` or Codex lists are shown. Roles:
+the rows need the AI panel's access (`panel:ai` and `code:edit`). Design mode refuses the channel.
+Studio has neither the MCP tab nor the panel; a host without the bridge draws nothing.
 
 **Trust and opening.** Opening the panel in a project allows agents there and is remembered, unless
 Settings → AI "Ask before allowing agents in a new project" is on (then the trust card asks first).
@@ -2693,6 +2875,174 @@ round-trip and bounds; ledger keep, undo, drift and snapshots), `test/renderer/a
 unread, drafts), `test/renderer/ai/chatStatus.test.js` and `test/renderer/ai/aiPanel.test.js` (the panel
 in jsdom).
 
+## Comment pins
+
+Comment mode (a button in the AI panel's header, `src/features/ai/panelModes.ts`) turns canvas clicks into numbered
+pins, each a small message of its own, and "Send all" sends the included ones at once, whatever else is running. Desktop
+only: the shell's host (`src/app/shell/DesktopPins.tsx`) registers the mode, so Studio and the demo never offer it.
+
+**Mode buttons.** `registerPanelMode({ id, order, label, icon, isActive, setActive, subscribe })` adds a mode and
+returns its removal; the header (`sessions/ModeButtons.tsx`) draws one icon button per registered mode, in `order`,
+right before "+", its tooltip and accessible name the mode's `label`, pressed (`aria-pressed`, accent) while it is
+on; clicking it again turns the mode off. A mode that is not registered has no button. Turning one mode on turns the others off
+(`setPanelMode`). At most `PANEL_MODES_MAX` (8). Comment pins register `comment-pins` at order 10
+(`pins/commentMode.tsx`); another mode registers from its own file and removing that file removes only its button.
+
+**Contract** (`shared/properties/ai/commentPinBrief.ts` under the chat model, `commentPins.ts` above it). A pin is
+`{ id, number, createdAt, updatedAt, comment, segments?, images, anchor, place, included, delivery }`: `anchor` is the canvas
+path clicked (`<file>|` scoped inside an open component), the copy, the point in the box (0 to 1) and the element's
+tag and words; `place` is the page, its display name, the open component, the element's file, locator and name, an
+instance's component file and the canvas width. `delivery` is `draft` or `sent` (chat, turn, mode `subagents` or
+`single`). `comment` and `images` are what was saved (`savedAt`, absent on a pin never saved); `edit` is what its box
+holds unsaved, kept on the board so a crash loses nothing and never sent. Save (or Enter) needs words or an added image
+(a crop alone is not a comment); the close button and Escape drop a pin never saved and only the unsaved changes of a
+saved one (the latter has an Undo toast). Removing a pin (that way, or Delete in the list) shows no toast: it is a
+command on the app's undo history (`pushCommand`, installed by the shell as `setPinHistory`), so Undo and Redo take it
+in order with every other change, restoring its words, chips, images, model and number; a pin Stacki deletes because
+its work finished is not recorded; a press elsewhere, another pin, leaving the mode or the page save a box with content and
+let an empty one go. A draft's marker drags onto another element (anchor, place and crop renewed; words, changes and
+number kept; Undo in a toast); a sent pin does not move. While comment mode takes the canvas, the frame's forwarded edit
+keys (`avb:shortcut`, except Escape and ⌥P) are dropped (`canvasClicksIntercepted`). Bounds `PIN_LIMITS`: 40 pins, 4,000
+characters a comment, 4 images a pin, the board's images within `boardImageCharsMax` (40 crops of 1.5 million
+characters). The board is the only bound on running pins: one send holds all 40 and their 160 images
+(`pinsPerSendMax`, `sendImagesMax`; `ai:prompt` allows past an ordinary message's attachment bounds only for a
+`subagents` pins message). `parsePinBoard` is total (a damaged pin is left out
+alone); `parsePinBoardStrict` (what a writer sends) refuses the whole board.
+
+**Mentions.** The box takes `@` as the chat does. `comment` is always the words' plain text, each chip as the reference
+the chat's composer sends; `segments` (the chat draft's own shape and bounds, `parseDraftSegments`) is kept only while
+there is a chip, on the pin, its `edit`, its brief entry and its sent pin, so older pins read unchanged. Chips that do
+not parse, or whose plain text is not `comment`, are dropped and the words stay (`pinSegmentsField`). On send, the
+files, skills and built-in instructions the pins mention travel as `parts`, each once, at most `mentionsMax`, after a
+line "Pin <n> mentions:"; every other chip is already in the comment. A component mention that no longer matches the
+project refuses the send, as in the chat.
+
+**Storage** (`electron/handlers/ai/pinBoardStore.ts`): `userData/ai/projects/<sha256(realpath)>/pins/board.json`
+(replaced whole after a 400 ms pause in typing) and `pins/images/<id>.bin` (each written once, removed by the save
+that stops naming it). Never in the project. Unlike a composer draft, a pin's images are stored: the crop of what it
+points at is the point. Channels `ai:pinsRead` (`{ projectPath }`, answers the board and the images still on disk; a
+missing image leaves its pin) and `ai:pinsWrite` (`{ projectPath, board, images }`, the images not stored yet;
+`invalid` when the board's images would pass the bound, nothing changed). A pin stored as sent with no turn (an older
+Stacki's queue) reads back as a draft.
+
+**Anchoring** (`pins/pinModel.ts` `resolveAnchor`). The stored path holds while the open file's element there has the
+pin's tag (and words, when both have some); otherwise the one rendered element with that tag and words is the
+element moved (the pin follows it); with none, the same tag at the path is the element with its words edited; else
+the pin is detached (kept, listed, offered "Move the pin"). Markers are drawn in the canvas overlay layer from the
+same measurements as the outlines (`extraTrackPaths`), so they follow scrolling, zoom and breakpoints. Clicks go to
+`canvasClickSlot.ts`'s interceptor, ahead of any Stacki app.
+
+**Send.** `ai:prompt` takes `pins` (`PinBrief`: mode and per-pin number, comment, names, page, file, locator, tag,
+words, component, width, image indexes). The renderer sends the pins' images as the attachments, each with the note
+`Pin 2, image 1: …`, and plain `text` ("Comments on 3 pins" and one line per pin). The host
+(`promptBlocks.ts`, `pinInstructions.ts`) puts a `<comment-pins>` text block first and records the user event with
+`text`, each pin's first picture only, and a `pins` sent part (number, comment, page and element names, thumbnail index): never the instructions,
+a path or a locator. A pin naming an image the message lacks is `invalid`; pins never steer (`ai.error.pinsSteer`).
+
+**Where a send goes** (`pinStore.ts` `sendAllPins`). A send never waits for what is running. It goes to the open chat
+while that chat is idle (no reply running, nothing queued; a new chat, opened, when none is open). While the open chat
+answers, the pins get a chat of their own, made and sent to in the background (`aiStore.ts` `newBackgroundChat`): the
+open chat stays open, is neither steered nor stopped, and a toast says where they went, with "Show chat". The new chat
+starts with the open chat's settings, except a mode that skips every permission. A chat that turns out to be answering
+(`busy`) is left alone and the pins go to a chat of their own. The pins of a send are taken before anything is awaited
+(`sending`, read as "Waiting"), so no pin is ever in two sends; a pin at work (`pinRunning`) has no Reopen, and an Undo
+never replaces it with an older draft. Each send is its own chat's reply: its permission cards, questions, changes,
+sign-in check, billing watch and Stop are its own. Transcripts of running chats and of chats sent pins name stay in
+memory past the usual 16 (`holdChatViews`). A chat that only ever held sends of pins in this run lets its adapter
+session go (`session/close`) when each reply ends, which frees that session's CLI process; a later message resumes it
+(`agentHost.ts` `closeFinishedPinSession`). Permission cards waiting at once are bounded at 128 and requests to one
+adapter at 128 (`aiLimits.ts`).
+
+**Replies that overlap** (`electron/handlers/ai/parallelWrites.ts`). Each reply's ledger snapshots the whole tree, so
+while replies of one project overlap, each hears which files the others' edit calls write. Its changes card then leaves
+out a file only another reply wrote, and refuses to undo (`ai.error.sharedChange`) a file both wrote, or one none of
+its own calls named (a shell command's work cannot be told apart). A reply that ran alone is tracked as before.
+
+**Pictures for subagents** (`electron/handlers/ai/pinPictures.ts`). A subagent gets only the words of the Agent
+tool's prompt, never the message's images. So for a `subagents` send the host also writes each pin's pictures to
+`userData/ai/pin-pictures/<project>/<chat>/pin-<n>-image-<k>.<ext>` (owner-only, never in the project), lists each
+pin's own paths in its lines of the instructions, and asks the main agent to pass them on for the subagent to open
+with its Read tool. The message itself carries no image blocks: a full board's would be far more than one message may
+hold. Every Claude session of the project gets one added permission
+rule, `Read(//<that project's folder>/**)`, in its flag settings, so those reads do not ask. A chat's pictures are
+removed when the turn ends, unless a pin asked a question, and in any case at its next pin send, when the chat is
+deleted and when the agents stop; folders a day old (a crash's) are swept when the host starts. A picture that cannot
+be written refuses the send. A managed policy that ignores added rules would make the read ask on a permission card.
+
+**Per provider** (`agentPresentation.ts` `pinSends`). Claude (`subagents`): one message; the instructions ask for one
+Agent call per pin titled `Pin <n>: …`, every call in one single message, so all start at once, shared files included.
+Claude Code 2.1.332 refuses the 21st subagent running at once in a session ("Concurrent subagent limit reached… Do not
+retry"), so Stacki starts Claude's adapter with its documented `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` at 60
+(`subagentsAtOnceMax`), keeping a value the person set (`agentHost.ts` `pinsEnvironment`). Checked with the shipped
+adapter and a local fake API: 24 ran at once, and a reply in a second session finished while they ran; the CLI alone
+ran 40 and 250. Whether the model puts every call in one message is the model's doing, and rate limits are the
+account's. What keeps edits apart, across subagents and sessions: the CLI's edit tools replace an exact passage in the
+file as it is, so another's change made meanwhile survives (checked across two sessions); the instructions forbid
+whole-file rewrites, writing files with shell commands and project-wide rewrites. That safety is the CLI's, asked for
+in words: Stacki does not see or gate those writes, and the person's own chat reply is not given these rules. Codex
+(`single`): Codex's own subagents send the panel nothing but their start, so each pin is a message in a chat of its
+own, all sent at once through the one adapter's sessions (one pin to an idle chat uses that chat). This relies on the
+adapter taking several sessions' turns at once, as ACP allows and the panel already does for two chats; it was not
+run against a real Codex adapter. One pin of a Claude send cannot be stopped on its own: Stop is its chat's and stops
+that send, never another.
+
+**A pin's model.** A draft's box has a model dropdown (`PinModelPicker.tsx`) of model names, one row per model
+(`pinModelRows`). An untouched pin follows the chat's model, whose row is the checked one; picking that row makes a pin
+follow the chat again, and a pin that had chosen that same model keeps its choice. A chat model that is not among the
+choices, or has no known name ("Chat model"), gets its own row, first. The choice is the pin's `model` (`{ agent, value, name }`, parsed with the board; absent on older pins).
+A subagent takes only `SUBAGENT_MODELS` (`opus`, `sonnet`, `haiku`, `fable`), so Claude lists only those; its brief and
+sent pin carry `model` and `modelName`, the instructions ask for it as the Agent call's `model`, and the sent card
+names what the call really asked for when it differs. For one message per pin, a pin with a model goes to a chat made
+with that model: no chat's model is switched. A model no longer available runs
+on the chat's, said in a toast. Effort is not per pin: it stays the chat's setting.
+
+**How a sent pin stands** (`pinModel.ts` `pinProgress`). In order: an open question about it; a permission card its
+work waits on; its newest subagent, in the send's reply or any later one (a person can have it resumed or restarted);
+else the reply it is in. "Needs you" is only ever the first two, so there is always something to answer: the badge
+shows the card, or opens the message box on that pin. A question is a written line, `Question for pin <n>: …`, with the
+choices listed under it (`pinQuestionsOf`; the instructions ask for it): neither agent can show a question card here
+(Claude's question tool is off for a client without ACP `elicitation`). Words that ask without that form are not
+detected. The pin shows the question, its choices as buttons and Reply. A reply opens with the pin's quoted words
+(`pinReplyLead`) and answers that pin; a message opening with no pin's words answers every question before it. A pin
+not done reads "Didn't finish", "Stopped" or "Not started"; "Waiting" is a pin on its way, or one whose subagent has
+not started yet.
+
+**When an agent has finished** (`subagents.ts`). A call that returned its result finished. A call that returned the
+background launch note did not: Claude's adapter reports a background agent's end only to JetBrains clients, but for
+Stacki it holds the turn open until every agent that turn started or woke has finished. So while that turn runs the
+agent reads "In the background" (its tooltip says its end is not reported); a turn that ends `end_turn` proves it
+finished; any other end means it did not. A follow-up that wakes an agent moves it to the follow-up's turn. Codex's
+"Start subagent" call proves only the start ("Started"). A chat read back with a turn nothing runs any more is given an
+error end (`closeInterruptedTurns`). Chunks of different ACP `messageId`s are separate messages. The strip, the cards,
+the Running panel and pin badges all read the same `deriveSubagentWork`; each state has its own mark shape, and the
+strip's head counts each apart, saying "finished" only when all are done. Proofs: `test/renderer/ai/pinLifecycle.test.js`.
+
+**The bar and the list.** The pins' bar stands at the bottom centre of the canvas (16 px up), clear of the page's own
+navigation, and stacks upward (the billing warning over it). It has no drag and no saved place. Toasts and the
+refused-save notice start above it; while a pin's crop is taken the bar and toasts are hidden; in Design mode, which
+has its own bar and canvas, it is not shown. A pin's box ends above it. The list opens upward, centred on the bar and
+kept in the window (`PinList.tsx` `listPosition`), at most 520 px high with its own scroll, with the bar's edge and no
+shadow; it stays open through the chat's own scrolling, and toasts wait under it. A sent pin's row has a one-line live
+status (`PinLiveLine.tsx`): the AI panel's agents-list mark, words (`statusLine`, `activityText`; a search or fetch
+reads "Searching" or "Fetching") and clock for that pin's own subagent (`pinModel.ts` `pinWork`); the reply's own
+newest step only when the reply works on that pin alone; "Starting" with no clock before then; "Waiting", or the end's
+word with no clock.
+
+**Finished pins are deleted** (`pinModel.ts` `pinFinished`, `pinStore.ts` `deleteFinishedPins`). A sent pin that reads
+done leaves the board by itself (marker, open box, list row, and its images with the save). Failed, stopped, not
+started, asking, waiting and running pins stay with their status. A finished pin holding words typed after the send
+and not saved becomes a draft with them instead. The chats sent pins went to are read on load (`aiStore.ts`
+`loadChatView`), so pins that finished while the app was closed go too. The chat's message keeps its own words and
+thumbnail.
+
+**Transcript.** A message with a `pins` part is drawn by `pins/PinsMessage.tsx`: each pin's words and names, its
+status (opening its subagent when it has one) and its thumbnail at the row's end; no pin numbers (the chat refers to
+none: subagent titles are shown without their `Pin <n>:`, `withoutPinNumber`, which matching still reads). A pin still
+on the board opens on the canvas. No
+Edit or Resend. Proofs: `test/shared/properties/ai/commentPins.test.ts`, `test/electron/handlers/ai/pinBoardStore.test.ts`,
+`test/electron/handlers/ai/agentHostPins.test.ts` (the stand-in adapter as Claude's coordinator),
+`test/renderer/ai/pinModel.test.js`, `test/renderer/ai/pinStore.test.js`, `test/renderer/ai/pinsMessage.test.js`.
+
 ## Voice input
 
 The composer's microphone (`src/features/ai/useDictation.ts`). Audio never crosses IPC: the
@@ -2757,6 +3107,8 @@ version 2; settings at their defaults are left out of the file.
 It travels as the `audits` metadata kind through `project:metadata` / `project:writeMetadata`
 (writes need `panel:audits` or `settings:audits`). An id is `findingId`
 (`shared/page/auditFindings.ts`): check (`custom:<id>` for a custom audit), file, structural path and detail.
+A broken link listed at the usage that passes its value keeps the id it would have had on the component that
+draws it in `formerIds`, so an entry saved under that id still hides it.
 
 `audit:measure` loads one route of the loopback dev server in a hidden, sandboxed window with its
 own session and answers `{ ok: true, measurement }` or `{ ok: false, message }`. The measurement is
@@ -2965,3 +3317,106 @@ The worker reads the model through `stacki-model://whisper/<model>/<revision>/<f
 only manifest files of an installed model. Messages between the page and the Whisper worker are a
 boundary too: `parseToWorker` and `parseFromWorker` (`whisperWorkerProtocol.ts`) bound audio to the
 30-second window and text to `segmentCharsMax`.
+
+## Files panel
+
+The Files panel (`src/features/files/`, Desktop's host `src/app/shell/DesktopFiles.tsx`) lists, opens, edits, creates,
+renames, moves, copies, trashes, imports, reveals and finds every file and folder of the open project, VS Code's Explorer
+as the model. Its contract is `shared/ipc/fileExplorer.ts`; main's side is `electron/project/explorerPaths.ts` (where a
+path lands), `explorerOps.ts` (what is done), `explorerWatch.ts` (live changes) and `electron/handlers/fileExplorerHandlers.ts`.
+
+Channels: `files:list`, `files:read`, `files:write`, `files:create`, `files:rename`, `files:transfer` (move or copy),
+`files:trash`, `files:import` (files dropped from the operating system), `files:reveal`, `files:find`, `files:watch`,
+`files:guardClose` and `files:allowClose`; events `files:changed` (`{ directories }`) and `files:closeRequested`. Every
+reply but the last three is `{ ok, value } | { ok, error }` with an `ExplorerError` (`code`, the taken `names` of a
+collision, and for `filesystem` the system's error code; never a path or file contents).
+
+- **Paths.** An `ExplorerPath` is project-relative with `/`, no empty, `.` or `..` segment, no backslash or control
+  character, at most 4,096 units and 128 segments; `''` is the root. Main accepts a request only for the project it has
+  open, resolves every path with `realpathSync.native` and refuses one whose real location is outside the project
+  (`outside`). An entry acted on as itself (rename, move, copy source, trash) is never followed: a link is renamed,
+  moved or trashed as a link, and its parent's real location must be inside the project.
+- **Dot-folders and `.git`.** Nothing is hidden: dotfiles, `.stacki`, `.github`, `.vscode`, `.astro` and `.git` are all
+  listed, expandable and readable, and find matches their names. `.git` and `.stacki/io` (the document actors' locks
+  and staging) are read-only from the panel: no write, create, rename, move, copy into, or trash, whatever the case of
+  the spelling, and also when a link resolves into them (`protected`). Find does not walk the inside of `.git` or
+  `node_modules` (generated and large), but matches their own names.
+- **Bounds.** A listing returns at most 5,000 entries, folders first in natural order, with the folder's `totalCount`;
+  text opens up to 8 MiB; a batch names at most 1,000 items; a copy is walked first and refused past 20,000 entries or
+  2 GiB; at most 512 folders are watched (the expanded ones and the open file's); a find visits at most 100,000 entries
+  and returns 200 matches, saying when it stopped early.
+- **Reading and saving.** A file opens as text only when it is strict UTF-8 with no NUL in its first 8 KiB; anything else
+  is `binary` or `too-large` (never decoded lossily, never written), and images, video and audio are `media`, previewed
+  through the `stacki-asset` scheme. A leading byte-order mark is a flag, not text, and is put back on save. The editor
+  edits `\n` text and puts each untouched line's own break back (`shared/core/lineBreaks.ts`), so a save changes only
+  the bytes the person edited. `files:write` goes through the file's document actor and is witnessed by the checksum the
+  text was read with: a file that changed since is `conflict`, never written over. Saves are explicit (⌘S / Ctrl+S or
+  Save). Unsaved text is settled (save, discard or stay) before the editor shows another file or closes, before the
+  project closes (`leaveProject`), and before the window closes or the app quits (main holds `close` and `before-quit`
+  while `files:guardClose` says text is unsaved, asks with `files:closeRequested`, and goes on after `files:allowClose`).
+  An outside change reloads a clean editor and is a conflict (keep mine, use theirs, or merge) for a dirty one.
+- **Single writer.** A file the canvas has open (the page, or the component drilled into) is not edited by the panel's
+  writer: the file editor shows the Code panel's editor for it, which writes through `page:edit`. A Files save of any
+  other file is announced as the project watcher announces an outside edit (`fs:changed`, `css:changed`, `cms:changed`).
+- **Never overwrite.** Create and rename refuse a taken name (`exists`); a rename that differs only in case and finds the
+  same entry goes through a free name in the same folder, so it works on case-insensitive disks. Move, copy and import
+  answer `collision` with the taken names; the renderer asks and sends `keep-both` ("name copy.ext", "name copy 2.ext")
+  or `replace` (the old entry goes to the Trash first). Copies are created with `COPYFILE_EXCL`; links inside a copied
+  folder are copied as links. Deleting is `shell.trashItem`, after the app's own confirm dialog.
+- **References.** A page or page folder under the pages folder moves through `page:move` / `pagefolder:rename` (links,
+  imports, `.stacki/pages.json`), and a component file under a component folder through `component:rename` (imports,
+  tags, `.stacki/components.json` recipe keys, roles); both keep their own Undo. Every other move is plain: no code is
+  rewritten. Plain renames and moves record an Undo step that moves the entries back (refused, never forced, when the
+  old name was taken meanwhile).
+- **Ready before it opens.** The app shell mounts `FilesKeeper.tsx` for the open project whenever the role may use the
+  panel. It reads the root and the folders left open (never a closed one, so `node_modules` stays unread), follows them
+  with `files:watch` while the panel is closed too, reads them again on `files:changed` and on window return, and reads
+  a folder again when it is opened, keeping the held listing on screen. So the panel's first frame is the tree. A
+  `files:list` that rejects, refuses or does not answer in 10 s is a failure: no placeholder rows stay, the open panel
+  says so in a toast and offers Refresh (a listing already held stays on screen).
+- **Git marks.** `files:gitStatus` (`shared/ipc/fileExplorer.ts`, read by `electron/git/gitFileStatus.ts` from the
+  porcelain the Git panel reads) answers `none` outside a repository, `too-many` past 20,000 changed entries (the panel
+  then marks nothing and says so once, never a partial list), or the changed and ignored entries relative to the project,
+  which may sit below the repository's root. An untracked or ignored folder is one entry. Past 20,000 ignored entries
+  nothing is dimmed. The rows, find results and the open file's header wear a letter (`!` `M` `D` `R` `A` `U`, each told
+  in words by a tooltip) in the `--git-*` colours the Git panel's badges use; the working tree's column wins over the
+  index's. A folder holding changes wears a dot in the strongest one's colour (that order). Ignored entries are dimmed.
+  A deleted file has no row; unlike VS Code, the folders above it still get the dot. There is no timer of its own: the
+  keeper reads when the app's git read answers (`useGitInfo`), on every `files:changed`, and on window return. Main
+  follows the git directory (index and HEAD) and sends `files:changed` with no folders, so a commit or switch made
+  anywhere shows at once. The tree never waits for git, and an unchanged answer draws nothing again.
+- **Git panel's list of changes.** Under the commit box (`ChangesList`, `features/git/CommitFilePicker.tsx`, Desktop
+  and Studio), closed each time the panel opens: `git:status`, one row per file with the same icons, colours and letters
+  (`ui/GitStatus.tsx`), deleted files included, at most 200 rows and then a count of the rest. It does not choose what
+  a commit takes; the picker still does. Desktop opens a clicked file in the Files panel; Studio's rows only show.
+- **Access.** The panel follows `code:edit` (`src/lib/roleAccess.ts`). Its shortcut is ⌥F. Studio has no Files panel yet.
+
+## Code intelligence
+
+`shared/ipc/codeIntel.ts` is what a full code editor may ask about its file (suggestions, a
+suggestion's detail, hover, signature help, errors) and what comes back, bounded by
+`CODE_INTEL_LIMITS`. One channel, `codeIntel:request`, carries a question with the editor's whole
+text, so unsaved text is what is analysed. Both sides parse: main parses the renderer's question, the
+intelligence process parses it again, and main and the renderer parse its answer.
+
+The answers come from `electron/lib/codeIntel/`, run as an Electron utility process
+(`serviceProcess.ts`) that `host.ts` starts on the first question, stops when the project closes or
+changes or after five idle minutes, times out, and restarts a bounded number of times. Main never reads
+types itself. Its memory is bounded twice: V8 ends it at its heap limit, and it ends itself after an
+answer that leaves it holding more than `residentMegabytesMax` in all, which counts toward the restarts.
+
+It reads the project and runs none of it:
+
+- The type checker is the app's own `typescript`, with its own libraries (the build copies them to
+  `dist/electron/typescript-lib/`, because the packager leaves `.d.ts` files out). A project's
+  installed TypeScript is not loaded.
+- `.astro` files are printed as TSX by the app's own `@astrojs/compiler`. `astro.config` is never
+  loaded, and neither are a tsconfig's `plugins` (the language service has no plugin host).
+- From the project it reads sources, `tsconfig`/`jsconfig` JSON (`extends`, `paths`, `baseUrl`,
+  references), `package.json`, `.d.ts` files (Astro's, and what Astro generated in `.astro/`) and
+  stylesheets.
+
+Without installed dependencies only mistakes in the writing itself are reported. `.vue`, `.svelte`
+and `.mdx` components are typed as taking any props. `public/` is taken to be the public folder,
+since reading another from `astro.config` would mean running it. Studio has no intelligence process:
+its editors pass no extension and are unchanged.

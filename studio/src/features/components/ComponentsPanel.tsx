@@ -1,4 +1,5 @@
 import PalettePanel from '../../../vendor/stacki/src/features/palette/PalettePanel';
+import { copyBuildComponent } from '../../../vendor/stacki/src/lib/agentTasks';
 import { useTranslate } from '../../../vendor/stacki/src/lib/i18n/useTranslate';
 import { request, type Project } from '../project/projectClient';
 import { parsePreviewTarget } from '../preview/usePreview';
@@ -67,6 +68,11 @@ export function ComponentsPanel({
         reason: translate('studio.components.createInSource'),
       }}
       onCreateComponent={() => {}}
+      buildComponent={{
+        projectKey: project.workspaceId ?? project.name,
+        destination: 'clipboard',
+        run: () => copyBuildComponent(translate, (message, kind) => report(kind === 'error' ? new Error(message) : message)),
+      }}
     />
   );
 }

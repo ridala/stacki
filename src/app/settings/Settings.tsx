@@ -7,6 +7,7 @@ import { ErrorToast } from '../../ui/ErrorToast';
 import { CmsConnections } from '../../features/cmsConnections/CmsConnections';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { assert } from '../../../shared/core/assert';
+import { DESKTOP_RELEASE } from '../../../shared/core/desktopRelease';
 import Popup from '../../ui/Popup';
 import StudioSetup from '../../features/studioSetup/StudioSetup';
 import { cleanError } from '../../lib/cleanError';
@@ -426,18 +427,20 @@ function Preferences() {
         </SettingsRow>
       </SettingsSection>
       <SettingsSection title={translate('settings.editor.section.privacy')}>
-        <PreferenceToggle
-          label={translate('settings.editor.privacy.usageCounts.label')}
-          info={translate('settings.editor.privacy.usageCounts.info')}
-          checked={value?.usageCountsEnabled ?? false}
-          disabled={!value || busy}
-          onToggle={() =>
-            void change({
-              setting: 'usageCountsEnabled',
-              enabled: !value?.usageCountsEnabled,
-            })
-          }
-        />
+        {DESKTOP_RELEASE.usageCountsURL !== undefined && (
+          <PreferenceToggle
+            label={translate('settings.editor.privacy.usageCounts.label')}
+            info={translate('settings.editor.privacy.usageCounts.info')}
+            checked={value?.usageCountsEnabled ?? false}
+            disabled={!value || busy}
+            onToggle={() =>
+              void change({
+                setting: 'usageCountsEnabled',
+                enabled: !value?.usageCountsEnabled,
+              })
+            }
+          />
+        )}
         <PreferenceToggle
           label={translate('settings.editor.privacy.hideDetails.label')}
           info={translate('settings.editor.privacy.hideDetails.info')}

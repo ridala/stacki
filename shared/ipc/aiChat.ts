@@ -3,6 +3,7 @@
 // and each pushed event with the parsers below before a component sees it.
 // Pushes: `ai:events` (batched transcript events, acknowledged with the
 // one-way `ai:ack`) and `ai:agentStatus` (an agent's availability changed).
+import { parseMcpAuthRequest, type McpAuthReply } from '../properties/mcp';
 import { assert } from '../core/assert';
 import { parseMessageRef, type MessageRef } from '../core/i18n/messageReference';
 import { boolean, count, list, object, optional, pathText, record, text } from '../core/boundary';
@@ -30,6 +31,8 @@ import {
 } from '../properties/ai/chatModel';
 import { parseAutoCompactPercent } from '../properties/ai/autoCompact';
 import { parseRememberAction, parseRememberedSettings, type RememberedSettings } from '../properties/ai/rememberedSettings';
+import { PIN_LIMITS, parsePinBrief } from '../properties/ai/commentPinBrief';
+import { parsePinBoardStrict, parsePinImages, type PinBoardRead } from '../properties/ai/commentPins';
 import { parseMentionCandidates, parseMentionKinds, parseMentionQuery, parsePromptParts, type MentionCandidate } from '../properties/ai/mentions';
 import { parseMergeResolution, type MergeResolution } from './mergeResolution';
 import type { WireConflictPart, WireMergeClash } from './ipcWire';
@@ -119,20 +122,58 @@ export function parsePromptAttachment(input: unknown): PromptAttachment {
   throw new Error('attachment.kind: unknown kind');
 }
 
-function attachments(input: unknown): readonly PromptAttachment[] {
-  const values = toArray(input);
-  if (values === undefined) {
-    throw new Error('attachments: expected array');
+// What one message may carry: the composer's bounds, or (a send of comment pins) every image a full board holds.
+interface AttachmentBounds {
+  readonly countMax: number;
+  readonly imageCharsMax: number;
+}
+
+const MESSAGE_ATTACHMENTS: AttachmentBounds = { countMax: AI_LIMITS.attachmentsMax, imageCharsMax: AI_LIMITS.attachmentsImageCharsMax };
+const PIN_SEND_ATTACHMENTS: AttachmentBounds = { countMax: PIN_LIMITS.sendImagesMax, imageCharsMax: PIN_LIMITS.boardImageCharsMax };
+
+function attachmentsWithin(bounds: AttachmentBounds): (input: unknown) => readonly PromptAttachment[] {
+  assert(bounds.countMax >= 1, 'attachmentsWithin: a bound holds at least one attachment');
+  assert(bounds.imageCharsMax >= AI_LIMITS.imageBase64CharsMax, 'attachmentsWithin: one largest image fits');
+  return (input) => {
+    const values = toArray(input);
+    if (values === undefined) {
+      throw new Error('attachments: expected array');
+    }
+    if (values.length > bounds.countMax) {
+      throw new Error('attachments: exceeds limit');
+    }
+    const parsed = values.map(parsePromptAttachment);
+    // The pair of the composer's draft bound: the main process refuses a payload the composer could not have built.
+    const imageChars = parsed.reduce((sum, attachment) => sum + (attachment.kind === 'image' ? attachment.data.length : 0), 0);
+    if (imageChars > bounds.imageCharsMax) {
+      throw new Error('attachments: images exceed limit');
+    }
+    return parsed;
+  };
+}
+
+const attachments = attachmentsWithin(MESSAGE_ATTACHMENTS);
+
+const promptFields = object({
+  projectPath,
+  chat,
+  text: prompt,
+  attachments: attachmentsWithin(PIN_SEND_ATTACHMENTS),
+  parts: optional(parsePromptParts),
+  mode: optional(promptMode),
+  // Comment pins sent with "Send all": what the agent is told about each (commentPinBrief.ts).
+  pins: optional(parsePinBrief),
+});
+
+// A message is held to the composer's bounds. Only a send of pins that run each in a subagent may carry more: its
+// pictures reach the agents as files, never as blocks of one message.
+function promptPayload(input: unknown): ReturnType<typeof promptFields> {
+  const parsed = promptFields(input);
+  if (parsed.pins?.mode !== 'subagents') {
+    attachments(record(input)['attachments']);
+    assert(parsed.attachments.length <= MESSAGE_ATTACHMENTS.countMax, 'promptPayload: an ordinary message keeps its own bound');
   }
-  if (values.length > AI_LIMITS.attachmentsMax) {
-    throw new Error('attachments: exceeds limit');
-  }
-  const parsed = values.map(parsePromptAttachment);
-  // The pair of the composer's draft bound: the main process refuses a payload the composer could not have built.
-  const imageChars = parsed.reduce((sum, attachment) => sum + (attachment.kind === 'image' ? attachment.data.length : 0), 0);
-  if (imageChars > AI_LIMITS.attachmentsImageCharsMax) {
-    throw new Error('attachments: images exceed limit');
-  }
+  assert(parsed.attachments.length <= PIN_SEND_ATTACHMENTS.countMax, 'promptPayload: no message is past a send of pins');
   return parsed;
 }
 
@@ -329,9 +370,13 @@ export const AI_PAYLOADS = {
   }),
   'ai:chatDelete': object({ projectPath, chat }),
   'ai:chatRead': object({ projectPath, chat }),
-  'ai:prompt': object({ projectPath, chat, text: prompt, attachments, parts: optional(parsePromptParts), mode: optional(promptMode) }),
+  'ai:prompt': promptPayload,
   'ai:steer': object({ projectPath, chat, text: prompt, attachments, parts: optional(parsePromptParts) }),
   'ai:compact': object({ projectPath, chat }),
+  /** The project's comment pins and their images, kept under userData (electron/handlers/ai/pinBoardStore.ts). */
+  'ai:pinsRead': object({ projectPath }),
+  /** Replaces the board whole; `images` are the images not stored yet. An image the board no longer names is removed. */
+  'ai:pinsWrite': object({ projectPath, board: parsePinBoardStrict, images: parsePinImages }),
   /** The saved "Auto-compact at" percentage, if any. */
   'ai:autoCompactGet': object({}),
   /** `percent` undefined: the agent's own default. */
@@ -349,6 +394,8 @@ export const AI_PAYLOADS = {
   'ai:remember': object({ projectPath, agent: parseAgentId, action: parseRememberAction }),
   'ai:review': object({ projectPath, chat, turn: (input: unknown) => toTurnId(text(input)), path: pathText, action: reviewAction }),
   'ai:setup': object({ projectPath, agent: parseAgentId, action: (input: unknown) => parseSetupAction(input) }),
+  /** Where the project's MCP servers stand for each agent, and signing in to one (shared/properties/mcp.ts). */
+  'ai:mcpAuth': object({ projectPath, request: (input: unknown) => parseMcpAuthRequest(input) }),
 } as const;
 
 /** The one-way acknowledgement: event characters the renderer has applied. Never negative or NaN. */
@@ -499,6 +546,8 @@ export interface AiResults {
   readonly 'ai:prompt': Result<{ readonly turn: TurnId }, AiFailure>;
   readonly 'ai:steer': Result<SteerReply, AiFailure>;
   readonly 'ai:compact': Result<{ readonly started: true }, AiFailure>;
+  readonly 'ai:pinsRead': Result<PinBoardRead, AiFailure>;
+  readonly 'ai:pinsWrite': Result<{ readonly saved: true }, AiFailure>;
   readonly 'ai:autoCompactGet': AutoCompactReply;
   readonly 'ai:autoCompactSet': AutoCompactReply;
   readonly 'ai:chatFork': Result<ChatSummary, AiFailure>;
@@ -512,6 +561,7 @@ export interface AiResults {
   readonly 'ai:remember': Result<RememberedSettings, AiFailure>;
   readonly 'ai:review': ReviewOutcome;
   readonly 'ai:setup': SetupState;
+  readonly 'ai:mcpAuth': McpAuthReply;
 }
 
 // ---------------------------------------------------------------------------
@@ -700,6 +750,14 @@ export function parseSteerReply(input: unknown): SteerReply {
   return { turn: toTurnId(text(value['turn'])), outcome };
 }
 
+/** The success value of `ai:pinsWrite`. */
+export function parsePinsSaved(input: unknown): { readonly saved: true } {
+  if (record(input)['saved'] !== true) {
+    throw new Error('ai:pinsWrite: expected saved');
+  }
+  return { saved: true };
+}
+
 /** What `ai:autoCompactGet` and `ai:autoCompactSet` answer: the saved percentage, undefined for the agent's default. */
 export interface AutoCompactReply {
   readonly percent: number | undefined;
@@ -875,11 +933,21 @@ export function parseSetupAction(input: unknown): SetupAction {
   }
 }
 
+/**
+ * `not-subscription`: the sign-in in effect is not proven to be a Claude subscription. `billed`: a running session
+ * was billed per use and was stopped.
+ */
+export const SIGNED_OUT_REASONS = ['not-subscription', 'billed'] as const;
+export type SignedOutReason = (typeof SIGNED_OUT_REASONS)[number];
+
 /** Where an agent's own CLI stands, in the order a person goes through it. */
 export type SetupState =
   | { readonly agent: AgentId; readonly step: 'missing' }
   | { readonly agent: AgentId; readonly step: 'installing' }
-  | { readonly agent: AgentId; readonly step: 'signed-out' }
+  /** `reason`: why a Claude that has some sign-in still needs the panel's subscription sign-in (`SIGNED_OUT_REASONS`). */
+  | { readonly agent: AgentId; readonly step: 'signed-out'; readonly reason?: SignedOutReason }
+  /** The sign-in could not be checked (the CLI timed out, stopped or printed something unreadable). Nothing is blocked. */
+  | { readonly agent: AgentId; readonly step: 'unchecked' }
   /**
    * `url`: the page the CLI asked for, opened in the browser; `needsCode`: the CLI waits for a pasted code;
    * `output`: what the CLI has printed so far, with links and tokens left out, for the card's Details.
@@ -891,7 +959,8 @@ export type SetupState =
       readonly needsCode: boolean;
       readonly output: string;
     }
-  | { readonly agent: AgentId; readonly step: 'ready'; readonly account: SetupAccount }
+  /** `billing`: a running session said it is charged beyond the subscription, which the panel warns about. */
+  | { readonly agent: AgentId; readonly step: 'ready'; readonly account: SetupAccount; readonly billing?: 'extra-usage' }
   /** A step that did not work: what to say, and the CLI's own output for "Copy details". */
   | {
       readonly agent: AgentId;
@@ -910,11 +979,16 @@ export interface SetupAccount {
   readonly name: string | undefined;
   readonly plan: string | undefined;
   readonly email: string | undefined;
+  /** Which kind of sign-in the agent uses. Only the kind crosses to the renderer: never a key, a token or a value. */
+  readonly source: SignInSource;
 }
+
+export const SIGN_IN_SOURCES = ['account', 'api-key', 'token', 'cloud'] as const;
+export type SignInSource = (typeof SIGN_IN_SOURCES)[number];
 
 export const SETUP_DETAILS_CHARS_MAX = 16_000;
 
-const SETUP_STEPS = ['missing', 'installing', 'signed-out', 'signing-in', 'ready', 'failed'] as const;
+const SETUP_STEPS = ['missing', 'installing', 'signed-out', 'unchecked', 'signing-in', 'ready', 'failed'] as const;
 
 export function parseSetupState(input: unknown): SetupState {
   const value = record(input);
@@ -923,7 +997,11 @@ export function parseSetupState(input: unknown): SetupState {
   switch (step) {
     case 'missing':
     case 'installing':
-    case 'signed-out':
+    case 'signed-out': {
+      const reason = SIGNED_OUT_REASONS.find((candidate) => candidate === value['reason']);
+      return reason === undefined ? { agent, step } : { agent, step, reason };
+    }
+    case 'unchecked':
       return { agent, step };
     case 'signing-in':
       return {
@@ -940,7 +1018,12 @@ export function parseSetupState(input: unknown): SetupState {
       if (name !== undefined && name.includes('@')) {
         throw new Error('account.name: a display name, never an email');
       }
-      return { agent, step, account: { name, plan: field(account['plan']), email: field(account['email']) } };
+      const source = SIGN_IN_SOURCES.find((candidate) => candidate === account['source']);
+      if (source === undefined) {
+        throw new Error('account.source: unknown kind of sign-in');
+      }
+      const shown = { name, plan: field(account['plan']), email: field(account['email']), source };
+      return value['billing'] === 'extra-usage' ? { agent, step, account: shown, billing: 'extra-usage' } : { agent, step, account: shown };
     }
     case 'failed': {
       const during = value['during'] === 'install' || value['during'] === 'sign-in' || value['during'] === 'sign-out' ? value['during'] : undefined;

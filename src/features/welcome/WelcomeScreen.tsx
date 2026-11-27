@@ -4,39 +4,49 @@ import CloneRepositoryModal from './CloneRepositoryModal';
 import WelcomeSplitButton from './WelcomeSplitButton';
 import React, { useEffect, useRef, useState } from 'react';
 import { chooseSiteFolder, chooseStarterParent, listRecentProjects, refreshRecentThumbnail, removeRecentProject, type RecentProject } from './welcomeBridge';
-import { AstroIcon, CloseIcon, FolderIcon, GitHubIcon, LayersIcon, LumosIcon } from '../../ui/Icons';
+import { AstroIcon, CloseIcon, ComponentIcon, FolderIcon, GitHubIcon, LayersIcon, LumosIcon } from '../../ui/Icons';
 import StackiLogo from './StackiLogo';
 import WelcomeShaderBackground from './WelcomeShaderBackground';
 import { railScrollbarFor, watchRailEdges } from './recentRail';
 import { currentDesktopPlatform } from '../../lib/shortcutLabel';
 import { NewProjectWizard, StarterWizard } from './WelcomeWizards';
 import ShadcnStarterWizard from './ShadcnStarterWizard';
+import HeroUIStarterWizard from './HeroUIStarterWizard';
 import { ShadcnStarterLogo } from '../../ui/ShadcnStarterLogo';
 import AstroCopyDialog, { announceAstroCopy, type AstroCopySource } from './AstroCopyDialog';
 import { FolderDropHost, useFolderChoiceRoute } from './FolderDropHost';
+import { hasProjectSetupChannels } from '../../ipc/projectSetupBridge';
+
+export interface WelcomeSetupDialogProps {
+  readonly projectPath: string;
+  readonly onClose: () => void;
+  readonly onContinue: () => void;
+}
 
 interface WelcomeScreenProps {
   readonly onOpen: (projectPath: string) => void;
   readonly showToast: (message: string, kind: 'success' | 'error' | 'info') => void;
+  readonly renderSetupDialog?: (props: WelcomeSetupDialogProps) => React.ReactNode;
 }
 
-const PROJECT_WIZARDS = { astro: NewProjectWizard, lumos: StarterWizard, shadcn: ShadcnStarterWizard };
+const PROJECT_WIZARDS = { astro: NewProjectWizard, lumos: StarterWizard, shadcn: ShadcnStarterWizard, heroui: HeroUIStarterWizard };
 type ProjectWizardKind = keyof typeof PROJECT_WIZARDS;
 interface ProjectCreation {
   readonly kind: ProjectWizardKind;
   readonly parentPath: string;
 }
 
-export default function WelcomeScreen({ onOpen, showToast }: WelcomeScreenProps) {
+export default function WelcomeScreen({ onOpen, showToast, renderSetupDialog }: WelcomeScreenProps) {
   const translate = useTranslate();
   const [cloning, setCloning] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [creation, setCreation] = useState<ProjectCreation | undefined>(undefined);
   const [copySource, setCopySource] = useState<AstroCopySource | undefined>(undefined);
+  const [setupPath, setSetupPath] = useState<string | undefined>(undefined);
   const recent = useRecentProjects(showToast);
-  const actions = useWelcomeActions(onOpen, setError, setCreation, setCopySource);
+  const actions = useWelcomeActions(renderSetupDialog !== undefined && hasProjectSetupChannels() ? setSetupPath : onOpen, setError, setCreation, setCopySource);
   const ProjectWizard = PROJECT_WIZARDS[creation?.kind ?? 'lumos'];
-  // A folder dropped on the window or on the app's icon: what "Open from folder" does with the same folder.
+  // Drop and recent paths open first. Only the native picker grants setup access before a project opens.
   const routeFolder = useFolderChoiceRoute({ open: onOpen, offerCopy: setCopySource, showToast });
 
   return (
@@ -50,7 +60,23 @@ export default function WelcomeScreen({ onOpen, showToast }: WelcomeScreenProps)
         cloneRepository={() => setCloning(true)}
       />
       <RecentRail projects={recent.projects} refreshing={recent.refreshing} open={onOpen} remove={(projectPath) => void recent.remove(projectPath)} />
-      <FolderDropHost onChoice={routeFolder} showToast={showToast} />
+      <FolderDropHost
+        onChoice={(choice) => {
+          if (setupPath === undefined) {
+            routeFolder(choice);
+          }
+        }}
+        showToast={showToast}
+      />
+      {setupPath !== undefined &&
+        renderSetupDialog?.({
+          projectPath: setupPath,
+          onClose: () => setSetupPath(undefined),
+          onContinue: () => {
+            setSetupPath(undefined);
+            onOpen(setupPath);
+          },
+        })}
       {cloning && (
         <CloneRepositoryModal
           onClose={() => setCloning(false)}
@@ -87,13 +113,13 @@ export default function WelcomeScreen({ onOpen, showToast }: WelcomeScreenProps)
 }
 
 function useWelcomeActions(
-  onOpen: WelcomeScreenProps['onOpen'],
+  openPickedAstro: WelcomeScreenProps['onOpen'],
   setError: React.Dispatch<React.SetStateAction<string | undefined>>,
   setCreation: React.Dispatch<React.SetStateAction<ProjectCreation | undefined>>,
   setCopySource: React.Dispatch<React.SetStateAction<AstroCopySource | undefined>>,
 ) {
   const translate = useTranslate();
-  // An Astro project opens; a plain website folder is offered an Astro copy; anything else is a toast.
+  // An Astro project can review its setup; a plain website is offered an Astro copy.
   const openExisting = async (): Promise<void> => {
     setError(undefined);
     const result = await chooseSiteFolder();
@@ -106,7 +132,7 @@ function useWelcomeActions(
       case 'canceled':
         return;
       case 'astro':
-        onOpen(choice.projectPath);
+        openPickedAstro(choice.projectPath);
         return;
       case 'plainWebsite':
         setCopySource({ sourcePath: choice.sourcePath, parentPath: choice.parentPath, name: choice.name, homePath: choice.homePath });
@@ -242,6 +268,7 @@ function WelcomeHero({
             items={[
               { label: translate('welcome.hero.startAstro'), icon: <AstroIcon size={15} />, onSelect: () => startProject('astro') },
               { label: translate('welcome.hero.startShadcn'), icon: <ShadcnStarterLogo brand="shadcn" size={15} />, onSelect: () => startProject('shadcn') },
+              { label: translate('welcome.hero.startHeroUI'), icon: <ComponentIcon size={15} />, onSelect: () => startProject('heroui') },
             ]}
             menuTitle={translate('welcome.hero.moreStart')}
             onClick={() => startProject('lumos')}

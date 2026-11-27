@@ -61,6 +61,25 @@
   --flow-purple-soft: rgba(146, 116, 255, 0.32);
   --red: #ff453a;
   --amber: #ffd60a;
+  /* What git says happened to a file: VS Code's dark colours, shared by the Files panel's marks (files.css) and the Git
+     panel's file badges. Its deleted red is lightened a step to stay readable on a selected row. */
+  --git-modified: #e2c08d;
+  --git-added: #81b88b;
+  --git-untracked: #73c991;
+  --git-renamed: #73c991;
+  --git-deleted: #e8735c;
+  --git-conflicted: #ff8589;
+  --git-ignored: #8c8c8c;
+  /* File-type icons, one colour per type, after VS Code's: each reads on a panel and on a selected row. */
+  --file-astro: #ff5d01;
+  --file-blue: #4a9fe0;
+  --file-cyan: #53c1de;
+  --file-green: #8dc149;
+  --file-grey: #9aa7b0;
+  --file-orange: #f08d49;
+  --file-purple: #b08ce0;
+  --file-red: #e5645c;
+  --file-yellow: #d9cb4a;
   --orange: #ff9f0a;
   --radius: 8px;
   --font: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
@@ -595,6 +614,10 @@ html[data-platform='win32'] .titlebar {
 }
 .conflict-file-row.on {
   background: var(--accent-soft);
+}
+.conflict-file-name .file-type-icon {
+  margin-inline-end: 6px;
+  vertical-align: text-bottom;
 }
 .conflict-file-name {
   font-size: 12px;
@@ -3001,6 +3024,23 @@ html[data-platform='win32'] .titlebar {
   font-family: var(--mono);
   font-size: 10px;
 }
+/* "Add to chat", beside the lines it adds: a small quiet button that keeps its size as the path gives way. */
+.code-panel-add {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-inline-start: 4px;
+  padding: 0;
+}
+/* The point the editor's right-click menu opens from. */
+.code-panel-menu-anchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+}
 .code-panel-editor,
 .code-panel-editor .cm-host,
 .code-panel-editor .cm-editor {
@@ -4716,7 +4756,8 @@ body > .embed-editor_provenance {
   background: transparent;
   color: var(--text-faint);
 }
-.props-field:hover > label > .prop-expr-toggle {
+.props-field:hover > label > .prop-expr-toggle,
+.props-field:hover > label > .prop-field-actions > .prop-expr-toggle {
   color: var(--text-dim);
 }
 .prop-expr-toggle:hover:not(:disabled) {
@@ -4724,7 +4765,8 @@ body > .embed-editor_provenance {
   color: var(--text);
 }
 .prop-expr-toggle.on,
-.props-field:hover > label > .prop-expr-toggle.on {
+.props-field:hover > label > .prop-expr-toggle.on,
+.props-field:hover > label > .prop-field-actions > .prop-expr-toggle.on {
   color: #9274ff;
   background: rgba(146, 116, 255, 0.16);
 }
@@ -6691,6 +6733,13 @@ body:has(#stacki-canvas-text-editor:not([data-shared])) .node-outline.sel.parent
   outline-width: 2px;
   outline-offset: -1px;
   opacity: 1;
+}
+/* The block editor draws its own ring in the page, which follows its blocks as they come and go. The app's boxes
+   for the picked and hovered node were measured before the typing and would sit off the words, so they step aside;
+   a parent component's outline stays. */
+body:has(#stacki-canvas-text-editor[data-blocks]) .node-outline.sel:not(.parent),
+body:has(#stacki-canvas-text-editor[data-blocks]) .node-outline.hover {
+  display: none;
 }
 /* Editing the words of a closed component: its owner keeps the resting look for the whole session (the faint thick outline and the
    light name tag), whatever the pointer does. Ordinary text, whose own tag goes while it is typed in, is not an owner. */
@@ -9427,25 +9476,168 @@ body:has(#stacki-canvas-text-editor[data-shared='variable']) .node-outline.sel .
   color: var(--text-faint);
   background: var(--surface-2, rgba(255, 255, 255, 0.06));
 }
+/* Git's marks (ui/GitStatus.tsx): `data-git` names what happened, and sets the colour its row and badge take. */
+[data-git='conflicted'] {
+  --files-git: var(--git-conflicted);
+}
+[data-git='modified'] {
+  --files-git: var(--git-modified);
+}
+[data-git='deleted'] {
+  --files-git: var(--git-deleted);
+}
+[data-git='renamed'] {
+  --files-git: var(--git-renamed);
+}
+[data-git='added'] {
+  --files-git: var(--git-added);
+}
+[data-git='untracked'] {
+  --files-git: var(--git-untracked);
+}
+[data-git='ignored'] {
+  --files-git: var(--git-ignored);
+}
+.git-badge {
+  /* One width for a letter and a dot, so they stand in one column down the end of the rows. */
+  width: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--files-git);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.git-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+/* A file's type icon (ui/ElementIcons.tsx, file-type icons): a square box, in its type's colour. The colour is set on
+   the icon itself, so it holds on a hovered or selected row; git's colours stay on the name and the badge. */
+.file-type-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+[data-file-hue='astro'] {
+  color: var(--file-astro);
+}
+[data-file-hue='blue'] {
+  color: var(--file-blue);
+}
+[data-file-hue='cyan'] {
+  color: var(--file-cyan);
+}
+[data-file-hue='green'] {
+  color: var(--file-green);
+}
+[data-file-hue='grey'] {
+  color: var(--file-grey);
+}
+[data-file-hue='orange'] {
+  color: var(--file-orange);
+}
+[data-file-hue='purple'] {
+  color: var(--file-purple);
+}
+[data-file-hue='red'] {
+  color: var(--file-red);
+}
+[data-file-hue='yellow'] {
+  color: var(--file-yellow);
+}
+
+/* The Git panel's list of changes (features/git/CommitFilePicker.tsx): closed until asked for, then its own bounded
+   scroll, under the commit controls so opening it never moves them. */
+.git-changes-list {
+  max-height: 232px;
+  margin: 0;
+  padding: 0 0 4px;
+  list-style: none;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.git-panel-controls .git-change {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: start;
+  white-space: nowrap;
+}
+.git-panel-controls button.git-change:hover,
+.git-panel-controls button.git-change:focus-visible {
+  background: var(--bg-hover);
+}
+.git-change-icon {
+  display: flex;
+  flex: none;
+  color: var(--text-dim);
+}
+/* The name keeps its room first; the folder takes what is left and is cut at its end. */
+.git-change-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.git-change[data-git] .git-change-name {
+  color: var(--files-git);
+}
+.git-change[data-git='deleted'] .git-change-name {
+  text-decoration: line-through;
+}
+.git-change-folder {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.git-changes-more {
+  padding: 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* The colours of the Files panel's marks: one meaning, one colour, wherever a file is listed. */
 .file-status.s-A {
-  color: var(--green);
-  background: rgba(48, 193, 88, 0.14);
+  --file-status-color: var(--git-added);
 }
 .file-status.s-M {
-  color: var(--accent);
-  background: var(--accent-soft);
+  --file-status-color: var(--git-modified);
 }
 .file-status.s-D {
-  color: var(--red);
-  background: rgba(255, 69, 58, 0.14);
+  --file-status-color: var(--git-deleted);
 }
 .file-status.s-R,
 .file-status.s-C {
-  color: var(--text-dim);
+  --file-status-color: var(--git-renamed);
 }
 .file-status.s-U {
-  color: #ffcb6b;
-  background: rgba(255, 203, 107, 0.14);
+  --file-status-color: var(--git-conflicted);
+}
+.file-status.s-A,
+.file-status.s-M,
+.file-status.s-D,
+.file-status.s-R,
+.file-status.s-C,
+.file-status.s-U {
+  color: var(--file-status-color);
+  background: color-mix(in srgb, var(--file-status-color) 15%, transparent);
 }
 
 .history-commit-actions {

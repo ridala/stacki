@@ -10,6 +10,7 @@ import * as net from 'node:net';
 import { createHash } from 'node:crypto';
 import { mainHarness } from '../../helpers/mainHarness.ts';
 import { IPC_PAYLOADS } from '#dist/shared/ipc/ipcPayloads.js';
+import { parseUpdateState } from '#dist/shared/ipc/updateState.js';
 import { toArray, toRecord } from '#dist/shared/core/record.js';
 import { parseMarkdownPage } from '#dist/electron/parse/markdownParser.js';
 import { parsePageModel } from '#dist/shared/page/pageNode.js';
@@ -133,8 +134,17 @@ test('the complete channel inventory matches real main and terminal registration
   // Publish's Add Worker setup adds one (publish:workerSetup), 324 in all.
   // A folder from outside the app adds two (project:inspectFolder for a window drop, project:takeOpenedFolders for
   // the icon and the command line; shared/ipc/folderOpen.ts), 326 in all.
-  // The shadcn wizard adds one (project:inspectShadcnPreset) so main can resolve a preset before site creation, 329 including the two shadcn project settings channels.
-  assert.equal(harness.handlers.size, 329);
+  // The Files panel adds thirteen (files:list, :read, :write, :create, :rename, :transfer, :trash, :import, :reveal, :find,
+  // :watch, :guardClose and :allowClose; shared/ipc/fileExplorer.ts), 339 in all.
+  // The AI panel's comment pins add two (ai:pinsRead and :pinsWrite, the board kept under userData), 341 in all.
+  // Design mode adds one (design:session; docs/design-mode/REMOVE.md), 342 in all.
+  // Publish's Add site for Netlify adds one (publish:netlifySite), 343 in all.
+  // The code editor's intelligence adds one (codeIntel:request; shared/ipc/codeIntel.ts), 344 in all.
+  // Signing in to MCP servers adds one (ai:mcpAuth; shared/properties/mcp.ts), 345 in all.
+  // The Files panel's git marks add one (files:gitStatus; shared/ipc/fileExplorer.ts), 346 in all.
+  // The shadcn wizard adds one (project:inspectShadcnPreset) and shadcn project settings add two, 349 in all.
+  // Existing Astro setup adds a read-only scan and a witnessed apply (project:setupScan and :setupApply), 351 in all.
+  assert.equal(harness.handlers.size, 351); // Design mode (experimental): docs/design-mode/REMOVE.md
   assert.equal(terminalChannels.length, 4);
   assert.deepEqual([...Object.keys(IPC_PAYLOADS)].sort(), [...harness.handlers.keys(), ...terminalChannels].sort());
   // One-way `send` listeners bypass the invoke registrar, so each must name
@@ -151,6 +161,22 @@ test('the complete channel inventory matches real main and terminal registration
     ['ai:ack'],
   );
   assert.match(ai, /parseSendPayload\('ai:ack'/, 'ai:ack is parsed');
+});
+
+test('setup refuses IPC from outside the main frame even when its path matches the project recorded by scan', async (context) => {
+  const harness = fixture();
+  context.after(harness.dispose);
+  await harness.invoke('project:scan', harness.root);
+
+  for (const request of [{ projectPath: harness.root }, { projectPath: harness.root, permission: 'confirm-open' }]) {
+    const result = toRecord(await harness.invoke('project:setupScan', request));
+    assert.equal(result?.['ok'], false);
+    assert.equal(toRecord(result?.['error'])?.['code'], 'unauthorized');
+  }
+  const result = toRecord(await harness.invoke('project:setupApply', { projectPath: harness.root, revision: 'a'.repeat(64), kinds: ['components'] }));
+  assert.equal(result?.['ok'], false);
+  assert.equal(toRecord(result?.['error'])?.['code'], 'unauthorized');
+  assert.equal(fs.existsSync(path.join(harness.root, '.stacki', 'folders.json')), false);
 });
 
 test('malformed writes fail before altering disk; valid writes still work', async (context) => {
@@ -221,6 +247,7 @@ test('disk parsers validate known shapes and fail on corrupt data', () => {
     aiReviewChanges: false,
     codeChips: true,
     localePreference: 'system',
+    httpCacheCleanupVersion: 0,
   });
   assert.equal(parseSettings({ sound: true, appsPersonHidden: true }).appsPersonHidden, true);
   assert.equal(parseSettings({ sound: true, aiAskBeforeTrust: true }).aiAskBeforeTrust, true);
@@ -280,6 +307,7 @@ test('disk parsers validate known shapes and fail on corrupt data', () => {
       aiReviewChanges: false,
       codeChips: true,
       localePreference: 'system',
+      httpCacheCleanupVersion: 0,
     },
   );
   assert.throws(() => parseSettings({ sound: false, usageCountsEnabled: 'no' }), /boolean/);
@@ -557,7 +585,12 @@ test('popup preferences persist independently and reject invalid changes', async
   const harness = fixture();
   context.after(harness.dispose);
   await harness.invoke('settings:set', { setting: 'sound', enabled: true });
+  assert.equal(toRecord(harness.call('readSettings'))?.['usageCountsEnabled'], true, 'the stored preference is preserved');
+  assert.equal(toRecord(await harness.invoke('settings:get'))?.['usageCountsEnabled'], false, 'the endpoint is required');
   await harness.invoke('settings:set', { setting: 'usageCountsEnabled', enabled: false });
+  const refused = toRecord(await harness.invoke('settings:set', { setting: 'usageCountsEnabled', enabled: true }));
+  assert.equal(refused?.['usageCountsEnabled'], false);
+  assert.equal(refused?.['saved'], false);
   const result = toRecord(await harness.invoke('settings:get'));
   assert.equal(result?.['sound'], true);
   assert.equal(result?.['usageCountsEnabled'], false);
@@ -567,4 +600,15 @@ test('popup preferences persist independently and reject invalid changes', async
   await assert.rejects(harness.invoke('settings:set', { setting: 'sound', enabled: 'yes' }));
   await assert.rejects(harness.invoke('settings:set', { setting: 'unknown', enabled: true }));
   assert.equal(toRecord(harness.call('readSettings'))?.['sound'], true);
+});
+
+test('the unconfigured updater stays idle across IPC actions', async (context) => {
+  const harness = fixture();
+  context.after(harness.dispose);
+  assert.deepEqual(parseUpdateState(await harness.invoke('update:read')), { kind: 'idle' });
+  for (const action of ['retry', 'install']) {
+    const result = toRecord(await harness.invoke('update:act', { action }));
+    assert.equal(result?.['ok'], true);
+  }
+  assert.deepEqual(parseUpdateState(await harness.invoke('update:read')), { kind: 'idle' });
 });

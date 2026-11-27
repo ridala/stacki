@@ -3,6 +3,7 @@
 // shell (every panel, the code editor, the style engine) loads behind it (docs/startup.md).
 import type { AppView } from '../App';
 import { ToastStack } from '../../features/notifications/ToastStack';
+import { ProjectSetupDialog } from '../../features/projectSetup/ProjectSetupDialog';
 import WelcomeScreen from '../../features/welcome/WelcomeScreen';
 import { ConfirmHost } from '../../ui/ConfirmDialog';
 import { UpdatePopupHost } from '../../features/update/UpdatePopup';
@@ -21,7 +22,13 @@ export function WelcomeView({ app }: { readonly app: AppView }) {
         <span className="spacer" />
         <SettingsButton />
       </div>
-      <WelcomeScreen onOpen={app.onOpenProject} showToast={app.showToast} />
+      <WelcomeScreen
+        onOpen={app.onOpenProject}
+        showToast={app.showToast}
+        renderSetupDialog={(setup) => (
+          <ProjectSetupDialog mode="welcome" projectPath={setup.projectPath} onClose={setup.onClose} onContinue={setup.onContinue} />
+        )}
+      />
       {app.busy && <BusyOverlay message={app.busy} />}
       <ToastStack notices={app.notices} dismiss={app.dismissToast} />
       <ConfirmHost />

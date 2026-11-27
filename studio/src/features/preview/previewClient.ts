@@ -1,4 +1,5 @@
 // First: the preview's link listeners go on before any other module's (previewLinks.ts).
+import { isCanvasTextEditing } from '../../../vendor/stacki/electron/preload/frameTextEditing';
 import './previewLinks';
 import { parentOrigin } from './parentOrigin';
 import { receiveLiveVariables } from '../../../vendor/stacki/electron/preload/frameLiveVariables';
@@ -28,7 +29,6 @@ import { receiveLiveText, applyLiveText } from './liveTextClient';
 import { installCursorPresence } from '../collaboration/cursorClient';
 import { receiveRenderPush } from './renderPushClient';
 import { cancelReveal, revealPath } from '../../../vendor/stacki/electron/preload/frameReveal';
-import { inlineTextPathAt } from '../../../vendor/stacki/electron/preload/inlineText';
 import { forgetUnionBoxes, unionTargetAt } from '../../../vendor/stacki/electron/preload/frameUnionTarget';
 import { startGuide } from '../../../vendor/stacki/electron/preload/frameGuide';
 import { taggedPlaces, inFocus, setTracking, resetFocusCache } from '../../../vendor/stacki/electron/preload/frameRegions';
@@ -190,6 +190,10 @@ for (const type of ['click', 'dblclick', 'contextmenu']) {
       if (interactive || window.parent === window || !(event.target instanceof Element) || event.target.closest('#studio-live-cursors')) {
         return;
       }
+      // In the text being edited the pointer is the editor's (frameTextEditing.ts).
+      if (isCanvasTextEditing(event.target)) {
+        return;
+      }
       if (type === 'click' && canvasMode === 'interact' && event instanceof MouseEvent) {
         selectThenPass(event, event.target);
         return;
@@ -211,16 +215,9 @@ for (const type of ['click', 'dblclick', 'contextmenu']) {
       }
       // A click measures afresh: the boxes kept for hover may be stale.
       forgetUnionBoxes();
-      const id = pageId(event.target);
       if (type === 'contextmenu') {
-        // Words beside a tagged sibling have no element to hit, so the menu
-        // finds their run as Desktop's does (frameTargets.ts). Only the menu:
-        // a click still selects the element.
-        const text = id === undefined ? undefined : inlineTextPathAt(scope + id, event.clientX, event.clientY)?.slice(scope.length);
-        const located =
-          text === undefined
-            ? locate(event.target, event.clientX, event.clientY)
-            : { id: text, occurrence: occurrenceAt(id ?? '', event.clientX, event.clientY) };
+        // As a click: bare words beside a tagged sibling are their element's (frameTargets.ts).
+        const located = locate(event.target, event.clientX, event.clientY);
         if (located) {
           post({
             type: 'avb:context-node',

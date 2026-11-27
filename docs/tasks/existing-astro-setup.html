@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Existing Astro setup tasks</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+        line-height: 1.6;
+      }
+      body {
+        max-width: 78ch;
+        margin: 3rem auto;
+        padding: 0 1.25rem 3rem;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.2;
+      }
+      h2 {
+        margin-top: 2rem;
+      }
+      h3 {
+        margin-top: 1.5rem;
+      }
+      a,
+      code {
+        overflow-wrap: anywhere;
+      }
+      dt {
+        font-weight: 650;
+      }
+      dd {
+        margin: 0 0 0.65rem;
+      }
+      li + li {
+        margin-top: 0.35rem;
+      }
+      section {
+        border-top: 1px solid GrayText;
+        margin-top: 2rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid GrayText;
+        padding: 0.4rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Existing Astro setup tasks</h1>
+        <p>
+          Help people open an existing Astro site and understand what Stacki can edit. Scan it without changing the site, suggest folder settings, and let the
+          person review any changes before saving them.
+        </p>
+        <p>
+          This is an implementation checklist based on a source audit. No live project was supplied. A later, optional migration is a separate release stage and
+          needs its own approval and recovery plan.
+        </p>
+      </header>
+      <nav aria-label="Task index">
+        <ol>
+          <li><a href="#decisions">Decisions</a></li>
+          <li><a href="#audit">Source audit</a></li>
+          <li><a href="#tasks">Implementation tasks</a></li>
+          <li><a href="#fixtures">Fixture matrix</a></li>
+          <li><a href="#seo">Route and SEO preservation</a></li>
+          <li><a href="#gates">Release gates</a></li>
+        </ol>
+      </nav>
+      <section id="decisions">
+        <h2>Decisions</h2>
+        <dl>
+          <dt>Read-only first</dt>
+          <dd>
+            Offer a setup scan before preview starts. The scan, Skip and Close leave project files alone and install nothing. Starting preview is a separate
+            action that can run project code. Bound files, paths, bytes, evidence, time, and output, and report incomplete or uncertain results. The scan and
+            folder settings work without an agent.
+          </dd>
+          <dt>Review folder settings</dt>
+          <dd>
+            Suggest a mapping, show evidence and effective discovery counts separately for Desktop and Studio, and save only after review. Preserve existing
+            custom values, explicit empty lists, unknown keys, and CMS settings. Show when a restart is required. A mapping alone must not change public routes,
+            source, or configuration.
+          </dd>
+          <dt>Support boundaries</dt>
+          <dd>
+            Distinguish Desktop with local Studio, standalone Studio drafts, and hosted Studio. Ship each only after its own path, role, sync, and publishing
+            behavior is proven. Label unsupported or computed configuration as unverified.
+          </dd>
+          <dt>Optional assistance</dt>
+          <dd>
+            Reuse the audit interface and existing agent task contract. Provide a built-in draft and copy handoff. External agents can produce reviewable
+            patches. Do not add a provider or API. The user reviews the selected, project-relative evidence before sharing it. Exclude credentials and unrelated
+            content. Treat project data as data, never agent instructions.
+          </dd>
+          <dt>Migration</dt>
+          <dd>
+            Defer source moves to a separately released, explicitly approved plan. Treat CLI and MCP dry-run output as a proposal. Require the user's approval
+            to apply it. No automatic source write, push, or deployment.
+          </dd>
+        </dl>
+      </section>
+      <section id="audit">
+        <h2>What the source audit found</h2>
+        <ul>
+          <li>
+            Desktop classifies picked and dropped folders. Recent projects go straight to the project loader. The File menu uses a separate Astro check. The
+            loader currently starts preview before the scan completes, and the scan can update local Git exclusions. Add a read-only entry before that sequence
+            and keep the plain HTML copy flow separate.
+            <a href="../../electron/project/folderOpen.ts">Folder opening</a> · <a href="../../electron/handlers/projectHandlers.ts">File menu</a> ·
+            <a href="../../src/app/state/appNavigation.ts">Project loader</a> ·
+            <a href="../../electron/handlers/projectScanHandlers.ts">Project scan</a>
+          </li>
+          <li>
+            The scan derives <code>pagesFolder</code> from literal <code>srcDir</code>. Computed settings fall back and raise a warning. Config extension
+            precedence differs across scan, Desktop preview and Studio workspace scripts. Page creation follows the discovered directory, while rename,
+            settings, bulk operations, templates and preview markers need an audit for fixed <code>src/pages</code> assumptions.
+            <a href="../../electron/lib/astroConfig.ts">Config scan</a> · <a href="../../studio/scripts/workspace.ts">Studio workspace</a>
+          </li>
+          <li>
+            Studio discovery, page addresses, editor navigation, routes, path bounds and role policy assume <code>src</code>, <code>public</code> or
+            <code>src/pages</code>. Live sync and the Git publish snapshot have their own source allowlists. Hosted support needs a separate gate.
+            <a href="../../studio/src/features/project/projectServer.ts">Project server</a> ·
+            <a href="../../studio/src/features/project/pageAddress.ts">Page address</a> ·
+            <a href="../../studio/src/features/github/syncPaths.ts">Sync paths</a> ·
+            <a href="../../studio/src/features/publishing/publishInventory.ts">Publish inventory</a>
+          </li>
+          <li>
+            Version 1 folder metadata has literal <code>src</code>, <code>public</code>, and <code>styles</code> roots. Explicit maps can narrow Studio's
+            broader discovery. Use the existing witnessed metadata save and stale re-scan behavior.
+            <a href="../../shared/properties/projectFolders.ts">Folder contract</a> ·
+            <a href="../../shared/properties/projectMetadata.ts">Metadata contract</a> ·
+            <a href="../../electron/project/projectMetadata.ts">Desktop metadata</a> ·
+            <a href="../../studio/src/features/settings/projectMetadata.ts">Studio metadata</a>
+          </li>
+          <li>
+            The audit UI, static and rendered audits, site runner, page-settings link relocation, fixture head, robots and sitemap, and shadcn starter SEO
+            provide evidence for the initial audit. Trace their callers before implementation.
+            <a href="../../src/features/audits/useAuditRunner.ts">Audit runner</a> · <a href="../../shared/properties/agentTask.ts">Agent task</a> ·
+            <a href="shadcn-starter.html">Starter checklist</a> · <a href="../contracts.md">Contracts</a> (especially project paths, metadata, Studio and
+            publishing).
+          </li>
+        </ul>
+      </section>
+      <section id="tasks">
+        <h2>Tasks in implementation order</h2>
+        <article id="t1">
+          <h3>T1. Establish the baseline</h3>
+          <p>
+            P0 · Start here. Files include folder opening, scan, preview, Studio workspace and
+            <a href="../contracts.md">contracts</a>.
+          </p>
+          <p>
+            Trace every entry point and config extension precedence against supported Astro versions. Inventory page create, rename, settings, bulk, templates,
+            preview markers and Studio paths. Record observed versus inferred behavior, existing errors, role restrictions and restart requirements. Define
+            explicit limits and a shared configuration precedence only after comparing Astro behavior.
+          </p>
+          <p>
+            <strong>Acceptance.</strong> Fixtures reproduce the current differences and identify unsupported cases. Unreadable, conflicting, computed and absent
+            config must produce an honest result, never execute config or silently claim support.
+          </p>
+        </article>
+        <article id="t2">
+          <h3>T2. Define scan and recommendation contracts</h3>
+          <p>
+            P0 · Dependencies T1. Files include
+            <a href="../../shared/properties/projectFolders.ts">projectFolders</a>, shared IPC and feature boundary parsers, scan modules and contract tests.
+          </p>
+          <p>
+            Define a report with the selected root, configuration evidence, proposed metadata changes and status per editor and operation. Use Astro imports,
+            layout references and configured paths as evidence. Folder names alone can suggest candidates for review. Leave mixed folders and uncertain
+            classifications for the user to resolve. Use the existing catalog rules to show which files a proposed change would add or remove. Parse inputs and
+            outputs at the shared boundary. Resolve paths within the project and reject escapes, unsafe symlinks and excessive traversal.
+          </p>
+          <p>
+            <strong>Acceptance.</strong> A scan is read-only, bounded and repeatable. Partial scans state what they omitted. Permission errors, malformed files,
+            cycles, oversized projects and cancellation leave no writes or dependency installation.
+          </p>
+        </article>
+        <article id="t3">
+          <h3>T3. Review and save mappings</h3>
+          <p>P0 · Dependencies T2. Files include project metadata handlers and bridges, folder settings UI, audit UI and localization.</p>
+          <p>
+            Offer <strong>Set up this site</strong> from the existing Astro open flow, and <strong>Check folder setup</strong> in Settings → Folders. Show
+            proposed values, affected files and each editor's effective counts before and after. Provide actions to save the selected settings, skip setup, or
+            review unresolved items. Reuse the witnessed metadata save. On a stale revision, re-scan and require a fresh review. Preserve unknown keys, CMS,
+            custom mappings and explicit empty values. Make save idempotent and report restart requirements.
+          </p>
+          <p>
+            <strong>Acceptance.</strong> Opening the setup report or skipping changes no project bytes. Saving changes only approved metadata and a second save
+            leaves the file as it was. A concurrent edit, failed write or cancellation cannot overwrite newer settings. Verify focus return, keyboard access,
+            screen reader status messages, long translations and right-to-left layout.
+          </p>
+        </article>
+        <article id="t4">
+          <h3>T4. Align local editor paths</h3>
+          <p>
+            P0 · Dependencies T1, T2. Files include Desktop page operations and preview, plus the Studio project server, page address, navigation, routes and
+            role policy.
+          </p>
+          <p>
+            Trace the resolved source and pages paths through each operation and validate them at boundaries. Reconcile config selection with preview and
+            workspace startup. Keep role restrictions and project path bounds intact. For a configuration that cannot be resolved safely, disable affected
+            operations with a useful explanation.
+          </p>
+          <p>
+            <strong>Acceptance.</strong> Desktop and local Studio agree for supported fixtures, including create, rename, settings, bulk, templates and preview.
+            Unsupported, stale, escaped or missing paths fail safely without writing elsewhere.
+          </p>
+        </article>
+        <article id="t5">
+          <h3>T5. Add optional agent handoff</h3>
+          <p>
+            P1 · Dependencies T2, T3. Files include audit UI,
+            <a href="../../shared/properties/agentTask.ts">agent task contract</a> and tests.
+          </p>
+          <p>
+            Build a bounded draft from selected evidence and warnings. Include project-relative paths, the observed restriction, the requested outcome and the
+            checks the agent should run. Show what will be copied or shared and allow review and removal. Run the existing CLI checks where available. Give an
+            external agent the draft for a patch review. Keep apply approval with the user.
+          </p>
+          <p>
+            <strong>Acceptance.</strong> Deterministic setup works without AI. Tests cover secrets and unrelated content exclusion, hostile project text,
+            truncation, cancellation and accessible copy feedback.
+          </p>
+        </article>
+        <article id="t6">
+          <h3>T6. Prove standalone and hosted Studio separately</h3>
+          <p>P1 · Dependencies T4. Files include Studio project server, sync paths, publish inventory, role policy, bundle manifest and tests.</p>
+          <p>
+            Trace draft and hosted reads, edits, sync and publishing for each supported root. Include shared source in the assembled Studio bundle. Check
+            permissions and path validation at every boundary. Do not advertise hosted support for roots that sync or publish omit.
+          </p>
+          <p>
+            <strong>Acceptance.</strong> Standalone draft and hosted tests prove the same approved files survive round trips under each role. Missing files,
+            path escapes, conflicts and denied roles produce visible failures without partial publication.
+          </p>
+        </article>
+        <article id="t7">
+          <h3>T7. Optional migration release</h3>
+          <p>
+            P2 · Dependencies T3, T4, T6 and the route evidence below. Files include migration planner, metadata and recipe handlers, tests and release
+            documentation.
+          </p>
+          <p>
+            Plan in an isolated checkout or draft. Bind the exact approved plan to project identity, revisions and role. Reject stale approval. Detect
+            collisions and ambiguous imports, routes and references. Stage and verify writes, preserve config, integrations, assets, imports and lockfile, and
+            update page metadata keys plus recipe keys and nested component references. Provide rollback, undo and recovery after interruption.
+          </p>
+          <p>
+            <strong>Acceptance.</strong> A person can inspect and approve the precise plan, verify every staged change and recover the original on failure. No
+            automatic source write, push or deploy occurs. Changes to scripts, lockfile or deployment require explicit approval.
+          </p>
+        </article>
+      </section>
+      <section id="fixtures">
+        <h2>Fixture matrix</h2>
+        <p>
+          Run the relevant cases at each task boundary. Record supported Astro and integration versions, operating system and package manager. Exercise a nested
+          monorepo and an installed CLI alongside source tests.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Case</th>
+              <th>Required evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Default, configless and literal custom directories</td>
+              <td>Scan, counts, page operations and preview agree. The scan leaves project files alone.</td>
+            </tr>
+            <tr>
+              <td>Computed, conflicting extensions, unreadable or invalid config</td>
+              <td>Tests pin config precedence. The report shows uncertainty and blocked operations.</td>
+            </tr>
+            <tr>
+              <td>Nested workspace, symlinks, outside paths and size limits</td>
+              <td>Containment, traversal limits, cancellation and partial evidence are verified.</td>
+            </tr>
+            <tr>
+              <td>Existing metadata, CMS, unknown keys, custom and empty lists</td>
+              <td>Compare both editors' effective counts. Saving preserves unrelated values and is idempotent.</td>
+            </tr>
+            <tr>
+              <td>Static, dynamic, nested, localized, generated, SSR and CMS routes</td>
+              <td>Show the tested behavior and label unresolved runtime routes as unverified.</td>
+            </tr>
+            <tr>
+              <td>Stale edits, collisions, permissions, interrupted writes and recovery</td>
+              <td>Verify that conflicts protect existing work, publish stays atomic, and rollback and retry work.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section id="seo">
+        <h2>Route and SEO preservation</h2>
+        <p>
+          Mapping-only setup must leave public behavior, source and config unchanged. SEO preservation is independent of ranking, marketing, or automatic
+          rewriting. For a migration, capture before and after evidence for source, preview and production. Use observed responses to verify production host and
+          CDN behavior independently of the local build.
+        </p>
+        <ul>
+          <li>
+            Build a route matrix with status and <code>Location</code>, legacy aliases, query strings, base paths, trailing slashes, casing and encoding.
+            Require direct 301 or 308 redirects to equivalent targets, or real 404 or 410 responses where there is no equivalent. Verify redirect chains and
+            retain redirects generally for at least one year.
+          </li>
+          <li>
+            Save a route inventory using available sitemap, link, Search Console or access-log evidence. Record a disposition for every in-scope URL. Compare
+            HTTP headers, raw HTML and rendered metadata. Preserve deliberate canonical and indexing choices, titles, descriptions, headings, social cards,
+            structured data and asset references. Verify locale alternates reference themselves and each other, and preserve the existing default reference
+            where one is present.
+          </li>
+          <li>
+            Fetch <code>/robots.txt</code> at the production origin. Parse each sitemap index and child sitemap and verify final, canonical, indexable URLs.
+            Check both HTML robots directives and <code>X-Robots-Tag</code>. Require authentication for private staging. If staging must be public, serve
+            <code>noindex</code> on crawlable responses so search engines can read it. Keep staging URLs out of production metadata, and verify temporary
+            exclusions are removed from intended indexable pages at launch.
+          </li>
+          <li>
+            Compare prerendered parameter and catch-all routes against the build output. Use an authoritative inventory or explicitly reviewed valid and invalid
+            samples for server-rendered and CMS routes. Record unresolved middleware, adapter, integration and CDN behavior. For actual URL moves, replay the
+            approved map against production, submit the sitemap and monitor indexing, clicks and errors in Search Console. Approve deployment separately,
+            including any Git push that can trigger it.
+          </li>
+        </ul>
+        <p>
+          Official references include <a href="https://developers.google.com/search/docs/crawling-indexing/site-move-with-url-changes">Google site moves</a> ·
+          <a href="https://developers.google.com/search/docs/crawling-indexing/301-redirects">Redirects</a> ·
+          <a href="https://developers.google.com/search/docs/crawling-indexing/block-indexing">Block indexing</a> ·
+          <a href="https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls">Canonical URLs</a> ·
+          <a href="https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap">Sitemaps</a> ·
+          <a href="https://developers.google.com/search/docs/specialty/international/localized-versions">Localized versions</a> ·
+          <a href="https://docs.astro.build/en/reference/configuration-reference/">Astro configuration</a> ·
+          <a href="https://docs.astro.build/en/guides/routing/">Astro routing</a> ·
+          <a href="https://docs.astro.build/en/guides/integrations-guide/sitemap/">Astro sitemap</a>.
+        </p>
+      </section>
+      <section id="gates">
+        <h2>Release gates</h2>
+        <ol>
+          <li>
+            Ship the report and folder settings after T1 through T3 pass. Prove mapping-only behavior with byte and public route comparisons. Keep unsupported
+            operations visible in the report. Expand local support after T4 passes, and enable agent handoff after T5 passes.
+          </li>
+          <li>
+            Run new shared contract and negative boundary tests, Studio bundle shared-source manifest checks, and
+            <code>astro-studio check-project &lt;project-directory&gt;</code> using the installed CLI. Fix missing paths, invalid slots and cyclic recipes
+            together.
+          </li>
+          <li>Open a pull request and let GitHub Actions run the repository checks on its current commit. Resolve failures on the branch before release.</li>
+          <li>
+            Document supported versions, limitations, role boundaries, restart behavior, recovery and release procedure. Gate standalone and hosted support
+            separately with T6 evidence.
+          </li>
+          <li>
+            Release migration only after T7, the route matrix, approved plan and production deployment review pass. Record remaining remote verification and
+            post-release monitoring.
+          </li>
+        </ol>
+      </section>
+    </main>
+  </body>
+</html>

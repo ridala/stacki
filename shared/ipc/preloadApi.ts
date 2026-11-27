@@ -33,11 +33,14 @@ interface InvokeChannels {
   readonly createAstroCopy: 'project:createAstroCopy';
   readonly inspectFolder: 'project:inspectFolder';
   readonly takeOpenedFolders: 'project:takeOpenedFolders';
+  readonly designSession: 'design:session'; // Design mode (experimental): docs/design-mode/REMOVE.md
   readonly createStarter: 'project:createStarter';
   readonly readShadcnSettings: 'project:readShadcnSettings';
   readonly changeShadcnSetting: 'project:changeShadcnSetting';
   readonly inspectShadcnPreset: 'project:inspectShadcnPreset';
   readonly scanProject: 'project:scan';
+  readonly scanProjectSetup: 'project:setupScan';
+  readonly applyProjectSetup: 'project:setupApply';
   readonly listProjectClasses: 'project:classes';
   readonly watchProject: 'watch:start';
   readonly listAssets: 'assets:list';
@@ -210,6 +213,7 @@ interface InvokeChannels {
   readonly discoverPublishing: 'publish:discover';
   readonly publishingAccount: 'publish:account';
   readonly setUpPublishWorker: 'publish:workerSetup';
+  readonly createNetlifySite: 'publish:netlifySite';
   readonly cmsConnections: 'cmsConnections:list';
   readonly saveCmsConnection: 'cmsConnections:save';
   readonly removeCmsConnection: 'cmsConnections:remove';
@@ -300,6 +304,8 @@ interface InvokeChannels {
   readonly aiPrompt: 'ai:prompt';
   readonly aiSteer: 'ai:steer';
   readonly aiCompact: 'ai:compact';
+  readonly aiPinsRead: 'ai:pinsRead';
+  readonly aiPinsWrite: 'ai:pinsWrite';
   readonly aiAutoCompactGet: 'ai:autoCompactGet';
   readonly aiAutoCompactSet: 'ai:autoCompactSet';
   readonly aiChatFork: 'ai:chatFork';
@@ -315,6 +321,7 @@ interface InvokeChannels {
   readonly aiRemember: 'ai:remember';
   readonly aiReview: 'ai:review';
   readonly aiSetup: 'ai:setup';
+  readonly aiMcpAuth: 'ai:mcpAuth';
   readonly startTerminal: 'terminal:start';
   readonly resizeTerminal: 'terminal:resize';
   readonly closeTerminal: 'terminal:close';
@@ -335,6 +342,21 @@ interface InvokeChannels {
   readonly nativePaste: 'native:paste';
   readonly nativeUndo: 'native:undo';
   readonly nativeRedo: 'native:redo';
+  readonly codeIntel: 'codeIntel:request';
+  readonly listFiles: 'files:list';
+  readonly readFile: 'files:read';
+  readonly writeFile: 'files:write';
+  readonly createFileEntry: 'files:create';
+  readonly renameFileEntry: 'files:rename';
+  readonly transferFileEntries: 'files:transfer';
+  readonly trashFileEntries: 'files:trash';
+  readonly importFileEntries: 'files:import';
+  readonly revealFileEntry: 'files:reveal';
+  readonly findFiles: 'files:find';
+  readonly watchFiles: 'files:watch';
+  readonly fileGitStatus: 'files:gitStatus';
+  readonly guardFilesClose: 'files:guardClose';
+  readonly allowFilesClose: 'files:allowClose';
 }
 
 type InvokeSurface = {
@@ -358,6 +380,8 @@ export type PreloadBridge = InvokeSurface & {
   readonly onAiAgentStatus: (callback: (data: unknown) => void) => () => void;
   /** A guided setup step moved on (shared/ipc/aiChat.ts SetupState). */
   readonly onAiSetup: (callback: (data: unknown) => void) => () => void;
+  /** A server sign-in moved on (shared/properties/mcp.ts McpAuthPush). */
+  readonly onAiMcpAuth: (callback: (data: unknown) => void) => () => void;
   readonly terminalClipboardImage: (bytes: Uint8Array, mime: string) => Promise<unknown>;
   readonly onAssetsChanged: (callback: () => void) => () => void;
   /** `.stacki/apps/` changed: the folders whose files moved (shared/properties/appFolders.ts AppFoldersChange). */
@@ -389,4 +413,8 @@ export type PreloadBridge = InvokeSurface & {
   /** A Markdown file the Instructions panel lists changed outside the app, or the hidden paths did: `{ files }`, project-relative. */
   readonly onInstructionsChanged: (callback: (data: unknown) => void) => () => void;
   readonly onMenu: (channel: string, callback: (data?: unknown) => void) => () => void;
+  /** Folders the Files panel follows changed on disk (shared/ipc/fileExplorer.ts parseFilesChanged). */
+  readonly onFilesChanged: (callback: (data: unknown) => void) => () => void;
+  /** The window wants to close while the Files editor holds unsaved text: settle it, then answer `files:allowClose`. */
+  readonly onFilesCloseRequested: (callback: () => void) => () => void;
 };

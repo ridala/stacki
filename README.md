@@ -8,6 +8,7 @@ MIT licensed — fork it, build on it, ship your own version.
 
 ## Features
 
+- **Existing Astro sites** — choose an existing site with **Open from folder** to review which pages Desktop and Studio can find before preview starts. Review suggested folder settings and save the ones you want. To check a site that's already open in Desktop, use **Settings → Folders**.
 - **Pages** — browse every page in `src/pages`, create new pages (including nested routes like `blog/post-1`), and delete pages.
 - **Layouts** — choose which layout from `src/layouts` wraps each page, and edit the layout's props (e.g. `title`).
 - **Components** — every component in `src/components` appears in the palette. Drag one into the page structure (or double-click to append), drag to reorder, click ✕ to remove.

@@ -1,0 +1,293 @@
+// What the rich text editor may open: a component's slot content, read as the bytes the file holds there. The editor
+// shows HTML and writes HTML, so it opens only content it can give back unchanged in meaning: native rich text
+// elements with plain attributes, nothing Astro reads as code. Anything else is shown as code instead (a component an
+// agent wrote, an expression, a comment, a directive), so opening the editor can never drop or rewrite it.
+//
+// The decision is pure and runs on every render of the Content field; writes go through the panel's one writer
+// (onSetInline for the editor's HTML, onSetContentSource for the code), so canvas edits, undo and redo reach both views
+// as the model the page holds.
+import { assert } from '../../../shared/core/assert';
+import { LIMITS } from '../../../shared/core/limits';
+import type { Attr } from '../../../shared/page/pageNode';
+import { renderedAssetPath } from '../../editor/richAssetImports';
+import { editableHTML } from '../../ui/htmlFieldModel';
+import type { InlineNode } from './richContentModel';
+
+/** Why content opens as code: each has its own tooltip on the `{}` toggle. */
+export const RICH_TEXT_CODE_REASONS = ['expression', 'component', 'markup', 'size'] as const;
+export type RichTextCodeReason = (typeof RICH_TEXT_CODE_REASONS)[number];
+
+export type RichTextView = { readonly view: 'rich'; readonly html: string } | { readonly view: 'code'; readonly reason: RichTextCodeReason };
+
+/** Content longer than this opens as code: the editor reads it into the DOM whole on every open. */
+export const RICH_TEXT_SOURCE_CHARS_MAX = 200_000;
+
+/**
+ * Which view the content opens in. `source` is the slot content exactly as written (the node's inner source), or
+ * undefined for an instance with nothing between its tags.
+ */
+export function richTextView(source: string | undefined, document: Document): RichTextView {
+  const text = source ?? '';
+  if (text.length > RICH_TEXT_SOURCE_CHARS_MAX) {
+    return { view: 'code', reason: 'size' };
+  }
+  // Braces are an expression in Astro markup, even inside an attribute; the editor would write them as text.
+  if (/[{}]/.test(text)) {
+    return { view: 'code', reason: 'expression' };
+  }
+  // A capitalized tag, or a dotted one (`<Icons.Star>`), is a component.
+  if (/<\/?(?:[A-Z]|[a-z][\w-]*\.)/.test(text)) {
+    return { view: 'code', reason: 'component' };
+  }
+  // Comments, directives (`set:html`, `class:list`, `is:raw`), fragments and the Astro-only tags are markup the
+  // editor cannot show; the browser would also drop a comment it parses.
+  if (/<!--|<!|<\s*>|<(?:slot|script|style|template|fragment)\b|\s[a-z]+:[\w-]+\s*=?/i.test(text)) {
+    return { view: 'code', reason: 'markup' };
+  }
+  const projection = editableHTML(text, document, { media: true });
+  if (projection.restricted) {
+    return { view: 'code', reason: 'markup' };
+  }
+  assert(projection.html.length <= text.length * 2 + 64, 'The editor projection is bounded by its source');
+  return { view: 'rich', html: text };
+}
+
+// Elements whose edges' whitespace is layout, and the ones that keep every space they hold.
+const LAYOUT_TAGS: ReadonlySet<string> = new Set([
+  'p',
+  'div',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'ul',
+  'ol',
+  'li',
+  'blockquote',
+  'figure',
+  'figcaption',
+  'hr',
+  'img',
+  'video',
+  'table',
+  'thead',
+  'tbody',
+  'tfoot',
+  'tr',
+  'td',
+  'th',
+  'caption',
+  'pre',
+]);
+
+/**
+ * Nodes without the whitespace that only lays the editor's HTML out: the line breaks and indents between blocks and at
+ * a block's edges (the HTML view's, or the page's own nesting), which the printer would write as blank lines and stray
+ * indents before laying the content out in the page's own indentation. A line break inside words is the space it shows
+ * as; a <pre> keeps its bytes.
+ */
+export function withoutLayoutSpace(nodes: readonly InlineNode[], inBlock = true, depth = 0): InlineNode[] {
+  assert(depth <= LIMITS.treeDepthMax, 'Rich text depth is bounded');
+  const layout = (node: InlineNode | undefined) => (node === undefined ? inBlock : node.kind === 'element' && LAYOUT_TAGS.has(node.name));
+  return nodes.flatMap((node, index): InlineNode[] => {
+    if (node.kind === 'element') {
+      if (node.name === 'pre' || node.name === 'textarea' || node.children === undefined) {
+        return [node];
+      }
+      return [{ ...node, children: withoutLayoutSpace(node.children, LAYOUT_TAGS.has(node.name), depth + 1) }];
+    }
+    if (node.kind !== 'text') {
+      return [node];
+    }
+    let value = node.value.replace(/[\t ]*\n\s*/g, '\n');
+    if (value.startsWith('\n') && layout(nodes[index - 1])) {
+      value = value.slice(1);
+    }
+    if (value.endsWith('\n') && layout(nodes[index + 1])) {
+      value = value.slice(0, -1);
+    }
+    value = value.replaceAll('\n', ' ');
+    return value === '' ? [] : [{ ...node, value }];
+  });
+}
+
+/** Tags that never hold children, written self-closing: the page model says so with `children: undefined`. */
+const VOID_TAGS: ReadonlySet<string> = new Set(['br', 'hr', 'img', 'source']);
+
+/**
+ * The editor's HTML as the nodes the panel writes for the instance's content. The editor emits only the tags and
+ * attributes `editableHTML` keeps, so every element and attribute here is one the rich text view accepted.
+ */
+export function richTextNodes(html: string, document: Document): InlineNode[] {
+  assert(html.length <= LIMITS.ipcFieldCharsMax, 'Rich text content fits one field');
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  let count = 0;
+  const read = (parent: Node, depth: number): InlineNode[] => {
+    assert(depth <= LIMITS.treeDepthMax, 'Rich text depth is bounded');
+    const out: InlineNode[] = [];
+    for (const child of Array.from(parent.childNodes)) {
+      count += 1;
+      assert(count <= LIMITS.treeNodesMax, 'Rich text node count is bounded');
+      if (child.nodeType === 3) {
+        const value = child.textContent ?? '';
+        if (value !== '') {
+          out.push({ kind: 'text', value });
+        }
+        continue;
+      }
+      // A template's content lives in an inert document with no window, so the element type is the page's own.
+      const ElementType = document.defaultView?.Element;
+      if (ElementType === undefined || !(child instanceof ElementType)) {
+        continue;
+      }
+      const element = child;
+      const name = element.localName;
+      const props = Object.fromEntries(
+        Array.from(element.attributes).map((attribute): [string, Attr] => {
+          // The preview renders a project file with the development server's own query: the address is the file's.
+          const value = attribute.name === 'src' ? renderedAssetPath(attribute.value) : attribute.value;
+          return [attribute.name, value === '' ? { type: 'bare' } : { type: 'string', value }];
+        }),
+      );
+      out.push({ kind: 'element', name, props, children: VOID_TAGS.has(name) ? undefined : read(element, depth + 1) });
+    }
+    return out;
+  };
+  const nodes = read(template.content, 0);
+  assert(count <= LIMITS.treeNodesMax, 'Rich text conversion stays inside the tree bound');
+  return nodes;
+}
+
+/**
+ * An element's text with the bytes between its tags replaced: undefined when those bytes are not the content the
+ * model read (the file moved on), so a stale view never writes over someone else's change. A self-closing tag opens
+ * to hold the new content.
+ */
+export function withInnerSource(element: string, current: { readonly name: string; readonly inner: string }, next: string): string | undefined {
+  assert(current.name.length > 0, 'A tag with content has a name');
+  if (/\/>\s*$/.test(element)) {
+    if (current.inner !== '') {
+      return undefined;
+    }
+    return next === '' ? element : `${element.replace(/\s*\/>\s*$/, '')}>${next}</${current.name}>`;
+  }
+  const close = element.lastIndexOf('</');
+  const start = close - current.inner.length;
+  if (close < 0 || start < 0 || element.slice(start, close) !== current.inner || element.charAt(start - 1) !== '>') {
+    return undefined;
+  }
+  const result = element.slice(0, start) + next + element.slice(close);
+  assert(result.length === element.length - current.inner.length + next.length, 'Only the content changed');
+  return result;
+}
+
+/** Whether two HTML texts hold the same rich content, whatever whitespace lies between their blocks. */
+export function sameRichContent(left: string, right: string, document: Document): boolean {
+  return JSON.stringify(richShape(richTextNodes(left, document), 0)) === JSON.stringify(richShape(richTextNodes(right, document), 0));
+}
+
+// The content with whitespace runs folded and text that is only whitespace left out: what a reader sees.
+function richShape(nodes: readonly InlineNode[], depth: number): readonly unknown[] {
+  assert(depth <= LIMITS.treeDepthMax, 'Rich text nesting is bounded');
+  return nodes.flatMap((node): readonly unknown[] => {
+    if (node.kind === 'text') {
+      const value = node.value.replace(/\s+/g, ' ').trim();
+      return value === '' ? [] : [value];
+    }
+    if (node.kind === 'expr') {
+      return [node.value];
+    }
+    return [{ name: node.name, props: node.props, children: node.children === undefined ? undefined : richShape(node.children, depth + 1) }];
+  });
+}
+
+/**
+ * The bytes between an element's tags, read from the element's own text: after the `>` that ends its opening tag (one
+ * inside a quoted value or an expression does not count) and before its last `</`. Empty for a self-closing tag;
+ * undefined when the text is not one element.
+ */
+export function innerSourceOf(element: string): string | undefined {
+  assert(element.length <= RICH_TEXT_SOURCE_CHARS_MAX * 2, 'An element read for its content is bounded');
+  if (!element.startsWith('<')) {
+    return undefined;
+  }
+  let quote = '';
+  let depth = 0;
+  for (let index = 1; index < element.length; index++) {
+    const character = element.charAt(index);
+    if (quote !== '') {
+      quote = character === quote ? '' : quote;
+    } else if (character === '"' || character === "'" || character === '`') {
+      quote = character;
+    } else if (character === '{') {
+      depth += 1;
+    } else if (character === '}') {
+      depth = Math.max(0, depth - 1);
+    } else if (character === '>' && depth === 0) {
+      if (element.charAt(index - 1) === '/') {
+        return '';
+      }
+      const close = element.lastIndexOf('</');
+      return close > index ? element.slice(index + 1, close) : undefined;
+    }
+  }
+  return undefined;
+}
+
+/** A page node as far as its markup goes: what `plainChildrenHTML` reads. */
+export interface MarkupNode {
+  readonly kind: string;
+  readonly name?: string;
+  readonly value?: string;
+  readonly props?: Readonly<Record<string, { readonly type: string; readonly value?: string } | undefined>> | undefined;
+  readonly children?: readonly MarkupNode[] | undefined;
+}
+
+/**
+ * Children as HTML when they are plain markup (text, and elements with literal attributes), else undefined: a
+ * component, an expression, a loop or a comment is not something rich text may stand for.
+ */
+export function plainChildrenHTML(children: readonly MarkupNode[] | undefined): string | undefined {
+  let count = 0;
+  const write = (nodes: readonly MarkupNode[], depth: number): string | undefined => {
+    assert(depth <= LIMITS.treeDepthMax, 'Plain markup depth is bounded');
+    let out = '';
+    for (const node of nodes) {
+      count += 1;
+      if (count > LIMITS.treeNodesMax) {
+        return undefined;
+      }
+      if (node.kind === 'text') {
+        out += node.value ?? '';
+        continue;
+      }
+      if (node.kind !== 'element' || node.name === undefined || !/^[a-z][a-z0-9]*$/.test(node.name)) {
+        return undefined;
+      }
+      let attributes = '';
+      for (const [name, value] of Object.entries(node.props ?? {})) {
+        if (value?.type === 'bare') {
+          attributes += ` ${name}`;
+        } else if (value?.type === 'string') {
+          attributes += ` ${name}="${(value.value ?? '').replaceAll('"', '&quot;')}"`;
+        } else if (value !== undefined) {
+          return undefined;
+        }
+      }
+      if (node.children === undefined) {
+        out += `<${node.name}${attributes}>`;
+        continue;
+      }
+      const inner = write(node.children, depth + 1);
+      if (inner === undefined) {
+        return undefined;
+      }
+      out += `<${node.name}${attributes}>${inner}</${node.name}>`;
+    }
+    return out;
+  };
+  return write(children ?? [], 0);
+}
