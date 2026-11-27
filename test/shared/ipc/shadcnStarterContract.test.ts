@@ -33,7 +33,7 @@ test('Lumos and shadcn retain their options and legacy Lumos keeps the omitted d
 test('HeroUI carries only the location and an optional creation package manager', () => {
   const heroui = { ...location, starter: 'heroui' };
   assert.deepEqual(parseIpcPayload('project:createStarter', heroui), heroui);
-  for (const packageManager of ['npm', 'pnpm']) {
+  for (const packageManager of ['npm', 'pnpm', 'bun']) {
     const options = { ...heroui, packageManager };
     assert.deepEqual(parseIpcPayload('project:createStarter', options), options);
   }
@@ -41,7 +41,7 @@ test('HeroUI carries only the location and an optional creation package manager'
   assert.deepEqual(parseIpcPayload('project:createStarter', windows), { ...windows, name: 'heroui-site' });
   assert.throws(() => parseIpcPayload('project:createStarter', { ...heroui, shadcn: SHADCN_STARTER_DEFAULTS }), /require the shadcn starter/);
   assert.throws(() => parseIpcPayload('project:createStarter', { ...heroui, shadcn: undefined }), /require the shadcn starter/);
-  assert.throws(() => parseIpcPayload('project:createStarter', { ...heroui, packageManager: 'yarn' }), /npm or pnpm/);
+  assert.throws(() => parseIpcPayload('project:createStarter', { ...heroui, packageManager: 'yarn' }), /expected one of npm, pnpm, bun$/);
   assert.throws(() => parseIpcPayload('project:createStarter', { starter: 'heroui', name: location.name }), /Expected string/);
   for (const name of ['', '.', '..', 'nested/site', '--overwrite', 'site&echo', 'a'.repeat(129)]) {
     assert.throws(() => parseIpcPayload('project:createStarter', { ...heroui, name }), /folder name/);
