@@ -122,6 +122,16 @@ export const MCP_PROVIDERS = [
     docsUrl: 'https://github.com/github/github-mcp-server',
   },
   {
+    id: 'heroui',
+    name: 'HeroUI',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@heroui/react-mcp@latest'],
+    secrets: [],
+    options: [],
+    docsUrl: 'https://heroui.com/en/docs/react/getting-started/mcp-server',
+  },
+  {
     id: 'hubspot',
     name: 'HubSpot',
     transport: 'stdio',
@@ -131,6 +141,15 @@ export const MCP_PROVIDERS = [
     options: [],
     docsUrl: 'https://developers.hubspot.com/mcp',
   }, // verify
+  {
+    id: 'hugeicons',
+    name: 'Hugeicons',
+    transport: 'http',
+    url: 'https://mcp.hugeicons.com/mcp',
+    secrets: [],
+    options: [],
+    docsUrl: 'https://hugeicons.com/docs/integrations/mcp',
+  },
   { id: 'linear', name: 'Linear', transport: 'http', url: 'https://mcp.linear.app/mcp', secrets: [], options: [], docsUrl: 'https://linear.app/docs/mcp' },
   {
     id: 'notion',

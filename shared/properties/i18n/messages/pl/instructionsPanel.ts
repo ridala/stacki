@@ -54,4 +54,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': 'Nazwa ma co najwyżej {max} znaków.',
   'instructionsPanel.problem.fileNameChars': 'Nazwa nie może zawierać / \\ : * ? " < > ani |.',
   'instructionsPanel.problem.fileNameDot': 'Nazwa nie może zaczynać się od kropki.',
+  'instructionsPanel.skills.addRecommended': 'Dodaj',
+  'instructionsPanel.skills.addedRecommended': 'Dodano umiejętność {name}.',
+  'instructionsPanel.skills.lintSetup': 'Skonfiguruj z AI',
+  'instructionsPanel.skills.recommended': 'Polecane dla tego projektu',
 } as const satisfies CatalogOf<MessageKey>;

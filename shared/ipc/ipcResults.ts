@@ -66,7 +66,7 @@ import type { StudioRestoreResult, StudioUpgradeCheck, StudioUpgradeResult } fro
 import type { UpdateEvent, UpdateState } from './updateState';
 import type { AppSecretScan } from '../properties/appSecrets';
 import type { SecretsListing, SecretsResult, SecretValue } from '../properties/secrets';
-import type { McpCodexState, McpListing, McpResult, McpText } from '../properties/mcp';
+import type { McpCodexState, McpListing, McpResult, McpText, ProjectAiToolkit } from '../properties/mcp';
 import type { McpServerConfig } from '../properties/mcpConfig';
 import type { AppSettingValues } from '../properties/appSettings';
 import type { AppEditOutcome, AppMember, AppPerson } from '../properties/appsRpc';
@@ -766,6 +766,7 @@ export interface IpcResults extends AiResults, AgentResults, FileExplorerResults
   readonly 'secrets:apply': SecretsResult<SecretsListing>;
   readonly 'secrets:ignore': SecretsResult<SecretsListing>;
   readonly 'mcp:read': McpResult<McpListing>;
+  readonly 'mcp:toolkit': ProjectAiToolkit;
   readonly 'mcp:readText': McpResult<McpText>;
   readonly 'mcp:reveal': McpResult<McpServerConfig>;
   readonly 'mcp:apply': McpResult<McpListing>;

@@ -8,6 +8,7 @@
 import { assert } from '../../shared/core/assert';
 import { agentTask, type AgentTask } from '../../shared/properties/agentTask';
 import type { Translator } from '../../shared/properties/i18n/messageRef';
+import type { ShadcnLintStatus } from '../../shared/properties/mcp';
 import type { ScanFrameworkComponent } from '../../shared/properties/projectScan';
 
 /** How a hand-off ended, for the caller's toast. */
@@ -162,6 +163,64 @@ export async function requestWrapFrameworkComponent(component: ScanFrameworkComp
   );
   if (outcome.tag === 'sent') {
     notify(translate('palette.components.buildWithAI.draftReady'), 'success');
+    return;
+  }
+  const { message, kind } = agentTaskMessage(outcome, translate);
+  notify(message, kind === 'error' ? 'error' : 'success');
+}
+
+function devInstallCommand(packageManager: ShadcnLintStatus['packageManager'], packages: readonly string[]): string {
+  const joined = packages.join(' ');
+  switch (packageManager) {
+    case 'pnpm':
+      return `pnpm add -D ${joined}`;
+    case 'yarn':
+      return `yarn add -D ${joined}`;
+    case 'bun':
+      return `bun add -d ${joined}`;
+    case 'npm':
+      return `npm install -D ${joined}`;
+    default: {
+      const exhaustive: never = packageManager;
+      return exhaustive;
+    }
+  }
+}
+
+export function shadcnLintSetupPrompt(status: ShadcnLintStatus): string {
+  const installPackages = status.linter === 'eslint' ? ['@shadcn/lint'] : status.linter === 'oxlint' ? ['@shadcn/lint'] : ['oxlint', '@shadcn/lint'];
+  const installCommand = devInstallCommand(status.packageManager, installPackages);
+  const linterGuidance =
+    status.linter === 'eslint'
+      ? 'This project already uses ESLint. Wire `@shadcn/lint` into the existing ESLint flat config rather than adding a second linter.'
+      : status.linter === 'oxlint'
+        ? 'This project already uses Oxlint. Add `@shadcn/lint` to `.oxlintrc.json` as a `jsPlugins` entry (`@shadcn/lint`) and enable the recommended shadcn design-system rules.'
+        : 'No Oxlint or ESLint config was detected. Recommend setting up Oxlint (`.oxlintrc.json`) with `@shadcn/lint` as a `jsPlugins` entry and adding a `"lint:design"` script in `package.json`.';
+  const monorepoNote =
+    status.workspaceAppPath === undefined
+      ? ''
+      : ` This project lives in a monorepo app at \`${status.workspaceAppPath}\`; confirm whether the devDependency and lint config should live in the app package or the workspace root.`;
+  return [
+    'Set up `@shadcn/lint` (https://github.com/shadcn-ui/lint) to catch Tailwind v4 and shadcn/ui design-system issues (hardcoded colors, deprecated utility classes, invalid tokens, and component conventions) in this project.',
+    '',
+    `1. Inspect \`package.json\`, lockfiles, and existing linter configs first.${monorepoNote}`,
+    `2. ${linterGuidance}`,
+    `3. Before running \`${installCommand}\` or editing any config files, show the exact command, package changes, and config diff, and ask for explicit approval.`,
+    '4. Do not install anything globally, do not weaken existing lint rules, and run the linter once after approval to verify it passes or report existing warnings clearly.',
+  ].join('\n');
+}
+
+export async function requestShadcnLintSetup(status: ShadcnLintStatus, translate: Translator, notify: BuildNotify): Promise<void> {
+  const outcome = await requestAgentTask(
+    agentTask({
+      title: translate('settings.shadcn.lint.title'),
+      prompt: shadcnLintSetupPrompt(status),
+      delivery: 'draft',
+      context: { files: [], nodeRefs: [], findingIds: [] },
+    }),
+  );
+  if (outcome.tag === 'sent') {
+    notify(translate('settings.shadcn.lint.draftReady'), 'success');
     return;
   }
   const { message, kind } = agentTaskMessage(outcome, translate);

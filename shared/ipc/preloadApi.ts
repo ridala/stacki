@@ -113,6 +113,7 @@ interface InvokeChannels {
   readonly applySecretsChange: 'secrets:apply';
   readonly ignoreSecretsFile: 'secrets:ignore';
   readonly readMcp: 'mcp:read';
+  readonly readMcpToolkit: 'mcp:toolkit';
   readonly readMcpText: 'mcp:readText';
   readonly revealMcpServer: 'mcp:reveal';
   readonly applyMcpChange: 'mcp:apply';

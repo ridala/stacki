@@ -793,6 +793,16 @@ export const messages = {
   'settings.element.attr.unsafe': 'Cannot change this attribute safely: {reason}',
   'settings.element.usesExpression': 'This value uses an expression. Switch to {{}} to edit its source.',
   'settings.element.renameLoop': 'Rename loop bindings and their references together in Code.',
+  'settings.mcp.recommended.connect': 'Connect',
+  'settings.mcp.recommended.connecting': 'Connecting…',
+  'settings.mcp.recommended.title': 'Recommended for this project',
+  'settings.shadcn.installed': 'Installed',
+  'settings.shadcn.lint.draftReady': 'Lint setup prompt added to AI chat.',
+  'settings.shadcn.lint.setup': 'Set up with AI',
+  'settings.shadcn.lint.title': 'Set up @shadcn/lint',
+  'settings.shadcn.skill.add': 'Add',
+  'settings.shadcn.skill.added': 'Added {name} skill.',
+  'settings.shadcn.skill.label': 'Agent skill',
 } as const satisfies CatalogOf<`settings.${string}`>;
 
 export type MessageKey = keyof typeof messages;

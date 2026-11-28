@@ -55,4 +55,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': 'Nama maksimal {max} karakter.',
   'instructionsPanel.problem.fileNameChars': 'Nama tidak boleh berisi / \\ : * ? " < > atau |.',
   'instructionsPanel.problem.fileNameDot': 'Nama tidak boleh diawali titik.',
+  'instructionsPanel.skills.addRecommended': 'Tambahkan',
+  'instructionsPanel.skills.addedRecommended': 'Skill {name} ditambahkan.',
+  'instructionsPanel.skills.lintSetup': 'Atur dengan AI',
+  'instructionsPanel.skills.recommended': 'Disarankan untuk proyek ini',
 } as const satisfies CatalogOf<MessageKey>;

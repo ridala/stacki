@@ -145,7 +145,8 @@ test('the complete channel inventory matches real main and terminal registration
   // The shadcn wizard adds one (project:inspectShadcnPreset) and shadcn project settings add two, 349 in all.
   // Existing Astro setup adds a read-only scan and a witnessed apply (project:setupScan and :setupApply), 351 in all.
   // On-demand framework component wrapping adds one (component:wrapFramework), 352 in all.
-  assert.equal(harness.handlers.size, 352); // Design mode (experimental): docs/design-mode/REMOVE.md
+  // Project-aware AI toolkit inspection adds one (mcp:toolkit), 353 in all.
+  assert.equal(harness.handlers.size, 353); // Design mode (experimental): docs/design-mode/REMOVE.md
   assert.equal(terminalChannels.length, 4);
   assert.deepEqual([...Object.keys(IPC_PAYLOADS)].sort(), [...harness.handlers.keys(), ...terminalChannels].sort());
   // One-way `send` listeners bypass the invoke registrar, so each must name

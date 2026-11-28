@@ -722,6 +722,7 @@ export const IPC_PAYLOADS = {
   'secrets:ignore': object({ ...project, file: parseSecretsIgnorableFile }),
   // The Settings panel's MCP tab (shared/properties/mcp.ts): the project's .mcp.json listed, read as text, one server revealed, a change or the whole text saved against a revision, and Codex's file.
   'mcp:read': object({ ...project }),
+  'mcp:toolkit': object({ ...project }),
   'mcp:readText': object({ ...project }),
   'mcp:reveal': object({ ...project, revision: parseMcpRevision, name: parseMcpServerName }),
   'mcp:apply': object({ ...project, revision: parseMcpRevision, change: parseMcpChange }),

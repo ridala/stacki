@@ -13,9 +13,10 @@
 // The files are read and printed by mcpJson.ts and mcpToml.ts; this module is the wire shape and the
 // parsers for both directions.
 import { assert } from '../core/assert';
-import { digest, optional, record, text } from '../core/boundary';
+import { boolean, digest, optional, pathText, record, text } from '../core/boundary';
 import type { Digest } from '../core/brand';
 import type { Result } from '../core/result';
+import { PACKAGE_MANAGERS, type PackageManager } from './packageManager';
 import { AGENT_IDS, parseAgentId, type AgentId } from './ai/agentIds';
 import {
   MCP_LIMITS,
@@ -402,4 +403,171 @@ export function parseMcpAuthReply(input: unknown): McpAuthReply {
 export function parseMcpAuthPush(input: unknown): McpAuthPush {
   const fields = record(input);
   return { projectPath: text(fields['projectPath']), entry: parseAuthEntry(fields['entry']), notice: parseNotice(fields['notice']) };
+}
+
+// ---------------------------------------------------------------------------
+// Project-aware AI toolkit recommendations: detected UI libraries (shadcn,
+// HeroUI, Hugeicons), whether their official MCP server and agent skill are
+// already configured, and optional `@shadcn/lint` setup status.
+// ---------------------------------------------------------------------------
+
+export const AI_TOOLKIT_IDS = ['shadcn', 'heroui', 'hugeicons'] as const;
+export type AiToolkitId = (typeof AI_TOOLKIT_IDS)[number];
+
+export const AI_TOOLKIT_MCP_PROVIDERS = ['heroui', 'hugeicons'] as const;
+export type AiToolkitMcpProvider = (typeof AI_TOOLKIT_MCP_PROVIDERS)[number];
+
+export const SHADCN_LINT_LINTERS = ['oxlint', 'eslint', 'none'] as const;
+export type ShadcnLintLinter = (typeof SHADCN_LINT_LINTERS)[number];
+
+export interface AiToolkitRecommendation {
+  readonly id: AiToolkitId;
+  readonly mcpProviderId?: AiToolkitMcpProvider;
+  readonly mcpConnected: boolean;
+  readonly skillSlug: string;
+  readonly skillInstalled: boolean;
+  readonly skillPath?: string;
+  readonly packagePath?: string;
+}
+
+export interface ShadcnLintStatus {
+  readonly applicable: boolean;
+  readonly installed: boolean;
+  readonly linter: ShadcnLintLinter;
+  readonly packageManager: PackageManager;
+  readonly workspaceAppPath?: string;
+}
+
+export interface ProjectAiToolkit {
+  readonly recommendations: readonly AiToolkitRecommendation[];
+  readonly shadcnLint: ShadcnLintStatus;
+}
+
+export function parseProjectAiToolkit(input: unknown): ProjectAiToolkit {
+  const fields = record(input);
+  const rawList = fields['recommendations'];
+  if (!Array.isArray(rawList) || rawList.length > AI_TOOLKIT_IDS.length) {
+    throw new Error('AI toolkit: expected bounded recommendations list');
+  }
+  const recommendations = rawList.map(parseRecommendation);
+  const lintFields = record(fields['shadcnLint']);
+  const linter = SHADCN_LINT_LINTERS.find((candidate) => candidate === lintFields['linter']);
+  if (linter === undefined) {
+    throw new Error('AI toolkit: unknown linter');
+  }
+  const packageManager = PACKAGE_MANAGERS.find((candidate) => candidate === lintFields['packageManager']);
+  if (packageManager === undefined) {
+    throw new Error('AI toolkit: unknown packageManager');
+  }
+  const workspaceAppPath = optional(pathText)(lintFields['workspaceAppPath']);
+  return {
+    recommendations,
+    shadcnLint: {
+      applicable: boolean(lintFields['applicable']),
+      installed: boolean(lintFields['installed']),
+      linter,
+      packageManager,
+      ...(workspaceAppPath === undefined ? {} : { workspaceAppPath }),
+    },
+  };
+}
+
+function parseRecommendation(input: unknown): AiToolkitRecommendation {
+  const fields = record(input);
+  const id = AI_TOOLKIT_IDS.find((candidate) => candidate === fields['id']);
+  if (id === undefined) {
+    throw new Error('AI toolkit: unknown recommendation id');
+  }
+  const rawProvider = fields['mcpProviderId'];
+  let mcpProviderId: AiToolkitMcpProvider | undefined;
+  if (rawProvider !== undefined) {
+    mcpProviderId = AI_TOOLKIT_MCP_PROVIDERS.find((candidate) => candidate === rawProvider);
+    if (mcpProviderId === undefined) {
+      throw new Error('AI toolkit: unknown MCP provider id');
+    }
+  }
+  const skillPath = optional(pathText)(fields['skillPath']);
+  const packagePath = optional(pathText)(fields['packagePath']);
+  return {
+    id,
+    ...(mcpProviderId === undefined ? {} : { mcpProviderId }),
+    mcpConnected: boolean(fields['mcpConnected']),
+    skillSlug: text(fields['skillSlug']),
+    skillInstalled: boolean(fields['skillInstalled']),
+    ...(skillPath === undefined ? {} : { skillPath }),
+    ...(packagePath === undefined ? {} : { packagePath }),
+  };
+}
+
+/**
+ * Generates a clean, valid `SKILL.md` scaffold for a detected UI ecosystem, tailored to the project's
+ * structure (including shared monorepo package paths when present).
+ */
+export function recommendedSkillSource(id: AiToolkitId, options: { readonly packagePath?: string } = {}): string {
+  switch (id) {
+    case 'shadcn': {
+      const locationNote =
+        options.packagePath === undefined
+          ? 'Inspect `components.json` at the project root before adding or editing UI components.'
+          : `This monorepo stores its shadcn configuration in \`${options.packagePath}/components.json\`. Run shadcn CLI commands against that package or preserve its alias paths.`;
+      return [
+        '---',
+        'name: shadcn',
+        'description: Manage and build UI with this project’s shadcn/ui components, design tokens, and components.json configuration.',
+        '---',
+        '',
+        '# shadcn/ui project skill',
+        '',
+        'Reference: https://ui.shadcn.com/docs/skills',
+        '',
+        '## Workflow',
+        `- ${locationNote}`,
+        '- Run `npx shadcn@latest info --json` (or read `components.json`) to check the base library, Tailwind version, icon library, and path aliases.',
+        '- Prefer composing existing installed UI primitives over creating duplicate buttons, inputs, dialogs, or cards.',
+        '- Use semantic design-system tokens (`bg-background`, `text-foreground`, `bg-primary`, `text-muted-foreground`, `border-border`) instead of hardcoded hex colors or arbitrary pixel values.',
+        '- Search and add missing primitives through `npx shadcn@latest search` and `npx shadcn@latest add` after confirming with the user.',
+        '',
+      ].join('\n');
+    }
+    case 'heroui':
+      return [
+        '---',
+        'name: heroui-react',
+        'description: Build and style UI with HeroUI v3 React components, compound patterns, Tailwind v4 tokens, and the HeroUI MCP server.',
+        '---',
+        '',
+        '# HeroUI React project skill',
+        '',
+        'Reference: https://heroui.com/en/docs/react/getting-started/agent-skills',
+        '',
+        '## Workflow',
+        '- Check installed documentation under `node_modules/@heroui/react/docs/` or query the connected `HeroUI` MCP server (`@heroui/react-mcp`) before writing component code.',
+        '- Follow HeroUI v3 conventions: compound components, Tailwind CSS v4 styling, and no legacy `<HeroUIProvider>` wrapper.',
+        '- Use HeroUI semantic CSS variables (`--accent`, `--background`, `--foreground`, `--surface`, `--overlay`, `--danger`, `--radius`) and preserve light/dark `@variant` or `[data-theme]` scopes.',
+        '- When placing interactive HeroUI React components inside Astro pages, wrap them in a clean `.astro` component with an appropriate hydration directive (`client:load` or `client:visible`).',
+        '',
+      ].join('\n');
+    case 'hugeicons':
+      return [
+        '---',
+        'name: hugeicons',
+        'description: Search and insert verified Hugeicons icons using the Hugeicons MCP server and installed icon packages.',
+        '---',
+        '',
+        '# Hugeicons project skill',
+        '',
+        'Reference: https://hugeicons.com/docs/integrations/skill',
+        '',
+        '## Workflow',
+        '- Always look up exact icon export names with the connected `Hugeicons` MCP server (`search_icons`, `get_icon_code`) instead of guessing names or hand-writing inline SVG paths.',
+        '- Match the packages already installed in `package.json` (for example `@hugeicons/react` with `@hugeicons/core-free-icons`).',
+        '- Render icons with `<HugeiconsIcon icon={...} size={...} strokeWidth={...} />` and use `currentColor` so icons inherit theme colors cleanly.',
+        '- Do not mix unrelated icon libraries when Hugeicons already provides the needed icon.',
+        '',
+      ].join('\n');
+    default: {
+      const exhaustive: never = id;
+      return exhaustive;
+    }
+  }
 }

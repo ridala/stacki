@@ -54,6 +54,10 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': 'A name is at most {max} characters.',
   'instructionsPanel.problem.fileNameChars': 'A name cannot hold / \\ : * ? " < > or |.',
   'instructionsPanel.problem.fileNameDot': 'A name cannot start with a dot.',
+  'instructionsPanel.skills.addRecommended': 'Add',
+  'instructionsPanel.skills.addedRecommended': 'Added {name} skill.',
+  'instructionsPanel.skills.lintSetup': 'Set up with AI',
+  'instructionsPanel.skills.recommended': 'Recommended for this project',
 } as const satisfies CatalogOf<`instructionsPanel.${string}`>;
 
 export type MessageKey = keyof typeof messages;

@@ -365,6 +365,7 @@ test('the handlers read Codex from the given home only, ignore any path in the i
     'mcp:reveal',
     'mcp:revealCodex',
     'mcp:saveText',
+    'mcp:toolkit',
   ]);
   const state = await handlers.get('mcp:readCodex')?.({}, { projectPath: root, path: '/etc/passwd', codexPath: '/etc/hosts' });
   assert.deepEqual(state, readCodexState(folder));

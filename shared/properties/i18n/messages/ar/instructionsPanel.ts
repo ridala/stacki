@@ -54,4 +54,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': 'الاسم {max} حرفًا كحد أقصى.',
   'instructionsPanel.problem.fileNameChars': 'لا يمكن أن يحتوي الاسم على / \\ : * ? " < > أو |.',
   'instructionsPanel.problem.fileNameDot': 'لا يمكن أن يبدأ الاسم بنقطة.',
+  'instructionsPanel.skills.addRecommended': 'إضافة',
+  'instructionsPanel.skills.addedRecommended': 'تمت إضافة مهارة {name}.',
+  'instructionsPanel.skills.lintSetup': 'إعداد بالذكاء الاصطناعي',
+  'instructionsPanel.skills.recommended': 'موصى به لهذا المشروع',
 } as const satisfies CatalogOf<MessageKey>;

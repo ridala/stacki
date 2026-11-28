@@ -20,6 +20,8 @@ test('ids are unique, valid server names, and the catalog lists the providers th
     'sanity',
     'figma',
     'github',
+    'heroui',
+    'hugeicons',
     'linear',
     'notion',
     'atlassian',

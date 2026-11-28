@@ -55,4 +55,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': 'Название содержит не более {max} символов.',
   'instructionsPanel.problem.fileNameChars': 'В названии нельзя использовать / \\ : * ? " < > и |.',
   'instructionsPanel.problem.fileNameDot': 'Название не может начинаться с точки.',
+  'instructionsPanel.skills.addRecommended': 'Добавить',
+  'instructionsPanel.skills.addedRecommended': 'Навык {name} добавлен.',
+  'instructionsPanel.skills.lintSetup': 'Настроить с ИИ',
+  'instructionsPanel.skills.recommended': 'Рекомендуется для этого проекта',
 } as const satisfies CatalogOf<MessageKey>;
