@@ -5,13 +5,13 @@
 // file's own and an edit needs no translation (cssVars.ts).
 
 import postcss from 'postcss';
-import type { Rule as PostcssRule, Root } from 'postcss';
+import type { AtRule, Rule as PostcssRule, Root } from 'postcss';
 import path from 'path';
 import { assert } from '../../shared/core/assert';
 import { runSync, type SlicedWork } from '../lib/slicedWork';
 import { described, type Described, type MessageRef } from '../../shared/properties/i18n/messageRef';
 import { readAstroSheet, type StyleBlockWriting, type StyleRegion } from '../documents/astroStyleBlocks';
-import { CSS_VARIABLE_LIMITS, SKIPPED_DIRECTORIES, readDeclarations, toPosix, type Rule } from './cssVarRead';
+import { CSS_VARIABLE_LIMITS, SKIPPED_DIRECTORIES, atRuleSelector, isVariableAtRule, readDeclarations, toPosix, type Rule } from './cssVarRead';
 import { variableFiles as fs } from './variableWorkspace';
 
 /** Who a `<style>` block's declaration reaches. A stylesheet has no reach: it is project CSS. */
@@ -97,8 +97,10 @@ export function cssSections(file: string, text: string): readonly CssSection[] {
   });
 }
 
+export type CssVarContainer = PostcssRule | AtRule;
+
 export type FoundRule =
-  | { readonly ok: true; readonly rule: PostcssRule; readonly root: Root; readonly section: number }
+  | { readonly ok: true; readonly rule: CssVarContainer; readonly root: Root; readonly section: number }
   | { readonly ok: false; readonly error: string; readonly errorRef?: MessageRef | undefined };
 
 // The literal tag the messages name, passed as a parameter so a message never carries markup the catalog would parse as a rich-text tag.
@@ -113,17 +115,19 @@ interface RuleQuery {
   readonly section?: number | undefined;
 }
 
-function rulesIn(root: Root, selector: string): PostcssRule[] {
-  const matches: PostcssRule[] = [];
-  root.walkRules((candidate) => {
-    if (candidate.selector === selector) {
+function rulesIn(root: Root, selector: string): CssVarContainer[] {
+  const matches: CssVarContainer[] = [];
+  root.walk((candidate) => {
+    if (candidate.type === 'rule' && candidate.selector === selector) {
+      matches.push(candidate);
+    } else if (candidate.type === 'atrule' && isVariableAtRule(candidate) && atRuleSelector(candidate) === selector) {
       matches.push(candidate);
     }
   });
   return matches;
 }
 
-const declaresName = (rule: PostcssRule, name: string): boolean => (rule.nodes ?? []).some((node) => node.type === 'decl' && node.prop === name);
+const declaresName = (rule: CssVarContainer, name: string): boolean => (rule.nodes ?? []).some((node) => node.type === 'decl' && node.prop === name);
 
 /**
  * The rule an edit means. A stylesheet's is the first with that selector. An

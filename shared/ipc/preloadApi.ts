@@ -135,6 +135,7 @@ interface InvokeChannels {
   readonly importPathFor: 'page:importPathFor';
   readonly rebaseImport: 'page:rebaseImport';
   readonly createComponent: 'component:create';
+  readonly wrapFrameworkComponent: 'component:wrapFramework';
   readonly discardComponent: 'component:discard';
   readonly duplicateComponent: 'component:duplicate';
   readonly planComponentRename: 'component:planRename';

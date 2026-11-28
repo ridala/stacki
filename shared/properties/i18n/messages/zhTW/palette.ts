@@ -178,4 +178,11 @@ export const messages = {
   'palette.rename.badCharacter': '名稱中不能使用「{character}」。',
   'palette.rename.spacesRemoved': '已移除空格：{name}',
   'palette.rename.normalized': '已儲存為 {name}',
+  'palette.framework.heading': '專案元件',
+  'palette.framework.note': 'React、Vue 或 Svelte 元件。加入後會建立可拖曳至頁面的 Astro 包裝元件。',
+  'palette.framework.wrap': '加入',
+  'palette.framework.wrapFailed': '無法加入 {name} — {detail}',
+  'palette.framework.wrapWithAI': '以 AI 包裝',
+  'palette.framework.wrapped': '已將 {name}（{file}）加入元件清單。',
+  'palette.framework.wrapping': '加入中…',
 } as const satisfies CatalogOf<MessageKey>;

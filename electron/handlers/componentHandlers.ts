@@ -31,6 +31,7 @@ import { runSliced } from '../lib/slicedWork';
 import { ComponentRemovalStore, duplicateComponentTarget, previewRemoveTarget, removeComponentTarget, restoreRemovedComponent } from './componentOps';
 import { projectFoldersFor } from '../lib/projectFolders';
 import { componentImportPaths } from '../properties/componentImports';
+import { wrapFrameworkComponent } from '../project/frameworkComponents';
 
 // Step 6: every applied property batch leaves its inverse here, and the reply
 // carries the token Undo sends back (componentProperties.ts).
@@ -63,6 +64,11 @@ function registerComponentCreateHandlers({
       'Every folder the component needed was made',
     );
     return { path: target, rel, name: options.name, checksum, folders };
+  });
+
+  ipcMain.handle('component:wrapFramework', async (_event, options) => {
+    noteAppWrite();
+    return wrapFrameworkComponent(options);
   });
 
   // The Components panel's "…" menu. Expected refusals (used, outside the component folders, a name that cannot be found)

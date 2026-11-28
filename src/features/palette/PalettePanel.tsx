@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ScanComponent } from '../../../shared/properties/projectScan';
+import type { ScanComponent, ScanFrameworkComponent } from '../../../shared/properties/projectScan';
 import type { TrailingSlash } from '../../editor/pageState';
 import type { ComponentUsageFile } from './paletteModel';
 import type { ComponentCreateOptions, ComponentCreationSource, UsageAnchor, UsagePopup } from './PaletteDialogs';
@@ -17,6 +17,7 @@ import { componentRuleFile } from '../../../shared/properties/componentAccess';
 import { groupPaletteComponents, parseComponentUsage, prettyComponentName } from './paletteModel';
 import {
   CanvasIcon,
+  ChevronRightIcon,
   CopyIcon,
   ElementComponentIcon,
   GearIcon,
@@ -73,6 +74,10 @@ interface PalettePanelProps {
   readonly buildComponent?: BuildComponentAction;
   /** The component canvas, for the "…" menu's Open canvas. Absent (Studio, for now): the row is left out. */
   readonly canvas?: PaletteCanvas | undefined;
+  /** Non-Astro UI components (React/Vue/Svelte) found in the project or workspace that can be wrapped on demand. */
+  readonly frameworkComponents?: readonly ScanFrameworkComponent[] | undefined;
+  readonly onWrapFrameworkComponent?: (component: ScanFrameworkComponent) => Promise<void>;
+  readonly onWrapFrameworkWithAI?: (component: ScanFrameworkComponent) => Promise<void>;
 }
 
 /** What the "…" menu needs of the component canvas: whether it can open on a component, and opening it. */
@@ -100,6 +105,19 @@ export default function PalettePanel(props: PalettePanelProps) {
   const listed = useOfferedComponents('browse', props.components);
   const list = useMemo(() => rankInsertItems(listed, query), [listed, query]);
   const groups = useMemo(() => groupPaletteComponents(list), [list]);
+  const unwrappedFramework = useMemo(() => {
+    const all = (props.frameworkComponents ?? []).filter((entry) => entry.wrapped !== true);
+    const trimmed = query.trim().toLowerCase();
+    if (trimmed.length === 0) {
+      return all;
+    }
+    return all.filter(
+      (entry) =>
+        entry.name.toLowerCase().includes(trimmed) ||
+        entry.file.toLowerCase().includes(trimmed) ||
+        (entry.packageName?.toLowerCase().includes(trimmed) ?? false),
+    );
+  }, [props.frameworkComponents, query]);
   return (
     <div className="panel-section grow">
       <PaletteHeader source={props.createFrom} setCreating={setCreating} tooltip={tooltip} buildComponent={props.buildComponent} />
@@ -117,6 +135,9 @@ export default function PalettePanel(props: PalettePanelProps) {
         preview={preview}
         openUsage={usage.open}
         onRename={setRenaming}
+        frameworkComponents={unwrappedFramework}
+        {...(props.onWrapFrameworkComponent === undefined ? {} : { onWrapFrameworkComponent: props.onWrapFrameworkComponent })}
+        {...(props.onWrapFrameworkWithAI === undefined ? {} : { onWrapFrameworkWithAI: props.onWrapFrameworkWithAI })}
       />
       <PalettePopups
         props={props}
@@ -352,6 +373,9 @@ interface PaletteListProps {
   readonly openUsage: (component: ScanComponent, anchor: HTMLElement) => Promise<void>;
   /** Opens the rename and move dialog on a component, focused on the name or on the folder. */
   readonly onRename: (request: RenameRequest) => void;
+  readonly frameworkComponents: readonly ScanFrameworkComponent[];
+  readonly onWrapFrameworkComponent?: (component: ScanFrameworkComponent) => Promise<void>;
+  readonly onWrapFrameworkWithAI?: (component: ScanFrameworkComponent) => Promise<void>;
 }
 
 interface RenameRequest {
@@ -361,6 +385,7 @@ interface RenameRequest {
 
 function PaletteList(props: PaletteListProps) {
   const itemCount = props.groups.reduce((count, [, items]) => count + items.length, 0);
+  const hasFramework = props.frameworkComponents.length > 0;
   return (
     <div className="panel-body" onMouseLeave={props.preview.cancel}>
       {props.groups.map(([folder, items]) => (
@@ -376,7 +401,101 @@ function PaletteList(props: PaletteListProps) {
           ))}
         </React.Fragment>
       ))}
-      {itemCount === 0 && <PaletteEmpty count={props.componentCount} query={props.query} />}
+      {itemCount === 0 && !hasFramework && <PaletteEmpty count={props.componentCount} query={props.query} />}
+      {hasFramework && (
+        <FrameworkComponentsSection
+          components={props.frameworkComponents}
+          defaultExpanded={props.componentCount === 0 || props.query.trim().length > 0}
+          onWrap={props.onWrapFrameworkComponent}
+          onWrapWithAI={props.onWrapFrameworkWithAI}
+        />
+      )}
+    </div>
+  );
+}
+
+function FrameworkComponentsSection({
+  components,
+  defaultExpanded,
+  onWrap,
+  onWrapWithAI,
+}: {
+  readonly components: readonly ScanFrameworkComponent[];
+  readonly defaultExpanded: boolean;
+  readonly onWrap: PaletteListProps['onWrapFrameworkComponent'];
+  readonly onWrapWithAI: PaletteListProps['onWrapFrameworkWithAI'];
+}) {
+  const translate = useTranslate();
+  const allowed = can(useCurrentRole(), 'component:create');
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [wrapping, setWrapping] = useState<string | undefined>(undefined);
+  const open = expanded || defaultExpanded;
+
+  return (
+    <div className="palette-framework-section">
+      <button
+        type="button"
+        className="palette-framework-toggle"
+        aria-expanded={open}
+        title={translate('palette.framework.note')}
+        onClick={() => setExpanded((previous) => !previous)}
+      >
+        <span className={open ? 'palette-framework-chevron is-open' : 'palette-framework-chevron'}>
+          <ChevronRightIcon size={10} />
+        </span>
+        <span className="palette-framework-heading">{translate('palette.framework.heading')}</span>
+        <span className="palette-framework-count">{components.length}</span>
+      </button>
+      {open && (
+        <div className="palette-framework-list">
+          {components.map((component) => {
+            const busy = wrapping === component.file;
+            const subtitle = component.packageName ?? component.file;
+            return (
+              <div key={`${component.file}:${component.name}`} className="palette-framework-item" title={component.file}>
+                <span className="icon">
+                  <ElementComponentIcon size={14} />
+                </span>
+                <span className="label">
+                  {prettyComponentName(component.name)}
+                  <div className="sub">{subtitle}</div>
+                </span>
+                {allowed && (
+                  <span className="palette-framework-actions">
+                    {onWrap !== undefined && (
+                      <button
+                        type="button"
+                        className="palette-framework-wrap"
+                        disabled={wrapping !== undefined}
+                        onClick={() => {
+                          setWrapping(component.file);
+                          void onWrap(component).finally(() => setWrapping(undefined));
+                        }}
+                      >
+                        {busy ? translate('palette.framework.wrapping') : translate('palette.framework.wrap')}
+                      </button>
+                    )}
+                    {onWrapWithAI !== undefined && (
+                      <button
+                        type="button"
+                        className="ghost palette-framework-ai"
+                        aria-label={translate('palette.framework.wrapWithAI')}
+                        title={translate('palette.framework.wrapWithAI')}
+                        disabled={wrapping !== undefined}
+                        onClick={() => {
+                          void onWrapWithAI(component);
+                        }}
+                      >
+                        <SparkleIcon size={12} />
+                      </button>
+                    )}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -49,6 +49,8 @@ export interface VariableFile {
   /** The reference `error` is translated from; absent for text that is not ours. */
   readonly errorRef?: MessageRef | undefined;
   readonly count?: number;
+  readonly sourceKind?: 'workspace' | 'library' | undefined;
+  readonly overrideTarget?: string | undefined;
 }
 export interface VariablesSnapshot {
   readonly files: readonly VariableFile[];
@@ -218,6 +220,12 @@ function columnParser(budget: VariablesBudget): Parser<WireColumn> {
     line: count,
   });
 }
+function sourceKindParser(input: unknown): 'workspace' | 'library' {
+  if (input === 'workspace' || input === 'library') {
+    return input;
+  }
+  throw new Error('CSSVariables: invalid source kind');
+}
 function variableFileParser(budget: VariablesBudget): Parser<VariableFile> {
   const column = columnParser(budget);
   const row = object({
@@ -266,5 +274,7 @@ function variableFileParser(budget: VariablesBudget): Parser<VariableFile> {
     // JSON transports an absent reference as null; a malformed one is dropped and the English `error` shows.
     errorRef: (input) => parseOptionalMessageRef(input ?? undefined),
     count: optional(count),
+    sourceKind: optional(sourceKindParser),
+    overrideTarget: optional(pathText),
   });
 }

@@ -390,6 +390,23 @@ export const IPC_PAYLOADS = {
     // Below the first component folder; absent or '' is that folder itself (componentNaming.ts says what a folder may be).
     folder: optional(parseComponentSubfolder),
   }),
+  'component:wrapFramework': object({
+    ...project,
+    name: text,
+    importPath: pathText,
+    exportKind: (value: unknown): 'default' | 'named' => {
+      if (value === 'default' || value === 'named') {
+        return value;
+      }
+      throw new Error('component:wrapFramework: invalid exportKind');
+    },
+    framework: (value: unknown): 'react' | 'vue' | 'svelte' => {
+      if (value === 'react' || value === 'vue' || value === 'svelte') {
+        return value;
+      }
+      throw new Error('component:wrapFramework: invalid framework');
+    },
+  }),
   // The Components panel's "…" menu: a copy of a component or folder, its deletion, and the undo of a deletion (componentOps.ts).
   // Renaming or moving a component: the plan's summary for the dialog, the rename itself, and its undo and redo (componentRename.ts).
   'component:planRename': object({ ...project, request: parseComponentRenameRequest }),

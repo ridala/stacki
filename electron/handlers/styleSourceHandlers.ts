@@ -7,15 +7,36 @@ import * as path from 'path';
 import { toPosix } from '../lib/mainHelpers';
 import { resolveImportPath, declarationLine } from '../properties/importPaths';
 import { listCssFilesSliced, listAstroStyleFilesSliced } from '../project/styleFiles';
+import { resolveEditableWorkspaceStyleFile } from '../project/cssVarImports';
 import { announceVariableWrite } from './cssVariableHandlers';
 import type { MainHost } from './mainHost';
 
-export function registerStyleSourceHandlers(host: Pick<MainHost, 'assertInProject' | 'ipcMain' | 'send'>): void {
+export function registerStyleSourceHandlers(host: Pick<MainHost, 'assertInProject' | 'ipcMain' | 'openProject' | 'send'>): void {
   registerStyleListFilesHandlers(host);
   registerSourceWriteTextHandler(host);
 }
 
-function registerStyleListFilesHandlers({ ipcMain, assertInProject, send }: Pick<MainHost, 'ipcMain' | 'assertInProject' | 'send'>): void {
+function resolveStyleAccess(filePath: string, assertInProject: MainHost['assertInProject'], openProject: MainHost['openProject']): string {
+  try {
+    return assertInProject(filePath);
+  } catch (error: unknown) {
+    const projectRoot = openProject();
+    if (projectRoot !== undefined) {
+      const workspaceStyle = resolveEditableWorkspaceStyleFile(projectRoot, filePath);
+      if (workspaceStyle !== undefined) {
+        return workspaceStyle;
+      }
+    }
+    throw error;
+  }
+}
+
+function registerStyleListFilesHandlers({
+  ipcMain,
+  assertInProject,
+  openProject,
+  send,
+}: Pick<MainHost, 'ipcMain' | 'assertInProject' | 'openProject' | 'send'>): void {
   ipcMain.handle('style:listFiles', async (_event, projectPath) => {
     if (!projectPath) {
       return { files: [] };
@@ -31,12 +52,12 @@ function registerStyleListFilesHandlers({ ipcMain, assertInProject, send }: Pick
   });
 
   ipcMain.handle('style:readFile', async (_event, filePath) => {
-    const abs = assertInProject(filePath);
+    const abs = resolveStyleAccess(filePath, assertInProject, openProject);
     return { css: readSource(abs) };
   });
 
   ipcMain.handle('style:writeFile', async (_event, { filePath, css, announce, expected }) => {
-    const abs = assertInProject(filePath);
+    const abs = resolveStyleAccess(filePath, assertInProject, openProject);
     // Notes the write, so the watcher does not see it as external. With `expected`, the file's actor writes only while
     // the file holds those bytes, in the same step as the write, and refuses otherwise: no read-then-write gap.
     writeProjectText(abs, css, expected ?? undefined);

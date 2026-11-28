@@ -87,4 +87,9 @@ export const messages = {
   'variables.undo.variable': 'variabel',
   'variables.visibility.blocked': 'Saran variabel tidak difilter: {detail} Penyembunyian dijeda agar file itu tidak tertimpa.',
   'variables.visibility.saveFailed': 'Tidak dapat menyimpan variabel mana yang disembunyikan: {detail}',
+  'variables.error.libraryReadOnly': 'Gaya bawaan pustaka bersifat baca-saja. Ubah nilai untuk menyimpan penimpaan lokal.',
+  'variables.source.library': 'Bawaan',
+  'variables.source.libraryDetail': 'Nilai bawaan dari pustaka ini. Mengubah nilai menyimpan penimpaan lokal di stylesheet proyek tanpa mengubah node_modules.',
+  'variables.source.workspace': 'Bersama',
+  'variables.source.workspaceDetail': 'Diimpor dari paket ruang kerja bersama.',
 } as const satisfies CatalogOf<MessageKey>;

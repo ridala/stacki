@@ -180,4 +180,11 @@ export const messages = {
   'palette.rename.badCharacter': '“{character}”은(는) 이름에 사용할 수 없습니다.',
   'palette.rename.spacesRemoved': '공백 제거됨: {name}',
   'palette.rename.normalized': '{name}(으)로 저장됨',
+  'palette.framework.heading': '프로젝트 컴포넌트',
+  'palette.framework.note': 'React, Vue 또는 Svelte 컴포넌트입니다. 추가하면 페이지로 드래그할 수 있는 Astro 래퍼를 만듭니다.',
+  'palette.framework.wrap': '추가',
+  'palette.framework.wrapFailed': '{name}을(를) 추가할 수 없습니다 — {detail}',
+  'palette.framework.wrapWithAI': 'AI로 래핑',
+  'palette.framework.wrapped': '{name}({file})을(를) 컴포넌트에 추가했습니다.',
+  'palette.framework.wrapping': '추가 중…',
 } as const satisfies CatalogOf<MessageKey>;

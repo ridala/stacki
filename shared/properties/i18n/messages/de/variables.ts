@@ -89,4 +89,10 @@ export const messages = {
   'variables.undo.variable': 'die Variable', // review
   'variables.visibility.blocked': 'Variablenvorschläge werden nicht gefiltert: {detail} Ausblenden ist pausiert, damit diese Datei nicht überschrieben wird.',
   'variables.visibility.saveFailed': 'Ausgeblendete Variablen konnten nicht gespeichert werden: {detail}',
+  'variables.error.libraryReadOnly': 'Standardstile der Bibliothek sind schreibgeschützt. Bearbeite einen Wert, um eine lokale Überschreibung zu speichern.',
+  'variables.source.library': 'Standards',
+  'variables.source.libraryDetail':
+    'Standardwerte dieser Bibliothek. Durch Bearbeiten wird eine lokale Überschreibung im Stylesheet gespeichert, ohne node_modules zu ändern.',
+  'variables.source.workspace': 'Geteilt',
+  'variables.source.workspaceDetail': 'Aus einem gemeinsamen Workspace-Paket importiert.',
 } as const satisfies CatalogOf<MessageKey>;

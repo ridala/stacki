@@ -30,7 +30,7 @@ import PagesPanel from '../../features/pages/PagesPanel';
 import { usePageBulkRemoveHost } from './pageBulkRemoveDesktop';
 import { ConnectSanity } from '../../features/cmsConnections/ConnectSanity';
 import PalettePanel from '../../features/palette/PalettePanel';
-import { requestBuildComponent } from '../../lib/agentTasks';
+import { requestBuildComponent, requestWrapFrameworkComponent } from '../../lib/agentTasks';
 import AddElementsPanel from '../../features/palette/AddElementsPanel';
 import { navigatorShown, useElementDragNavigator } from '../state/elementDragNavigator';
 import { useComponentRoleRules } from '../roles/componentRoleRules';
@@ -61,7 +61,7 @@ import { useDelayedTooltip } from '../../ui/delayedTooltip';
 import FittedTooltip from '../../ui/FittedTooltip';
 import { type LeftTab } from '../appTypes';
 import type { CodeReveal, SourceRange } from '../../features/code/codePanelModel';
-import { openExternalURL, restoreProjectFile, restoreProjectVersion } from '../../ipc/appBridge';
+import { openExternalURL, restoreProjectFile, restoreProjectVersion, wrapProjectFrameworkComponent } from '../../ipc/appBridge';
 import { PhonePreviewButton } from '../../features/preview/phone/PhonePreviewMenu';
 import type { ReactNode } from 'react';
 import type { Translator } from '../../lib/i18n/localeContext';
@@ -883,6 +883,24 @@ export function PaletteTab({ app }: { readonly app: ShellView }) {
       await requestBuildComponent(translate, app.showToast);
     }
   };
+  const onWrapFrameworkComponent = async (component: NonNullable<typeof app.scan.frameworkComponents>[number]): Promise<void> => {
+    const result = await wrapProjectFrameworkComponent({
+      projectPath: app.project.path,
+      name: component.name,
+      importPath: component.importPath,
+      exportKind: component.exportKind,
+      framework: component.framework,
+    });
+    if (!result.ok) {
+      app.showToast(translate('palette.framework.wrapFailed', { name: component.name, detail: result.error.message }), 'error');
+      return;
+    }
+    app.showToast(translate('palette.framework.wrapped', { name: result.value.name, file: result.value.rel }), 'success');
+    await app.rescan(app.project.path);
+  };
+  const onWrapFrameworkWithAI = async (component: NonNullable<typeof app.scan.frameworkComponents>[number]): Promise<void> => {
+    await requestWrapFrameworkComponent(component, translate, app.showToast);
+  };
   const roleRules = useComponentRoleRules(app.project.path, app.reportFailure);
   const management = useComponentManagement(app);
   // Counts that follow the open tree: an instance deleted on the page is gone from the count in the same frame.
@@ -892,6 +910,9 @@ export function PaletteTab({ app }: { readonly app: ShellView }) {
     <PalettePanel
       canvas={canvas}
       components={components}
+      frameworkComponents={app.scan.frameworkComponents}
+      onWrapFrameworkComponent={onWrapFrameworkComponent}
+      onWrapFrameworkWithAI={onWrapFrameworkWithAI}
       roleRules={roleRules}
       management={management}
       devUrl={app.devUrl}

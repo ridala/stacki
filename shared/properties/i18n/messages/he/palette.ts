@@ -184,4 +184,11 @@ export const messages = {
   'palette.rename.badCharacter': 'אי אפשר להשתמש ב־“{character}” בשם.',
   'palette.rename.spacesRemoved': 'הרווחים הוסרו: {name}',
   'palette.rename.normalized': 'יישמר בשם {name}',
+  'palette.framework.heading': 'רכיבי הפרויקט',
+  'palette.framework.note': 'רכיבי React, Vue או Svelte. הוסיפו אחד כדי ליצור מעטפת Astro שאפשר לגרור לדפים.',
+  'palette.framework.wrap': 'הוספה',
+  'palette.framework.wrapFailed': 'לא ניתן להוסיף את {name} — {detail}',
+  'palette.framework.wrapWithAI': 'עטיפה עם AI',
+  'palette.framework.wrapped': '{name} ({file}) נוסף לרכיבים.',
+  'palette.framework.wrapping': 'מוסיף…',
 } as const satisfies CatalogOf<MessageKey>;

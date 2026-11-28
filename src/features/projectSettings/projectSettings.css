@@ -254,3 +254,9 @@
   gap: 8px;
   padding: 6px 8px 8px;
 }
+.shadcn-project-package {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}

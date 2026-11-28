@@ -87,4 +87,9 @@ export const messages = {
   'variables.undo.variable': '변수',
   'variables.visibility.blocked': '변수 추천이 필터링되지 않고 있습니다: {detail} 해당 파일을 덮어쓰지 않도록 숨기기가 일시 중지되었습니다.',
   'variables.visibility.saveFailed': '숨긴 변수 목록을 저장할 수 없습니다: {detail}',
+  'variables.error.libraryReadOnly': '라이브러리 기본 스타일은 읽기 전용입니다. 값을 수정하면 로컬 재정의가 저장됩니다.',
+  'variables.source.library': '기본값',
+  'variables.source.libraryDetail': '이 라이브러리의 기본값입니다. 값을 수정하면 node_modules를 건드리지 않고 스타일시트에 로컬 재정의를 저장합니다.',
+  'variables.source.workspace': '공유',
+  'variables.source.workspaceDetail': '공유 워크스페이스 패키지에서 가져왔습니다.',
 } as const satisfies CatalogOf<MessageKey>;

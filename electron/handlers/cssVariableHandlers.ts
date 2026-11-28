@@ -131,7 +131,8 @@ function registerCssAddSectionHandlers({ ipcMain, send }: Pick<MainHost, 'ipcMai
   ipcMain.handle('css:setVariable', async (_event, { projectPath, ...edit }) => {
     const result = cssVars.setVariable(projectPath, edit);
     if (result.ok) {
-      announceVariableWrite(send, inProject(projectPath, [edit]));
+      const touched = result.writtenFile === undefined ? inProject(projectPath, [edit]) : [path.resolve(projectPath, result.writtenFile)];
+      announceVariableWrite(send, touched);
     }
     return result;
   });

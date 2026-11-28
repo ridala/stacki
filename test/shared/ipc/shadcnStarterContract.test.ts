@@ -10,6 +10,7 @@ import {
   SHADCN_PRESET_CODE_LENGTH_MAX,
   SHADCN_STARTER_DEFAULTS,
 } from '#dist/shared/ipc/shadcnStarter.js';
+import { parseShadcnSettingsReply } from '#dist/shared/ipc/shadcnSettings.js';
 
 const location = { parentPath: '/sites', name: 'example' };
 const request = { ...location, starter: 'shadcn', shadcn: SHADCN_STARTER_DEFAULTS };
@@ -83,4 +84,16 @@ test('preset inspection accepts only bare codes and parses its success and failu
   assert.deepEqual(parseShadcnPresetReply(failed), failed);
   assert.throws(() => parseShadcnPresetReply({ ...found, value: { iconLibrary: 'unknown', style: 'nova' } }));
   assert.throws(() => parseShadcnPresetReply({ ...failed, error: { message: 1 } }));
+});
+
+test('shadcn settings replies accept optional workspace packagePath and refuse invalid paths', () => {
+  assert.deepEqual(parseShadcnSettingsReply({ ok: true, value: undefined }), { ok: true, value: undefined });
+  assert.deepEqual(parseShadcnSettingsReply({ ok: true, value: { pointer: true, rtl: false } }), { ok: true, value: { pointer: true, rtl: false } });
+  assert.deepEqual(parseShadcnSettingsReply({ ok: true, value: { pointer: true, rtl: true, packagePath: 'packages/ui' } }), {
+    ok: true,
+    value: { pointer: true, rtl: true, packagePath: 'packages/ui' },
+  });
+  for (const badPath of ['/packages/ui', '../packages/ui', 'packages\\ui', '']) {
+    assert.throws(() => parseShadcnSettingsReply({ ok: true, value: { pointer: true, rtl: true, packagePath: badPath } }));
+  }
 });

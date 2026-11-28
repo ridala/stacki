@@ -88,4 +88,10 @@ export const messages = {
   'variables.undo.variable': 'la variable', // review
   'variables.visibility.blocked': 'Las sugerencias de variables no se están filtrando: {detail} Ocultar está en pausa para no sobrescribir ese archivo.',
   'variables.visibility.saveFailed': 'No se pudo guardar qué variables están ocultas: {detail}',
+  'variables.error.libraryReadOnly': 'Los estilos predeterminados de la biblioteca son de solo lectura. Edita un valor para guardar una anulación local.',
+  'variables.source.library': 'Predeterminados',
+  'variables.source.libraryDetail':
+    'Valores predeterminados de esta biblioteca. Al editar un valor se guarda una anulación local en tu hoja de estilos sin modificar node_modules.',
+  'variables.source.workspace': 'Compartido',
+  'variables.source.workspaceDetail': 'Importado desde un paquete compartido del espacio de trabajo.',
 } as const satisfies CatalogOf<MessageKey>;

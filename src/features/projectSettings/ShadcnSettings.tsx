@@ -76,6 +76,9 @@ export default function ShadcnSettings({ projectPath, showToast }: Props) {
         <ChevronRightIcon size={14} />
       </summary>
       <div className="shadcn-project-options" aria-busy={pending}>
+        {settings.packagePath !== undefined && (
+          <p className="shadcn-project-package">{translate('welcome.shadcn.sharedPackage', { path: settings.packagePath })}</p>
+        )}
         <SwitchRow
           label={translate('welcome.shadcn.pointer')}
           checked={settings.pointer}

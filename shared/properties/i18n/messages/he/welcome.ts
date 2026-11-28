@@ -75,6 +75,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': 'יש להזין קוד הגדרה של shadcn.',
   'welcome.shadcn.presetLink': 'פתיחת shadcn Create',
   'welcome.shadcn.rtl': 'הפעלת תמיכה בתצוגה מימין לשמאל',
+  'welcome.shadcn.sharedPackage': 'חבילה משותפת: {path}',
   'welcome.siteCreated': 'האתר נוצר',
   'welcome.siteName': 'שם האתר',
   'welcome.starter.nameEmpty': 'יש להזין שם לאתר.',

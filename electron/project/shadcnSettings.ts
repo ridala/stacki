@@ -15,6 +15,7 @@ import { SHADCN_CLI_PACKAGE } from './shadcnStarter';
 import { shadcnStarterLayout } from './shadcnStarterContent';
 import { shadcnThemePicker } from './shadcnStarterTheme';
 import { runCreateCommand } from './starter';
+import { findEnclosingWorkspace, findWorkspacePackages, readProjectDependencyNames } from './workspaceAstro';
 
 const CONFIG = 'components.json';
 const FILE_COUNT_MAX = 512;
@@ -43,14 +44,25 @@ interface ProjectConfig {
   readonly rtl: boolean;
 }
 
+interface ShadcnTarget {
+  readonly root: string;
+  readonly config: ProjectConfig;
+  readonly packagePath?: string;
+}
+
 export function readShadcnSettings(root: string): ShadcnSettingsReply {
   try {
-    const config = readConfig(root);
-    if (config === undefined) {
+    const target = resolveShadcnTarget(root);
+    if (target === undefined) {
       return ok(undefined);
     }
-    const style = readOptionalSource(root, cssFile(config));
-    return ok({ rtl: config.rtl, pointer: style !== undefined && pointerDeclarations(postcss.parse(style)).at(-1)?.value === 'pointer' });
+    const style = readOptionalSource(target.root, cssFile(target.config));
+    const pointer = style !== undefined && pointerDeclarations(postcss.parse(style)).at(-1)?.value === 'pointer';
+    return ok({
+      rtl: target.config.rtl,
+      pointer,
+      ...(target.packagePath === undefined ? {} : { packagePath: target.packagePath }),
+    });
   } catch (error: unknown) {
     return failure(error);
   }
@@ -58,24 +70,66 @@ export function readShadcnSettings(root: string): ShadcnSettingsReply {
 
 export async function changeShadcnSetting(root: string, change: Omit<ShadcnSettingsChange, 'projectPath'>): Promise<ShadcnSettingsReply> {
   try {
-    if (activeChanges.has(root) || activeChanges.size >= CONCURRENT_CHANGES_MAX) {
+    const target = resolveShadcnTarget(root);
+    if (target === undefined) {
+      return ok(undefined);
+    }
+    const lockKey = target.root;
+    if (activeChanges.has(lockKey) || activeChanges.size >= CONCURRENT_CHANGES_MAX) {
       throw new Error('Wait for the current shadcn change to finish.');
     }
-    activeChanges.add(root);
+    activeChanges.add(lockKey);
     try {
-      const config = readConfig(root);
-      if (config === undefined) {
-        return ok(undefined);
-      }
-      const edits = change.setting === 'pointer' ? pointerEdit(root, config, change) : await rtlEdits(root, config, change);
-      applyEdits(root, edits);
+      const edits = change.setting === 'pointer' ? pointerEdit(target.root, target.config, change) : await rtlEdits(target.root, target.config, change);
+      applyEdits(target.root, edits);
       return readShadcnSettings(root);
     } finally {
-      activeChanges.delete(root);
+      activeChanges.delete(lockKey);
     }
   } catch (error: unknown) {
     return failure(error);
   }
+}
+
+// Resolves shadcn configuration directly in `root`, or in a single declared workspace dependency package
+// (for example, `packages/ui` in a monorepo where `apps/site` depends on `@app/ui`).
+function resolveShadcnTarget(root: string): ShadcnTarget | undefined {
+  const direct = readConfig(root);
+  if (direct !== undefined) {
+    return { root, config: direct };
+  }
+  const workspace = findEnclosingWorkspace(root);
+  if (workspace === undefined) {
+    return undefined;
+  }
+  const dependencies = readProjectDependencyNames(root);
+  if (dependencies.size === 0) {
+    return undefined;
+  }
+  const normalizedRoot = path.resolve(root);
+  const matches: ShadcnTarget[] = [];
+  for (const workspacePackage of findWorkspacePackages(workspace.workspaceRoot)) {
+    if (path.resolve(workspacePackage.packagePath) === normalizedRoot) {
+      continue;
+    }
+    if (!dependencies.has(workspacePackage.name)) {
+      continue;
+    }
+    let config: ProjectConfig | undefined;
+    try {
+      config = readConfig(workspacePackage.packagePath);
+    } catch {
+      continue;
+    }
+    if (config !== undefined) {
+      matches.push({ root: workspacePackage.packagePath, config, packagePath: workspacePackage.relativePath });
+      if (matches.length > 1) {
+        // Multiple referenced workspace packages declare shadcn configs; never guess which one to mutate.
+        return undefined;
+      }
+    }
+  }
+  return matches[0];
 }
 
 function readConfig(root: string): ProjectConfig | undefined {
@@ -267,7 +321,54 @@ function uiDirectory(root: string, alias: string): string {
       }
     }
   }
+  const packageCandidate = resolvePackageAliasDirectory(root, alias);
+  if (packageCandidate !== undefined) {
+    return packageCandidate;
+  }
   throw new Error('Stacki could not locate the shadcn UI folder. Check the UI alias in components.json.');
+}
+
+// Resolves self-referenced workspace package aliases such as `@zentrack/ui/components` using package.json exports.
+function resolvePackageAliasDirectory(root: string, alias: string): string | undefined {
+  const manifestSource = readOptionalSource(root, 'package.json', { bytesMax: CONFIG_BYTES_MAX });
+  if (manifestSource === undefined) {
+    return undefined;
+  }
+  let manifest: Readonly<Record<string, unknown>> | undefined;
+  try {
+    manifest = toRecord(JSON.parse(manifestSource));
+  } catch {
+    return undefined;
+  }
+  const packageName = manifest?.['name'];
+  if (typeof packageName !== 'string' || !alias.startsWith(`${packageName}/`)) {
+    return undefined;
+  }
+  const subpath = alias.slice(packageName.length + 1);
+  if (subpath.length === 0 || subpath.includes('..')) {
+    return undefined;
+  }
+  const exportsField = toRecord(manifest?.['exports']);
+  if (exportsField !== undefined) {
+    for (const key of [`./${subpath}/*`, `./${subpath}`]) {
+      const target = exportsField[key];
+      const defaultExport = toRecord(target)?.['default'];
+      const exportPath = typeof target === 'string' ? target : typeof defaultExport === 'string' ? defaultExport : undefined;
+      if (exportPath === undefined) {
+        continue;
+      }
+      const cleaned = exportPath.replace(/^\.\//, '').replace(/\/\*[^/]*$/, '');
+      if (cleaned.length > 0 && projectEntry(root, cleaned)?.stat.isDirectory()) {
+        return cleaned;
+      }
+    }
+  }
+  for (const candidate of [path.join('src', subpath), subpath]) {
+    if (projectEntry(root, candidate)?.stat.isDirectory()) {
+      return candidate;
+    }
+  }
+  return undefined;
 }
 
 function snapshotComponents(root: string, directory: string): readonly { readonly file: string; readonly before: string }[] {

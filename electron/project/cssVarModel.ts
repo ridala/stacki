@@ -1,7 +1,7 @@
 // The model the variables editor shows: one group per set of rules, blocks per
 // comment section or prefix, rows and columns of cells (cssVars.ts).
 
-import { variableFiles as fs } from './variableWorkspace';
+import { discoverImportedStylesheets, variableFiles as fs } from './variableWorkspace';
 import path from 'path';
 import { runSliced, runSync, type SlicedWork } from '../lib/slicedWork';
 import { assert } from '../../shared/core/assert';
@@ -66,6 +66,10 @@ export interface FileModel {
   /** The reference the panel translates `error` from; absent for text received from elsewhere. */
   readonly errorRef?: MessageRef | undefined;
   readonly count?: number;
+  /** Present when the stylesheet comes from a shared workspace package or a read-only library package. */
+  readonly sourceKind?: 'workspace' | 'library';
+  /** Local project stylesheet that receives overrides when editing a read-only library default variable. */
+  readonly overrideTarget?: string;
   declarations?: Rule[];
 }
 
@@ -316,7 +320,11 @@ export interface VariablesModel {
 
 export function* variablesSliced(projectPath: string): SlicedWork<VariablesModel> {
   const files: FileModel[] = [];
-  for (const abs of yield* stylesheetsSliced(projectPath)) {
+  const declaredByProject = new Set<string>();
+  const libraryValues = new Map<string, string>();
+  const localStylesheets = yield* stylesheetsSliced(projectPath);
+
+  for (const abs of localStylesheets) {
     // One stylesheet is one unit: a project with thousands of them is a longer run, never a refusal.
     yield;
     let text: string;
@@ -337,6 +345,7 @@ export function* variablesSliced(projectPath: string): SlicedWork<VariablesModel
     if (!rules.length) {
       continue;
     }
+    recordDeclaredNames(rules, declaredByProject);
     const groups = groupRules(rules).map((members) => buildGroup(members, rel));
     files.push({
       rel,
@@ -346,6 +355,85 @@ export function* variablesSliced(projectPath: string): SlicedWork<VariablesModel
       count: rules.reduce((sum, rule) => sum + namesOf(rule).length, 0),
     });
   }
+
+  const imported = discoverImportedStylesheets(projectPath, localStylesheets);
+  // Process editable shared workspace stylesheets before read-only library defaults so project/workspace tokens win.
+  for (const sheet of imported) {
+    if (sheet.kind !== 'workspace') {
+      continue;
+    }
+    yield;
+    let text: string;
+    try {
+      text = fs.readFileSync(sheet.absolutePath, 'utf8');
+    } catch {
+      continue;
+    }
+    let rules: Rule[];
+    try {
+      rules = readDeclarations(text);
+    } catch (error: unknown) {
+      const parseFailure = described('variables.error.parse', { detail: error instanceof Error ? error.message : String(error) });
+      files.push({
+        rel: sheet.rel,
+        name: sheet.displayName,
+        sourceKind: 'workspace',
+        error: parseFailure.message,
+        errorRef: parseFailure.messageRef,
+        groups: [],
+      });
+      continue;
+    }
+    if (!rules.length) {
+      continue;
+    }
+    recordDeclaredNames(rules, declaredByProject);
+    const groups = groupRules(rules).map((members) => buildGroup(members, sheet.rel));
+    files.push({
+      rel: sheet.rel,
+      name: sheet.displayName,
+      sourceKind: 'workspace',
+      groups,
+      declarations: rules,
+      count: rules.reduce((sum, rule) => sum + namesOf(rule).length, 0),
+    });
+  }
+
+  for (const sheet of imported) {
+    if (sheet.kind !== 'library') {
+      continue;
+    }
+    yield;
+    let text: string;
+    try {
+      text = fs.readFileSync(sheet.absolutePath, 'utf8');
+    } catch {
+      continue;
+    }
+    let allRules: Rule[];
+    try {
+      allRules = readDeclarations(text);
+    } catch {
+      // Unparseable third-party CSS never blocks the project's own variables panel.
+      continue;
+    }
+    recordLibraryFallbackValues(allRules, libraryValues);
+    const rules = filterLibraryRules(allRules, declaredByProject);
+    if (!rules.length) {
+      continue;
+    }
+    const groups = groupRules(rules).map((members) => buildGroup(members, sheet.rel));
+    files.push({
+      rel: sheet.rel,
+      name: sheet.displayName,
+      sourceKind: 'library',
+      overrideTarget: sheet.importerRel,
+      groups,
+      declarations: rules,
+      count: rules.reduce((sum, rule) => sum + namesOf(rule).length, 0),
+    });
+  }
+
   files.push(...(yield* readAstroFiles(projectPath)));
   // Values reference each other across files as freely as within one, so the
   // map every value is resolved against is the project's, not the file's.
@@ -354,17 +442,22 @@ export function* variablesSliced(projectPath: string): SlicedWork<VariablesModel
     for (const rule of file.declarations || []) {
       for (const entry of rule.entries) {
         if (entry.kind === 'var') {
-          // A `<style>` block's value holds where the block is rendered, so it
-          // answers only for a name no stylesheet declares.
-          if (!isAstroFile(file.rel) || !map.has(entry.name)) {
+          // A `<style>` block or library default answers only when no project/workspace stylesheet declares the name.
+          const lowPriority = isAstroFile(file.rel) || file.sourceKind === 'library';
+          if (!lowPriority || !map.has(entry.name)) {
             map.set(entry.name, entry.value);
           }
         }
       }
     }
   }
+  for (const [name, value] of libraryValues) {
+    if (!map.has(name)) {
+      map.set(name, value);
+    }
+  }
   const values = Object.fromEntries(map);
-  const scopes = variableScopes(files);
+  const scopes = variableScopes(files, libraryValues);
   for (const file of files) {
     delete file.declarations;
     for (const group of file.groups) {
@@ -377,6 +470,49 @@ export function* variablesSliced(projectPath: string): SlicedWork<VariablesModel
     yield;
   }
   return { files, values };
+}
+
+function recordDeclaredNames(rules: readonly Rule[], declared: Set<string>): void {
+  for (const rule of rules) {
+    for (const entry of rule.entries) {
+      if (entry.kind === 'var') {
+        declared.add(entry.name);
+      }
+    }
+  }
+}
+
+function recordLibraryFallbackValues(rules: readonly Rule[], values: Map<string, string>): void {
+  for (const rule of rules) {
+    for (const entry of rule.entries) {
+      if (entry.kind === 'var' && !values.has(entry.name)) {
+        values.set(entry.name, entry.value);
+      }
+    }
+  }
+}
+
+// Library defaults keep only global/theme rules (`:root`, `@theme`, `@variant`, light/dark modes) and omit
+// variables the project or shared workspace already defines so overrides stay in one place.
+const LIBRARY_THEME_SELECTOR = /^(?::root|:host(?:\([^)]*\))?|html|body|\.(?:light|dark|default)|\[data-theme[^\]]*\]|@(?:theme|variant)\b)/i;
+
+function isLibraryThemeRule(rule: Rule): boolean {
+  const candidates = rule.selectors.length > 0 ? rule.selectors : [rule.selector];
+  return candidates.some((selector) => LIBRARY_THEME_SELECTOR.test(selector.trim()));
+}
+
+function filterLibraryRules(rules: readonly Rule[], declaredByProject: ReadonlySet<string>): Rule[] {
+  const kept: Rule[] = [];
+  for (const rule of rules) {
+    if (!isLibraryThemeRule(rule)) {
+      continue;
+    }
+    const entries = rule.entries.filter((entry) => entry.kind === 'comment' || !declaredByProject.has(entry.name));
+    if (entries.some((entry) => entry.kind === 'var')) {
+      kept.push({ ...rule, entries });
+    }
+  }
+  return kept;
 }
 
 export function readVariables(projectPath: string): VariablesModel {
@@ -426,7 +562,7 @@ function* readAstroFiles(projectPath: string): SlicedWork<FileModel[]> {
 // A `<style>` block is its own scope, overlaid with the rest of its file: a page's
 // `:root` must not answer for a stylesheet's `:root`, nor for another page's.
 // Stylesheets are read first, so they are the base wherever a name is in both.
-function variableScopes(files: readonly FileModel[]) {
+function variableScopes(files: readonly FileModel[], libraryValues: ReadonlyMap<string, string>) {
   const base = new Map<string, string>();
   const fallback = new Map<string, string>();
   const scopes = new Map<string, Map<string, string>>();
@@ -479,6 +615,7 @@ function variableScopes(files: readonly FileModel[]) {
       fileBases.get(cell.file) ?? new Map<string, string>(),
       base,
       fallback,
+      libraryValues,
     ];
     const lookup: ValueLookup = {
       get(name: string): string | undefined {

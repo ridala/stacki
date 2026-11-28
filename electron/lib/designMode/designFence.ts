@@ -77,7 +77,7 @@ export const DESIGN_CHANNELS: ReadonlySet<string> = new Set([
   // Components.
   ...['component:classUsage', 'component:create', 'component:discard', 'component:duplicate', 'component:editProperties'],
   ...['component:planRemove', 'component:planRename', 'component:previewPropertyRemoval', 'component:properties', 'component:remove'],
-  ...['component:rename', 'component:restoreRemoved', 'component:revertProperties', 'component:revertRename', 'component:usage'],
+  ...['component:rename', 'component:restoreRemoved', 'component:revertProperties', 'component:revertRename', 'component:usage', 'component:wrapFramework'],
   // Assets, source text and the Files panel, inside the copy.
   ...['assets:convert', 'assets:delete', 'assets:dimensions', 'assets:list', 'assets:mkdir', 'assets:move', 'assets:pickUpload'],
   ...['assets:readText', 'assets:rename', 'assets:replace', 'assets:upload', 'assets:writeText'],

@@ -87,4 +87,10 @@ export const messages = {
   'variables.undo.variable': 'de variabele',
   'variables.visibility.blocked': 'Variabelesuggesties worden niet gefilterd: {detail} Verbergen is gepauzeerd zodat dat bestand niet wordt overschreven.',
   'variables.visibility.saveFailed': 'Kon niet opslaan welke variabelen verborgen zijn: {detail}',
+  'variables.error.libraryReadOnly': 'Standaardstijlen van de bibliotheek zijn alleen-lezen. Bewerk een waarde om een lokale overschrijving op te slaan.',
+  'variables.source.library': 'Standaard',
+  'variables.source.libraryDetail':
+    'Standaardwaarden van deze bibliotheek. Bij bewerken wordt een lokale overschrijving in je stylesheet opgeslagen zonder node_modules te wijzigen.',
+  'variables.source.workspace': 'Gedeeld',
+  'variables.source.workspaceDetail': 'Geïmporteerd uit een gedeeld workspace-pakket.',
 } as const satisfies CatalogOf<MessageKey>;

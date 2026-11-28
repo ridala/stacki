@@ -73,6 +73,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': 'Introduce un código de preajuste de shadcn.',
   'welcome.shadcn.presetLink': 'Abrir shadcn Create',
   'welcome.shadcn.rtl': 'Activar la compatibilidad con el diseño de derecha a izquierda',
+  'welcome.shadcn.sharedPackage': 'Paquete compartido: {path}',
   'welcome.siteCreated': 'Sitio creado',
   'welcome.siteName': 'Nombre del sitio',
   'welcome.starter.nameEmpty': 'Introduce un nombre para el sitio.',

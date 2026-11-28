@@ -87,4 +87,9 @@ export const messages = {
   'variables.undo.variable': '变量', // review
   'variables.visibility.blocked': '变量建议未被过滤：{detail} 隐藏功能已暂停，以免覆盖该文件。',
   'variables.visibility.saveFailed': '无法保存哪些变量已隐藏：{detail}',
+  'variables.error.libraryReadOnly': '库默认样式为只读。编辑任意值即可保存本地覆盖。',
+  'variables.source.library': '默认值',
+  'variables.source.libraryDetail': '此库的默认值。编辑值会在项目样式表中保存本地覆盖，而不会修改 node_modules。',
+  'variables.source.workspace': '共享',
+  'variables.source.workspaceDetail': '从共享工作区包导入。',
 } as const satisfies CatalogOf<MessageKey>;

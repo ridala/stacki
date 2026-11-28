@@ -77,6 +77,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': 'Введите код пресета shadcn.',
   'welcome.shadcn.presetLink': 'Открыть shadcn Create',
   'welcome.shadcn.rtl': 'Включить поддержку отображения справа налево',
+  'welcome.shadcn.sharedPackage': 'Общий пакет: {path}',
   'welcome.siteCreated': 'Сайт создан',
   'welcome.siteName': 'Название сайта',
   'welcome.starter.nameEmpty': 'Введите имя сайта.',

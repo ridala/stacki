@@ -87,4 +87,9 @@ export const messages = {
   'variables.undo.variable': '變數',
   'variables.visibility.blocked': '目前未篩選變數建議：{detail} 已暫停隱藏功能，以免覆寫該檔案。',
   'variables.visibility.saveFailed': '無法儲存隱藏的變數設定：{detail}',
+  'variables.error.libraryReadOnly': '函式庫預設樣式為唯讀。編輯任一數值即可儲存本機覆寫。',
+  'variables.source.library': '預設值',
+  'variables.source.libraryDetail': '此函式庫的預設值。編輯數值會在專案樣式表中儲存本機覆寫，而不會修改 node_modules。',
+  'variables.source.workspace': '共用',
+  'variables.source.workspaceDetail': '從共用工作區套件匯入。',
 } as const satisfies CatalogOf<MessageKey>;

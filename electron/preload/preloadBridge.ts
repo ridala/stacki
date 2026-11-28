@@ -315,6 +315,7 @@ function pageBridge() {
     importPathFor: invoke('page:importPathFor'),
     rebaseImport: invoke('page:rebaseImport'),
     createComponent: invoke('component:create'),
+    wrapFrameworkComponent: invoke('component:wrapFramework'),
     discardComponent: invoke('component:discard'),
     duplicateComponent: invoke('component:duplicate'),
     planComponentRename: invoke('component:planRename'),

@@ -214,4 +214,11 @@ export const messages = {
   'palette.rename.badCharacter': '«{character}» нельзя использовать в имени.',
   'palette.rename.spacesRemoved': 'Пробелы удалены: {name}',
   'palette.rename.normalized': 'Сохранено как {name}',
+  'palette.framework.heading': 'Компоненты проекта',
+  'palette.framework.note': 'Компоненты React, Vue или Svelte. Добавьте компонент, чтобы создать обёртку Astro для перетаскивания на страницы.',
+  'palette.framework.wrap': 'Добавить',
+  'palette.framework.wrapFailed': 'Не удалось добавить {name} — {detail}',
+  'palette.framework.wrapWithAI': 'Обернуть с ИИ',
+  'palette.framework.wrapped': 'Компонент {name} ({file}) добавлен в панель.',
+  'palette.framework.wrapping': 'Добавление…',
 } as const satisfies CatalogOf<MessageKey>;

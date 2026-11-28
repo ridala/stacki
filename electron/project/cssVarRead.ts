@@ -4,7 +4,7 @@
 import { variableFiles as fs } from './variableWorkspace';
 import path from 'path';
 import postcss from 'postcss';
-import type { Declaration, Rule as PostcssRule } from 'postcss';
+import type { AtRule, ChildNode, Declaration, Rule as PostcssRule } from 'postcss';
 import { LIMITS } from '../../shared/core/limits';
 import { runSync, type SlicedWork } from '../lib/slicedWork';
 import { commentLabel } from '../../shared/page/commentLabel';
@@ -114,13 +114,24 @@ export interface Rule {
 /** The indentation in front of `text`, absent when nothing matches (never). */
 export const leading = (text: string): number => text.match(/^\s*/)?.[0]?.length ?? 0;
 
+// Tailwind v4 `@theme` / `@theme inline` and `@variant light` / `@variant dark` declare custom properties directly inside at-rule blocks.
+const VARIABLE_AT_RULES = new Set(['theme', 'variant']);
+
+export function isVariableAtRule(node: AtRule): boolean {
+  return VARIABLE_AT_RULES.has(node.name.toLowerCase());
+}
+
+export function atRuleSelector(node: AtRule): string {
+  return `@${node.name} ${node.params}`.trim();
+}
+
 // Every custom property declared in one file, with where its value sits in the
 // text so it can be written back without reformatting anything around it.
 export function readDeclarations(text: string): Rule[] {
   const root = postcss.parse(text);
   const rules: Rule[] = [];
 
-  const contextOf = (node: Declaration | PostcssRule): string[] => {
+  const contextOf = (node: Declaration | PostcssRule | AtRule): string[] => {
     const parts: string[] = [];
     let parent = node.parent;
     while (parent && parent.type !== 'root') {
@@ -134,9 +145,9 @@ export function readDeclarations(text: string): Rule[] {
     return parts;
   };
 
-  root.walkRules((rule: PostcssRule) => {
+  const collectEntries = (nodes: readonly ChildNode[] | undefined): Entry[] => {
     const entries: Entry[] = [];
-    for (const node of rule.nodes || []) {
+    for (const node of nodes || []) {
       if (node.type === 'comment') {
         // Where the words are, inside the `/*` and the spacing postcss keeps in
         // raws: a heading in a single-rule file IS this comment, so renaming it
@@ -180,16 +191,38 @@ export function readDeclarations(text: string): Rule[] {
         line: node.source?.start?.line ?? 0,
       });
     }
-    if (!entries.some((entry) => entry.kind === 'var')) {
+    return entries;
+  };
+
+  root.walk((node) => {
+    if (node.type === 'rule') {
+      const entries = collectEntries(node.nodes);
+      if (!entries.some((entry) => entry.kind === 'var')) {
+        return;
+      }
+      rules.push({
+        selector: node.selector,
+        selectors: node.selectors ?? [],
+        context: contextOf(node),
+        line: node.source?.start?.line ?? 0,
+        entries,
+      });
       return;
     }
-    rules.push({
-      selector: rule.selector,
-      selectors: rule.selectors ?? [],
-      context: contextOf(rule),
-      line: rule.source?.start?.line ?? 0,
-      entries,
-    });
+    if (node.type === 'atrule' && isVariableAtRule(node)) {
+      const entries = collectEntries(node.nodes);
+      if (!entries.some((entry) => entry.kind === 'var')) {
+        return;
+      }
+      const selector = atRuleSelector(node);
+      rules.push({
+        selector,
+        selectors: [selector],
+        context: contextOf(node),
+        line: node.source?.start?.line ?? 0,
+        entries,
+      });
+    }
   });
 
   return rules;

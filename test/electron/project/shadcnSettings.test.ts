@@ -78,3 +78,58 @@ test('keeps another library hidden and refuses CSS linked outside the project', 
     rmSync(other, { recursive: true, force: true });
   }
 });
+
+test('resolves shadcn config from a declared monorepo workspace UI package and ignores unreferenced or ambiguous ones', async () => {
+  const workspace = site();
+  try {
+    const app = path.join(workspace, 'apps', 'site');
+    const ui = path.join(workspace, 'packages', 'ui');
+    const unusedUi = path.join(workspace, 'packages', 'unused-ui');
+    mkdirSync(path.join(app, 'src'), { recursive: true });
+    mkdirSync(path.join(ui, 'src', 'styles'), { recursive: true });
+    mkdirSync(path.join(ui, 'src', 'components'), { recursive: true });
+    mkdirSync(path.join(unusedUi, 'src', 'styles'), { recursive: true });
+
+    writeFileSync(path.join(workspace, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n  - packages/*\n');
+    writeFileSync(path.join(app, 'package.json'), JSON.stringify({ name: '@mono/site', dependencies: { astro: '^7.0.0', '@mono/ui': 'workspace:*' } }));
+    writeFileSync(
+      path.join(ui, 'package.json'),
+      JSON.stringify({ name: '@mono/ui', exports: { './globals.css': './src/styles/globals.css', './components/*': './src/components/*.tsx' } }),
+    );
+    writeFileSync(
+      path.join(ui, 'components.json'),
+      JSON.stringify({
+        $schema: 'https://ui.shadcn.com/schema.json',
+        style: 'base-sera',
+        tailwind: { css: 'src/styles/globals.css' },
+        aliases: { ui: '@mono/ui/components' },
+        rtl: true,
+      }),
+    );
+    const uiCss = path.join(ui, 'src', 'styles', 'globals.css');
+    writeFileSync(uiCss, '@layer base {\n  button:not(:disabled), [role="button"]:not(:disabled) {\n    cursor: pointer;\n  }\n}\n');
+
+    // Unreferenced sibling package must not interfere with the declared dependency match.
+    writeFileSync(path.join(unusedUi, 'package.json'), JSON.stringify({ name: '@mono/unused-ui' }));
+    writeFileSync(path.join(unusedUi, 'components.json'), JSON.stringify(config));
+
+    assert.deepEqual(readShadcnSettings(app), { ok: true, value: { pointer: true, rtl: true, packagePath: 'packages/ui' } });
+    assert.deepEqual(await changeShadcnSetting(app, { setting: 'pointer', enabled: false }), {
+      ok: true,
+      value: { pointer: false, rtl: true, packagePath: 'packages/ui' },
+    });
+    assert.deepEqual(await changeShadcnSetting(app, { setting: 'pointer', enabled: true }), {
+      ok: true,
+      value: { pointer: true, rtl: true, packagePath: 'packages/ui' },
+    });
+
+    // If the app depends on two workspace packages that both declare components.json, stay ambiguous (undefined).
+    writeFileSync(
+      path.join(app, 'package.json'),
+      JSON.stringify({ name: '@mono/site', dependencies: { astro: '^7.0.0', '@mono/ui': 'workspace:*', '@mono/unused-ui': 'workspace:*' } }),
+    );
+    assert.deepEqual(readShadcnSettings(app), { ok: true, value: undefined });
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});

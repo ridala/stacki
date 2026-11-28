@@ -71,6 +71,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': 'shadcn 프리셋 코드를 입력하세요.',
   'welcome.shadcn.presetLink': 'shadcn Create 열기',
   'welcome.shadcn.rtl': '오른쪽에서 왼쪽으로 읽는 언어 지원 켜기',
+  'welcome.shadcn.sharedPackage': '공유 패키지: {path}',
   'welcome.siteCreated': '사이트가 생성되었습니다',
   'welcome.siteName': '사이트 이름',
   'welcome.starter.nameEmpty': '사이트 이름을 입력하세요.',

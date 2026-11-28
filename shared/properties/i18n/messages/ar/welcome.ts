@@ -81,6 +81,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': 'أدخل رمز إعداد مسبق من shadcn.',
   'welcome.shadcn.presetLink': 'فتح shadcn Create',
   'welcome.shadcn.rtl': 'تفعيل دعم العرض من اليمين إلى اليسار',
+  'welcome.shadcn.sharedPackage': 'الحزمة المشتركة: {path}',
   'welcome.siteCreated': 'تم إنشاء الموقع',
   'welcome.siteName': 'اسم الموقع',
   'welcome.starter.nameEmpty': 'أدخل اسمًا للموقع.',

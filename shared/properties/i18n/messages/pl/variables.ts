@@ -88,4 +88,9 @@ export const messages = {
   'variables.undo.variable': 'zmienną',
   'variables.visibility.blocked': 'Podpowiedzi zmiennych nie są filtrowane: {detail} Ukrywanie jest wstrzymane, aby nie nadpisać tego pliku.',
   'variables.visibility.saveFailed': 'Nie udało się zapisać, które zmienne są ukryte: {detail}',
+  'variables.error.libraryReadOnly': 'Domyślne style biblioteki są tylko do odczytu. Edytuj wartość, aby zapisać lokalne nadpisanie.',
+  'variables.source.library': 'Domyślne',
+  'variables.source.libraryDetail': 'Domyślne wartości z tej biblioteki. Edycja zapisuje lokalne nadpisanie w arkuszu stylów bez modyfikowania node_modules.',
+  'variables.source.workspace': 'Wspólne',
+  'variables.source.workspaceDetail': 'Zaimportowano ze wspólnego pakietu obszaru roboczego.',
 } as const satisfies CatalogOf<MessageKey>;

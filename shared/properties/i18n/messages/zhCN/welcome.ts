@@ -71,6 +71,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': '输入 shadcn 预设代码。',
   'welcome.shadcn.presetLink': '打开 shadcn Create',
   'welcome.shadcn.rtl': '启用从右到左的布局支持',
+  'welcome.shadcn.sharedPackage': '共享包：{path}',
   'welcome.siteCreated': '网站已创建',
   'welcome.siteName': '网站名称',
   'welcome.starter.nameEmpty': '输入站点名称。',

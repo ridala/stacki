@@ -31,6 +31,102 @@ export interface EnclosingWorkspace {
   readonly relativeAppPath: string;
 }
 
+export interface WorkspacePackage {
+  readonly name: string;
+  readonly relativePath: string;
+  readonly packagePath: string;
+}
+
+const DEPENDENCY_SECTIONS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const;
+
+/** Lists declared workspace packages (with a package.json name) inside `workspaceRoot` without following symlinks. */
+export function findWorkspacePackages(workspaceRoot: string): readonly WorkspacePackage[] {
+  assert(path.isAbsolute(workspaceRoot), 'findWorkspacePackages: workspaceRoot must be absolute');
+  const normalized = path.resolve(workspaceRoot);
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(normalized);
+  } catch {
+    return [];
+  }
+  const declared = readWorkspacePatterns(normalized);
+  const candidates = declared.length > 0 ? expandWorkspacePatterns(normalized, realRoot, declared) : walkWorkspaceCandidates(normalized, realRoot);
+  const packages: WorkspacePackage[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (seen.has(candidate.projectPath)) {
+      continue;
+    }
+    seen.add(candidate.projectPath);
+    const name = readPackageName(candidate.projectPath);
+    if (name !== undefined) {
+      packages.push({ name, relativePath: candidate.relativePath, packagePath: candidate.projectPath });
+    }
+  }
+  packages.sort((left, right) => (left.relativePath < right.relativePath ? -1 : left.relativePath === right.relativePath ? 1 : 0));
+  assert(packages.length <= WORKSPACE_ASTRO_LIMITS.candidatesMax, 'findWorkspacePackages: result stays bounded');
+  return packages;
+}
+
+/** Reads the set of package names listed in `directory/package.json` dependency fields. */
+export function readProjectDependencyNames(directory: string): ReadonlySet<string> {
+  assert(path.isAbsolute(directory), 'readProjectDependencyNames: directory must be absolute');
+  const text = readSmallFile(path.join(directory, 'package.json'));
+  if (text === undefined) {
+    return new Set();
+  }
+  const names = new Set<string>();
+  try {
+    const manifest = toRecord(JSON.parse(text));
+    if (manifest === undefined) {
+      return names;
+    }
+    for (const section of DEPENDENCY_SECTIONS) {
+      const entries = toRecord(manifest[section]);
+      if (entries === undefined) {
+        continue;
+      }
+      for (const dependencyName of Object.keys(entries)) {
+        if (names.size >= WORKSPACE_ASTRO_LIMITS.candidatesMax) {
+          return names;
+        }
+        names.add(dependencyName);
+      }
+    }
+  } catch {
+    return new Set();
+  }
+  return names;
+}
+
+function walkWorkspaceCandidates(root: string, realRoot: string): readonly CandidateDirectory[] {
+  const found: CandidateDirectory[] = [];
+  const queue: Array<{ readonly absolute: string; readonly relativePath: string; readonly depth: number }> = [{ absolute: root, relativePath: '', depth: 0 }];
+  let inspected = 0;
+  while (queue.length > 0 && inspected < WORKSPACE_ASTRO_LIMITS.candidatesMax) {
+    const current = queue.shift();
+    if (current === undefined) {
+      break;
+    }
+    for (const child of listChildDirectories(current.absolute)) {
+      if (inspected >= WORKSPACE_ASTRO_LIMITS.candidatesMax) {
+        break;
+      }
+      inspected += 1;
+      const nextRelative = current.relativePath.length === 0 ? child : `${current.relativePath}/${child}`;
+      const nextAbsolute = path.join(current.absolute, child);
+      if (!isContainedRealDirectory(realRoot, nextAbsolute)) {
+        continue;
+      }
+      found.push({ relativePath: nextRelative, projectPath: nextAbsolute });
+      if (current.depth + 1 < WORKSPACE_ASTRO_LIMITS.depthMax) {
+        queue.push({ absolute: nextAbsolute, relativePath: nextRelative, depth: current.depth + 1 });
+      }
+    }
+  }
+  return found;
+}
+
 /**
  * Finds Astro applications nested inside `directory` when `directory` is a monorepo or workspace root.
  * Reads declared workspace patterns (`pnpm-workspace.yaml`, `package.json#workspaces`, `lerna.json`) first

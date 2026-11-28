@@ -101,4 +101,9 @@ export const messages = {
   'variables.undo.variable': 'المتغير',
   'variables.visibility.blocked': 'لا تتم تصفية اقتراحات المتغيرات: {detail} أُوقف الإخفاء مؤقتًا حتى لا يُستبدل ذلك الملف.',
   'variables.visibility.saveFailed': 'تعذّر حفظ المتغيرات المخفية: {detail}',
+  'variables.error.libraryReadOnly': 'أنماط المكتبة الافتراضية للقراءة فقط. عدّل أي قيمة لحفظ تخصيص محلي.',
+  'variables.source.library': 'افتراضية',
+  'variables.source.libraryDetail': 'قيم افتراضية من هذه المكتبة. تعديل أي قيمة يحفظ تخصيصًا محليًا في ملف الأنماط دون تعديل node_modules.',
+  'variables.source.workspace': 'مشتركة',
+  'variables.source.workspaceDetail': 'مستوردة من حزمة مساحة عمل مشتركة.',
 } as const satisfies CatalogOf<MessageKey>;

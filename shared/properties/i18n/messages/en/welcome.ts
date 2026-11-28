@@ -73,6 +73,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': 'Enter a shadcn preset code.',
   'welcome.shadcn.presetLink': 'Open shadcn Create',
   'welcome.shadcn.rtl': 'Enable RTL support',
+  'welcome.shadcn.sharedPackage': 'Shared package: {path}',
   'welcome.siteCreated': 'Site created',
   'welcome.siteName': 'Site name',
   'welcome.starter.nameEmpty': 'Enter a site name.',

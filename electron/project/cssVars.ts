@@ -1,8 +1,7 @@
-import { variableFiles as fs } from './variableWorkspace';
-import path from 'path';
-import { writeProjectText } from './variableWorkspace';
+import { isLibraryVariableFile, resolveEditableVariableFile, resolveLibrarySourceFile, variableFiles as fs, writeProjectText } from './variableWorkspace';
 import { assert } from '../../shared/core/assert';
 import { findRule, sectionAt, styleWriteProblem } from './cssVarRegions';
+import { findStylesheets, readDeclarations } from './cssVarRead';
 import type { Declaration } from 'postcss';
 import { described, type Described, type MessageKey, type MessageRef } from '../../shared/properties/i18n/messageRef';
 import type { MessageParams } from '../../shared/core/i18n/catalog';
@@ -69,13 +68,21 @@ interface SetValuePayload {
 /**
  * Replaces one variable's value in place. The value it is replacing has to be
  * the value that was read, or the file has changed underneath the panel and the
- * offsets no longer mean anything.
+ * offsets no longer mean anything. Editing a read-only library default writes
+ * a clean local override into the project stylesheet that imported the library.
  */
 function setVariable(
   projectPath: string,
-  { file, valueStart, valueEnd, expect, value }: SetValuePayload,
-): { ok: boolean; stale?: boolean; error?: string; errorRef?: MessageRef | undefined } {
-  const abs = path.resolve(projectPath, file);
+  payload: SetValuePayload,
+): { ok: boolean; stale?: boolean; writtenFile?: string; error?: string; errorRef?: MessageRef | undefined } {
+  const { file, valueStart, valueEnd, expect, value } = payload;
+  if (isLibraryVariableFile(file)) {
+    return setLibraryVariableOverride(projectPath, payload);
+  }
+  const abs = resolveEditableVariableFile(projectPath, file);
+  if (abs === undefined) {
+    return { ok: false, ...refusal('variables.error.libraryReadOnly') };
+  }
   const text = fs.readFileSync(abs, 'utf8');
   const current = text.slice(valueStart, valueEnd);
   if (expect !== undefined && current !== expect) {
@@ -83,6 +90,99 @@ function setVariable(
   }
   const problem = commit(abs, { file, text, next: text.slice(0, valueStart) + value + text.slice(valueEnd) });
   return problem === undefined ? { ok: true } : { ok: false, ...problemRefusal(problem) };
+}
+
+function setLibraryVariableOverride(
+  projectPath: string,
+  { file, valueStart, valueEnd, expect, value }: SetValuePayload,
+): { ok: boolean; stale?: boolean; writtenFile?: string; error?: string; errorRef?: MessageRef | undefined } {
+  const source = resolveLibrarySourceFile(projectPath, findStylesheets(projectPath), file);
+  if (source === undefined) {
+    return { ok: false, ...refusal('variables.error.ruleGone', { selector: ':root', file }) };
+  }
+  const libraryText = fs.readFileSync(source.absolutePath, 'utf8');
+  const current = libraryText.slice(valueStart, valueEnd);
+  if (expect !== undefined && current !== expect) {
+    return { ok: false, stale: true, ...refusal('variables.error.changedSincePanelRead') };
+  }
+  const located = findDeclarationAtOffset(libraryText, valueStart, valueEnd);
+  if (located === undefined) {
+    return { ok: false, ...refusal('variables.error.placeGone') };
+  }
+  const targetAbs = resolveEditableVariableFile(projectPath, source.importerRel);
+  if (targetAbs === undefined) {
+    return { ok: false, ...refusal('variables.error.libraryReadOnly') };
+  }
+  const targetText = fs.readFileSync(targetAbs, 'utf8');
+  const overrideSelector = normalizeOverrideSelector(located.selector);
+  const nextTarget = upsertOverrideDeclaration(targetText, {
+    file: source.importerRel,
+    selector: overrideSelector,
+    name: located.name,
+    value: value.trim().replace(/;+$/, ''),
+  });
+  const problem = commit(targetAbs, { file: source.importerRel, text: targetText, next: nextTarget });
+  return problem === undefined ? { ok: true, writtenFile: source.importerRel } : { ok: false, ...problemRefusal(problem) };
+}
+
+function findDeclarationAtOffset(text: string, valueStart: number, valueEnd: number): { readonly name: string; readonly selector: string } | undefined {
+  for (const rule of readDeclarations(text)) {
+    for (const entry of rule.entries) {
+      if (entry.kind === 'var' && entry.valueStart === valueStart && entry.valueEnd === valueEnd) {
+        return { name: entry.name, selector: rule.selector };
+      }
+    }
+  }
+  return undefined;
+}
+
+// Base/light selectors like `:root, [data-theme="light"], .light` collapse to `:root` in a local override;
+// dark/mode selectors keep their scope so dark edits stay dark-only.
+function normalizeOverrideSelector(selector: string): string {
+  const trimmed = selector.trim();
+  if (trimmed.includes(':root') && !/dark/i.test(trimmed)) {
+    return ':root';
+  }
+  return trimmed.length > 0 ? trimmed : ':root';
+}
+
+function upsertOverrideDeclaration(
+  targetText: string,
+  { file, selector, name, value }: { readonly file: string; readonly selector: string; readonly name: string; readonly value: string },
+): string {
+  const existing = findRule(targetText, { file, selector });
+  if (existing.ok) {
+    const declarations = (existing.rule.nodes ?? []).filter((node): node is Declaration => node.type === 'decl');
+    const sameName = declarations.find((declaration) => declaration.prop === name);
+    if (sameName !== undefined) {
+      const start = sameName.source?.start?.offset ?? 0;
+      const end = sameName.source?.end?.offset ?? start;
+      const rawValue = sameName.raws.value?.raw ?? sameName.value;
+      const leadingSpaces = rawValue.match(/^\s*/)?.[0]?.length ?? 0;
+      const valueStart = start + sameName.prop.length + (sameName.raws.between ?? ':').length + leadingSpaces;
+      const declText = targetText.slice(start, end);
+      const valueEnd = Math.max(valueStart, start + declText.replace(/[\s;]+$/, '').length);
+      return targetText.slice(0, valueStart) + value + targetText.slice(valueEnd);
+    }
+    const lastDecl = declarations[declarations.length - 1];
+    if (lastDecl !== undefined) {
+      const start = lastDecl.source?.start?.offset ?? 0;
+      const end = lastDecl.source?.end?.offset ?? start;
+      const indent = targetText.slice(targetText.lastIndexOf('\n', start - 1) + 1, start);
+      const nextLine = targetText.indexOf('\n', end);
+      const at = nextLine === -1 ? targetText.length : nextLine + 1;
+      const prefix = nextLine === -1 ? '\n' : '';
+      return `${targetText.slice(0, at)}${prefix}${indent}${name}: ${value};\n${targetText.slice(at)}`;
+    }
+    const openOffset = existing.rule.source?.start?.offset ?? 0;
+    const brace = targetText.indexOf('{', openOffset);
+    if (brace !== -1) {
+      return `${targetText.slice(0, brace + 1)}\n  ${name}: ${value};\n${targetText.slice(brace + 1)}`;
+    }
+  }
+  const separator = targetText.endsWith('\n\n') ? '' : targetText.endsWith('\n') ? '\n' : '\n\n';
+  const heading = targetText.includes('/* Library overrides */') ? '' : '/* Library overrides */\n';
+  return `${targetText}${separator}${heading}${selector} {\n  ${name}: ${value};\n}\n`;
 }
 
 interface SectionRangePayload {
@@ -116,7 +216,10 @@ function setSectionTitle(
     return { ok: false, ...refusal('variables.error.headingCannotContainCommentEnd') };
   }
 
-  const abs = path.resolve(projectPath, file);
+  const abs = resolveEditableVariableFile(projectPath, file);
+  if (abs === undefined) {
+    return { ok: false, ...refusal('variables.error.libraryReadOnly') };
+  }
   const text = fs.readFileSync(abs, 'utf8');
   const current = text.slice(start, end);
   if (expect !== undefined && current !== expect) {
@@ -142,7 +245,10 @@ function removeSection(
   projectPath: string,
   { file, start, end, expect }: SectionRangePayload,
 ): { ok: boolean; stale?: boolean; error?: string; errorRef?: MessageRef | undefined } {
-  const abs = path.resolve(projectPath, file);
+  const abs = resolveEditableVariableFile(projectPath, file);
+  if (abs === undefined) {
+    return { ok: false, ...refusal('variables.error.libraryReadOnly') };
+  }
   const text = fs.readFileSync(abs, 'utf8');
   if (expect !== undefined && text.slice(start, end) !== expect) {
     return { ok: false, stale: true, ...refusal('variables.error.changedSincePanelRead') };
@@ -193,7 +299,10 @@ function moveHeading(
   projectPath: string,
   { file, selector, start, end, expect, before }: MoveHeadingPayload,
 ): { ok: boolean; stale?: boolean; error?: string; errorRef?: MessageRef | undefined } {
-  const abs = path.resolve(projectPath, file);
+  const abs = resolveEditableVariableFile(projectPath, file);
+  if (abs === undefined) {
+    return { ok: false, ...refusal('variables.error.libraryReadOnly') };
+  }
   const text = fs.readFileSync(abs, 'utf8');
   if (expect !== undefined && text.slice(start, end) !== expect) {
     return { ok: false, stale: true, ...refusal('variables.error.changedSincePanelRead') };
@@ -277,7 +386,10 @@ function addSection(
     return { ok: false, ...refusal('variables.error.headingCannotContainCommentEnd') };
   }
 
-  const abs = path.resolve(projectPath, file);
+  const abs = resolveEditableVariableFile(projectPath, file);
+  if (abs === undefined) {
+    return { ok: false, ...refusal('variables.error.libraryReadOnly') };
+  }
   const text = fs.readFileSync(abs, 'utf8');
 
   let offset = at;
@@ -367,7 +479,10 @@ function moveVariable(
   projectPath: string,
   { file, selector, name, target, at: landAt }: MoveVariablePayload,
 ): { ok: boolean; error?: string; errorRef?: MessageRef | undefined; changed?: boolean } {
-  const abs = path.resolve(projectPath, file);
+  const abs = resolveEditableVariableFile(projectPath, file);
+  if (abs === undefined) {
+    return { ok: false, ...refusal('variables.error.libraryReadOnly') };
+  }
   const text = fs.readFileSync(abs, 'utf8');
   const found = findRule(text, { file, selector, declares: name });
   if (!found.ok) {
@@ -430,7 +545,10 @@ function moveSection(
   projectPath: string,
   { file, selector, names, target }: MoveSectionPayload,
 ): { ok: boolean; error?: string; errorRef?: MessageRef | undefined; changed?: boolean } {
-  const abs = path.resolve(projectPath, file);
+  const abs = resolveEditableVariableFile(projectPath, file);
+  if (abs === undefined) {
+    return { ok: false, ...refusal('variables.error.libraryReadOnly') };
+  }
   const text = fs.readFileSync(abs, 'utf8');
   const found = findRule(text, { file, selector, declares: names[0] });
   if (!found.ok) {
@@ -528,7 +646,10 @@ function addVariable(
   projectPath: string,
   { file, selector, name, value = 'unset', after }: AddVariablePayload,
 ): { ok: boolean; error?: string; errorRef?: MessageRef | undefined; name?: string } {
-  const abs = path.resolve(projectPath, file);
+  const abs = resolveEditableVariableFile(projectPath, file);
+  if (abs === undefined) {
+    return { ok: false, ...refusal('variables.error.libraryReadOnly') };
+  }
   const text = fs.readFileSync(abs, 'utf8');
   const found = findRule(text, { file, selector, declares: after });
   if (!found.ok) {

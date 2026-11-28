@@ -180,4 +180,11 @@ export const messages = {
   'palette.rename.badCharacter': 'नाम में “{character}” इस्तेमाल नहीं हो सकता।',
   'palette.rename.spacesRemoved': 'स्पेस हटाए गए: {name}',
   'palette.rename.normalized': '{name} के रूप में सहेजा गया',
+  'palette.framework.heading': 'प्रोजेक्ट कंपोनेंट्स',
+  'palette.framework.note': 'React, Vue या Svelte कंपोनेंट्स। पेजों पर खींचने के लिए Astro रैपर बनाने हेतु किसी एक को जोड़ें।',
+  'palette.framework.wrap': 'जोड़ें',
+  'palette.framework.wrapFailed': '{name} नहीं जोड़ा जा सका — {detail}',
+  'palette.framework.wrapWithAI': 'AI से रैप करें',
+  'palette.framework.wrapped': '{name} ({file}) कंपोनेंट्स में जोड़ा गया।',
+  'palette.framework.wrapping': 'जोड़ा जा रहा है…',
 } as const satisfies CatalogOf<MessageKey>;

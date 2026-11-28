@@ -87,4 +87,10 @@ export const messages = {
   'variables.undo.variable': 'değişkeni',
   'variables.visibility.blocked': 'Değişken önerileri filtrelenmiyor: {detail} Dosyanın üzerine yazılmaması için gizleme duraklatıldı.',
   'variables.visibility.saveFailed': 'Hangi değişkenlerin gizli olduğu kaydedilemedi: {detail}',
+  'variables.error.libraryReadOnly': 'Kitaplık varsayılan stilleri salt okunurdur. Yerel bir geçersiz kılma kaydetmek için bir değeri düzenleyin.',
+  'variables.source.library': 'Varsayılanlar',
+  'variables.source.libraryDetail':
+    'Bu kitaplığın varsayılan değerleri. Bir değeri düzenlemek node_modules dosyasını değiştirmeden stil dosyanıza yerel geçersiz kılma kaydeder.',
+  'variables.source.workspace': 'Paylaşılan',
+  'variables.source.workspaceDetail': 'Paylaşılan bir çalışma alanı paketinden içe aktarıldı.',
 } as const satisfies CatalogOf<MessageKey>;

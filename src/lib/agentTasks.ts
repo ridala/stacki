@@ -8,6 +8,7 @@
 import { assert } from '../../shared/core/assert';
 import { agentTask, type AgentTask } from '../../shared/properties/agentTask';
 import type { Translator } from '../../shared/properties/i18n/messageRef';
+import type { ScanFrameworkComponent } from '../../shared/properties/projectScan';
 
 /** How a hand-off ended, for the caller's toast. */
 export type AgentTaskOutcome =
@@ -132,5 +133,37 @@ export async function requestBuildComponent(translate: Translator, notify: Build
 export async function copyBuildComponent(translate: Translator, notify: BuildNotify): Promise<void> {
   // Studio's own handler writes to chat. Copy directly to keep that state untouched.
   const { message, kind } = agentTaskMessage(await copyAgentPrompt(componentBuildPrompt()), translate);
+  notify(message, kind === 'error' ? 'error' : 'success');
+}
+
+export function wrapFrameworkComponentPrompt(component: ScanFrameworkComponent): string {
+  const importStatement =
+    component.exportKind === 'named'
+      ? `import { ${component.name} } from '${component.importPath}';`
+      : `import ${component.name} from '${component.importPath}';`;
+  return [
+    `Wrap the existing ${component.framework} component "${component.name}" (${component.file}) as an Astro component so it can be inserted and edited visually in Stacki.`,
+    '',
+    `1. Inspect ${component.file} to see its props, defaults, and children/slots.`,
+    `2. Create a clean wrapper at src/components/${component.name}.astro using \`${importStatement}\` and an appropriate Astro hydration directive (such as \`client:load\` or \`client:visible\`) only if it needs client interactivity.`,
+    `3. Expose the useful visual props on \`export interface Props\` with sensible defaults so the component renders meaningfully when dragged onto a page in Stacki, and forward \`class?: string\` and default slot content where applicable.`,
+    `4. Do not modify or delete ${component.file}; keep existing project styling and dependencies intact.`,
+  ].join('\n');
+}
+
+export async function requestWrapFrameworkComponent(component: ScanFrameworkComponent, translate: Translator, notify: BuildNotify): Promise<void> {
+  const outcome = await requestAgentTask(
+    agentTask({
+      title: translate('palette.framework.wrapWithAI'),
+      prompt: wrapFrameworkComponentPrompt(component),
+      delivery: 'draft',
+      context: { files: [component.file], nodeRefs: [], findingIds: [] },
+    }),
+  );
+  if (outcome.tag === 'sent') {
+    notify(translate('palette.components.buildWithAI.draftReady'), 'success');
+    return;
+  }
+  const { message, kind } = agentTaskMessage(outcome, translate);
   notify(message, kind === 'error' ? 'error' : 'success');
 }

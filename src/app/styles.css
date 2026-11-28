@@ -4084,6 +4084,110 @@ body > .embed-editor_provenance {
   cursor: default;
 }
 
+.palette-framework-section {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.palette-framework-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.palette-framework-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-dim);
+}
+.palette-framework-chevron {
+  display: inline-flex;
+  transition: transform 0.14s ease;
+}
+.palette-framework-chevron.is-open {
+  transform: rotate(90deg);
+}
+.palette-framework-heading {
+  flex: 1;
+  text-align: start;
+}
+.palette-framework-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.palette-framework-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin: 1px 0;
+  border-radius: 6px;
+  color: var(--text-dim);
+}
+.palette-framework-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.palette-framework-item .icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.palette-framework-item .label {
+  flex: 1;
+  font-weight: 500;
+  line-height: 1.25;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.palette-framework-item .sub {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-faint);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-framework-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.palette-framework-wrap {
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.palette-framework-wrap:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.palette-framework-wrap:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.palette-framework-ai {
+  padding: 3px;
+}
+
 /* Where a component is used — pages and components, each a way in. */
 .instances-popup {
   position: fixed;
