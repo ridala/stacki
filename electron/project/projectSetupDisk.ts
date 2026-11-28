@@ -6,17 +6,23 @@ import ts from 'typescript';
 import { assert } from '../../shared/core/assert';
 import { BOUNDARY_LIMITS } from '../../shared/core/boundary';
 import { ASTRO_CONFIG_FILES, pagesFolderOf, projectFolderOfLiteral, sourceDirectoryFromConfig } from '../../shared/properties/astroSourceDirectory';
-import { PROJECT_SETUP_ENTRIES_MAX, type ProjectSetupReport } from '../../shared/ipc/projectSetup';
+import { PROJECT_SETUP_ENTRIES_MAX, PROJECT_SETUP_FINDING_FILES_MAX, type ProjectSetupReport } from '../../shared/ipc/projectSetup';
 import { PROJECT_FOLDERS_FILE, PROJECT_FOLDER_LIMITS, readProjectFoldersSource } from '../../shared/properties/projectFolders';
 import { errorCode } from './projectWalk';
 
 const SOURCE_BYTES_MAX = 256 * 1024;
 const DIRECTORY_LEVELS_MAX = 32;
 const DIRECTORY_BUFFER_SIZE = 32;
+const PATH_ALIASES_MAX = 32;
+const MIDDLEWARE_FILES = ['src/middleware.ts', 'src/middleware.js', 'src/middleware.mjs'] as const;
+const FRAMEWORK_COMPONENT_RE = /\.(?:tsx|jsx|vue|svelte)$/i;
+const TEST_FILE_RE = /\.(?:test|spec)\.[^.]+$/i;
 
 export interface SetupPages {
   readonly folder: string;
   readonly source: ProjectSetupReport['pagesSource'];
+  readonly configFile: string | undefined;
+  readonly externalConfigImports: readonly string[];
   readonly witness: readonly string[];
 }
 
@@ -26,23 +32,94 @@ export interface SetupFile {
   readonly witness: string;
 }
 
+export interface SetupPathAlias {
+  readonly prefix: string;
+  readonly targetPrefix: string;
+}
+
+export interface SetupFramingEvidence {
+  readonly file: string;
+  readonly witness: string;
+}
+
 export function setupPages(root: string): SetupPages {
   const files = ASTRO_CONFIG_FILES.filter((file) => checkedEntry(root, file).kind !== 'missing');
   const file = files[0];
   if (file === undefined) {
-    return { folder: pagesFolderOf(undefined), source: 'default', witness: [] };
+    return { folder: pagesFolderOf(undefined), source: 'default', configFile: undefined, externalConfigImports: [], witness: [] };
   }
   const reading = setupText(root, file, SOURCE_BYTES_MAX);
   const witness = [...files, reading.kind === 'text' ? hashText(reading.text) : reading.kind];
+  const externalConfigImports = reading.kind === 'text' ? readExternalConfigImports(file, reading.text) : [];
   // Installed Astro prefers .ts to .mts and does not search .cjs. Desktop discovery
   // does search .cjs. Studio can also select a config explicitly. Ambiguity blocks setup.
   if (files.length === 1 && file !== 'astro.config.cjs' && reading.kind === 'text') {
     const directory = sourceDirectory(file, reading.text);
     if (directory.kind === 'verified') {
-      return { folder: pagesFolderOf(directory.value), source: directory.value === undefined ? 'default' : 'literal', witness };
+      return {
+        folder: pagesFolderOf(directory.value),
+        source: directory.value === undefined ? 'default' : 'literal',
+        configFile: file,
+        externalConfigImports,
+        witness,
+      };
     }
   }
-  return { folder: pagesFolderOf(undefined), source: 'unverified', witness };
+  return { folder: pagesFolderOf(undefined), source: 'unverified', configFile: file, externalConfigImports, witness };
+}
+
+/** Reads `compilerOptions.paths` prefix aliases from tsconfig.json so `@/...` Astro imports resolve during setup scans. */
+export function setupPathAliases(root: string): { readonly aliases: readonly SetupPathAlias[]; readonly witness: string | undefined } {
+  const reading = setupText(root, 'tsconfig.json', SOURCE_BYTES_MAX);
+  if (reading.kind !== 'text') {
+    return { aliases: [], witness: undefined };
+  }
+  const parsed = ts.parseConfigFileTextToJson('tsconfig.json', reading.text);
+  const config: unknown = parsed.config;
+  if (typeof config !== 'object' || config === null || !('compilerOptions' in config)) {
+    return { aliases: [], witness: hashText(reading.text) };
+  }
+  const compilerOptions: unknown = Reflect.get(config, 'compilerOptions');
+  if (typeof compilerOptions !== 'object' || compilerOptions === null || !('paths' in compilerOptions)) {
+    return { aliases: [], witness: hashText(reading.text) };
+  }
+  const pathsField: unknown = Reflect.get(compilerOptions, 'paths');
+  if (typeof pathsField !== 'object' || pathsField === null) {
+    return { aliases: [], witness: hashText(reading.text) };
+  }
+  const aliases: SetupPathAlias[] = [];
+  for (const [pattern, rawTargets] of Object.entries(pathsField)) {
+    if (aliases.length >= PATH_ALIASES_MAX) {
+      break;
+    }
+    if (!pattern.endsWith('/*') || !Array.isArray(rawTargets)) {
+      continue;
+    }
+    const firstTarget: unknown = rawTargets[0];
+    if (typeof firstTarget !== 'string' || !firstTarget.endsWith('/*')) {
+      continue;
+    }
+    const normalizedTarget = firstTarget.slice(0, -1).replace(/^\.\//, '');
+    if (normalizedTarget.length === 0 || normalizedTarget.startsWith('/') || normalizedTarget.includes('..')) {
+      continue;
+    }
+    aliases.push({ prefix: pattern.slice(0, -1), targetPrefix: normalizedTarget });
+  }
+  return { aliases, witness: hashText(reading.text) };
+}
+
+/** Checks Astro middleware files for iframe-blocking headers (`X-Frame-Options` or `frame-ancestors`). */
+export function setupFramingHeaders(root: string): SetupFramingEvidence | undefined {
+  for (const file of MIDDLEWARE_FILES) {
+    const reading = setupText(root, file, SOURCE_BYTES_MAX);
+    if (reading.kind !== 'text') {
+      continue;
+    }
+    if (/x-frame-options|frame-ancestors/i.test(reading.text)) {
+      return { file, witness: hashText(reading.text) };
+    }
+  }
+  return undefined;
 }
 
 export function setupMetadata(root: string) {
@@ -63,6 +140,8 @@ export function setupInventory(root: string, roots: readonly string[], timeAvail
   assert(new Set(roots).size === roots.length, 'Setup inventory roots are unique');
   const pending = [...roots];
   const files: SetupFile[] = [];
+  const frameworkComponents: string[] = [];
+  let frameworkComponentCount = 0;
   let remaining = PROJECT_SETUP_ENTRIES_MAX;
   let incomplete = false;
   inventory: for (let index = 0; index < pending.length && remaining > 0; index += 1) {
@@ -123,6 +202,11 @@ export function setupInventory(root: string, roots: readonly string[], timeAvail
               } else {
                 incomplete = true;
               }
+            } else if (entryPath.startsWith('src/components/') && FRAMEWORK_COMPONENT_RE.test(entry.name) && !TEST_FILE_RE.test(entry.name)) {
+              frameworkComponentCount += 1;
+              if (frameworkComponents.length < PROJECT_SETUP_FINDING_FILES_MAX) {
+                frameworkComponents.push(entryPath);
+              }
             }
           } else {
             incomplete = true;
@@ -135,7 +219,12 @@ export function setupInventory(root: string, roots: readonly string[], timeAvail
       incomplete = true;
     }
   }
-  return { files: files.sort((left, right) => (left.path < right.path ? -1 : left.path === right.path ? 0 : 1)), incomplete: incomplete || remaining === 0 };
+  return {
+    files: files.sort((left, right) => (left.path < right.path ? -1 : left.path === right.path ? 0 : 1)),
+    frameworkComponentCount,
+    frameworkComponents: frameworkComponents.sort(),
+    incomplete: incomplete || remaining === 0,
+  };
 }
 
 export function setupEvidenceText(root: string, file: SetupFile) {
@@ -148,6 +237,27 @@ export function setupEvidenceText(root: string, file: SetupFile) {
 
 export function hashText(text: string): string {
   return createHash('sha256').update(text).digest('hex');
+}
+
+function readExternalConfigImports(file: string, source: string): readonly string[] {
+  const syntax = setupSyntax(file, source);
+  if (syntax === undefined) {
+    return [];
+  }
+  const external: string[] = [];
+  for (const statement of syntax.statements) {
+    if (external.length >= PROJECT_SETUP_FINDING_FILES_MAX) {
+      break;
+    }
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
+      continue;
+    }
+    const specifier = statement.moduleSpecifier.text;
+    if (specifier.startsWith('../')) {
+      external.push(specifier);
+    }
+  }
+  return external;
 }
 
 function sourceDirectory(file: string, source: string): { readonly kind: 'unverified' } | { readonly kind: 'verified'; readonly value: string | undefined } {
@@ -171,6 +281,14 @@ function sourceDirectory(file: string, source: string): { readonly kind: 'unveri
   let sourceDirectory: string | undefined;
   const seen = new Set<string>();
   for (const property of config.properties) {
+    if (ts.isShorthandPropertyAssignment(property)) {
+      const key = property.name.text;
+      if (seen.has(key) || key === 'root' || key === 'srcDir' || key === 'publicDir' || key === 'outDir' || key === 'cacheDir') {
+        return { kind: 'unverified' };
+      }
+      seen.add(key);
+      continue;
+    }
     if (!ts.isPropertyAssignment(property) || (!ts.isIdentifier(property.name) && !ts.isStringLiteral(property.name))) {
       return { kind: 'unverified' };
     }

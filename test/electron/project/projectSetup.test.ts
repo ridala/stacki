@@ -7,6 +7,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { applyProjectSetup, scanProjectSetup } from '#dist/electron/project/projectSetup.js';
 import { createProjectSetupAccess } from '#dist/electron/handlers/projectSetupHandlers.js';
+import { siteFolderChoice } from '#dist/electron/project/folderOpen.js';
+import { findWorkspaceAstroApps } from '#dist/electron/project/workspaceAstro.js';
 import { parseProjectSetupApply, parseProjectSetupResult } from '#dist/shared/ipc/projectSetup.js';
 
 function fixture(context: TestContext) {
@@ -216,4 +218,81 @@ test('Settings can confirm only the open Astro folder through the native picker'
   access.confirmOpen(access.beginPicker(), projectPath, projectPath);
   assert.ok(access.authorize(projectPath, projectPath));
   assert.equal(access.authorize(projectPath, other.projectPath), undefined);
+});
+
+test('monorepo root discovers nested Astro apps and setup reports compatibility findings and tsconfig aliases', (context) => {
+  const { projectPath: workspaceRoot, write } = fixture(context);
+  write('pnpm-workspace.yaml', 'packages:\n  - apps/*\n');
+  write('package.json', JSON.stringify({ name: 'portfolio-monorepo', packageManager: 'pnpm@12.0.0' }));
+  write('apps/studio/package.json', JSON.stringify({ name: 'studio', dependencies: { sanity: '^4.0.0' } }));
+  write('apps/web/package.json', JSON.stringify({ name: 'web', devDependencies: { astro: '^7.0.0' } }));
+  write(
+    'apps/web/astro.config.mjs',
+    'import { defineConfig } from "astro/config";\nimport { check } from "../../tools/check.mjs";\nvoid check;\nexport default defineConfig({ output: "server" });\n',
+  );
+  write('apps/web/tsconfig.json', JSON.stringify({ compilerOptions: { paths: { '@/*': ['./src/*'] } } }));
+  write('apps/web/src/pages/index.astro', '---\nimport Hero from "@/sections/Hero.astro";\n---\n<Hero />\n');
+  write('apps/web/src/pages/work/[slug].astro', '---\nconst slug = Astro.params.slug;\n---\n<h1>{slug}</h1>\n');
+  write('apps/web/src/sections/Hero.astro', '<section />');
+  write('apps/web/src/components/ui/Button.tsx', 'export function Button() { return null; }');
+  write(
+    'apps/web/src/middleware.ts',
+    'export const onRequest = async (_ctx, next) => { const r = await next(); r.headers.set("X-Frame-Options", "DENY"); return r; };',
+  );
+
+  const apps = findWorkspaceAstroApps(workspaceRoot);
+  assert.equal(apps.length, 1);
+  assert.equal(apps[0]?.relativePath, 'apps/web');
+  assert.equal(apps[0]?.name, 'web');
+
+  const choice = siteFolderChoice(workspaceRoot);
+  assert.equal(choice.kind, 'workspace');
+  if (choice.kind === 'workspace') {
+    assert.equal(choice.apps.length, 1);
+    assert.equal(choice.apps[0]?.relativePath, 'apps/web');
+  }
+
+  const webRoot = path.join(workspaceRoot, 'apps', 'web');
+  const access = createProjectSetupAccess();
+  access.acceptPickerPaths(access.beginPicker(), [webRoot]);
+  assert.ok(access.authorize(webRoot, undefined));
+
+  const report = scanProjectSetup(webRoot);
+  assert.equal(report.workspaceAppPath, 'apps/web');
+  assert.equal(report.packageManager, 'pnpm');
+  assert.equal(report.dependenciesInstalled, false);
+  const codes = report.findings.map(({ code }) => code);
+  assert.ok(codes.includes('dependencies-missing'));
+  assert.ok(codes.includes('workspace-nested-app'));
+  assert.ok(codes.includes('astro-config-external-imports'));
+  assert.ok(codes.includes('ssr-dynamic-routes'));
+  assert.ok(codes.includes('framing-headers-present'));
+  assert.ok(codes.includes('framework-components-only'));
+  assert.deepEqual(
+    report.suggestions.map(({ kind, folders }) => ({ kind, folders })),
+    [{ kind: 'components', folders: ['src/components', 'src/sections'] }],
+  );
+});
+
+test('monorepo discovery finds Astro apps without a workspace manifest and verifies shorthand non-structural config keys', (context) => {
+  const { projectPath: root, write } = fixture(context);
+  write('marketing/site/package.json', JSON.stringify({ name: 'marketing-site', dependencies: { astro: '^7.0.0' } }));
+  write(
+    'marketing/site/astro.config.mjs',
+    'import { defineConfig } from "astro/config";\nconst site = "https://example.com";\nexport default defineConfig({ site, output: "static" });\n',
+  );
+  write('marketing/site/src/pages/index.astro', '<main />');
+
+  const apps = findWorkspaceAstroApps(root);
+  assert.equal(apps.length, 1);
+  assert.equal(apps[0]?.relativePath, 'marketing/site');
+  assert.equal(apps[0]?.name, 'marketing-site');
+
+  const report = scanProjectSetup(path.join(root, 'marketing', 'site'));
+  assert.equal(report.pagesSource, 'default');
+  assert.equal(report.desktopPages, 1);
+  assert.equal(
+    report.findings.some(({ code }) => code === 'astro-config-unverified'),
+    false,
+  );
 });

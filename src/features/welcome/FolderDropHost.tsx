@@ -13,6 +13,7 @@ import { FolderOpenIcon } from '../../ui/Icons';
 import { windowHeld } from '../../ui/busyLock';
 import { useTranslate } from '../../lib/i18n/useTranslate';
 import { FOLDER_OPEN_LIMITS, type FolderOpenChoice } from '../../../shared/ipc/folderOpen';
+import type { WorkspaceAstroApp } from '../../../shared/ipc/astroCopy';
 import { droppedFolders, folderRejectionMessageKey, mayCarryFolder, type DroppedFolders } from './folderDrop';
 import { inspectFolder, subscribeOpenedFolders, takeOpenedFolders } from './welcomeBridge';
 import type { AstroCopySource } from './AstroCopyDialog';
@@ -27,6 +28,8 @@ type ShowToast = (message: string, kind: 'success' | 'error' | 'info') => void;
 export interface FolderRoutes {
   /** An Astro project at this path. */
   readonly open: (projectPath: string) => void;
+  /** A monorepo workspace containing one or more Astro apps; defaults to opening the first app. */
+  readonly openWorkspace?: (workspace: { readonly workspaceRoot: string; readonly apps: readonly WorkspaceAstroApp[] }) => void;
   /** A plain website: offer the Astro copy. */
   readonly offerCopy: (source: AstroCopySource) => void;
   readonly showToast: ShowToast;
@@ -40,6 +43,17 @@ export function useFolderChoiceRoute(routes: FolderRoutes): (choice: FolderOpenC
       case 'astro':
         routes.open(choice.projectPath);
         return;
+      case 'workspace': {
+        if (routes.openWorkspace !== undefined) {
+          routes.openWorkspace({ workspaceRoot: choice.workspaceRoot, apps: choice.apps });
+          return;
+        }
+        const first = choice.apps[0];
+        if (first !== undefined) {
+          routes.open(first.projectPath);
+        }
+        return;
+      }
       case 'plainWebsite':
         routes.offerCopy({ sourcePath: choice.sourcePath, parentPath: choice.parentPath, name: choice.name, homePath: choice.homePath });
         return;

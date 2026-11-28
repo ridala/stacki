@@ -1,6 +1,13 @@
 import { assert } from '../core/assert';
 import { list, text, record, boolean, pathText } from '../core/boundary';
 import { parseOptionalMessageRef } from '../core/i18n/messageReference';
+import type { MessageRef } from '../properties/i18n/messageRef';
+import { parseWorkspaceAstroApps, type WorkspaceAstroApp } from './astroCopy';
+
+export type CloneRepositoryResult =
+  | { readonly canceled: true }
+  | { readonly canceled: false; readonly error: string; readonly errorRef?: MessageRef }
+  | { readonly canceled: false; readonly projectPath: string; readonly workspaceApps?: readonly WorkspaceAstroApp[] };
 
 export function parseGitHubRepository(input: unknown): string {
   const value = text(input);
@@ -25,7 +32,7 @@ export function parseGitHubRepositories(input: unknown): readonly string[] {
   return repositories;
 }
 
-export function parseCloneResult(input: unknown) {
+export function parseCloneResult(input: unknown): CloneRepositoryResult {
   const value = record(input);
   if (boolean(value['canceled'])) {
     return { canceled: true as const };
@@ -36,5 +43,7 @@ export function parseCloneResult(input: unknown) {
       ? { canceled: false as const, error: text(value['error']) }
       : { canceled: false as const, error: text(value['error']), errorRef };
   }
-  return { canceled: false as const, projectPath: pathText(value['projectPath']) };
+  const projectPath = pathText(value['projectPath']);
+  const workspaceApps = value['workspaceApps'] === undefined ? undefined : parseWorkspaceAstroApps(value['workspaceApps']);
+  return workspaceApps === undefined ? { canceled: false as const, projectPath } : { canceled: false as const, projectPath, workspaceApps };
 }

@@ -16,6 +16,13 @@ test('GitHub repository boundaries', () => {
     canceled: false,
     projectPath: '/site',
   });
+  const monorepoClone = {
+    canceled: false,
+    projectPath: '/mono/apps/landing',
+    workspaceApps: [{ name: '@mono/landing', relativePath: 'apps/landing', projectPath: '/mono/apps/landing' }],
+  };
+  assert.deepEqual(parseCloneResult(monorepoClone), monorepoClone);
+  assert.throws(() => parseCloneResult({ canceled: false, projectPath: '/mono/apps/landing', workspaceApps: [] }));
   assert.throws(() => parseCloneResult({ canceled: false, projectPath: 2 }));
   assert.throws(() => parseCloneResult({ canceled: 'false' }));
 });

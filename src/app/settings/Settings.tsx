@@ -48,6 +48,8 @@ interface Props {
   readonly onRecordUndo?: (command: BreakpointSyncUndo) => void;
   /** The project's component files (project-relative), for each role's Components section. */
   readonly componentFiles?: readonly string[];
+  /** Surfaces app-level toasts from settings sub-dialogs (e.g., copying or sending a setup prompt). */
+  readonly showToast?: (message: string, kind: 'success' | 'error' | 'info') => void;
 }
 
 // Who opens Settings besides the File menu: the title bar's gear on Windows and
@@ -258,6 +260,8 @@ function SettingsPanel(props: Props & { readonly tab: SettingsTab; readonly onCl
           projectPath={props.projectPath}
           {...(props.pages === undefined ? {} : { pages: props.pages })}
           {...(props.onOpenFile === undefined ? {} : { onOpenFile: openAfterClosing(props.onClose, props.onOpenFile) })}
+          {...(props.showToast === undefined ? {} : { showToast: props.showToast })}
+          onCloseSettings={props.onClose}
         />
       ) : (
         <SettingsEmpty icon={icon}>{translate('settings.empty.folders')}</SettingsEmpty>

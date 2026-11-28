@@ -32,6 +32,15 @@ function componentFilesOf(components: readonly ScanComponent[]): readonly string
 export default function App() {
   const scope = useAppScope();
   const actions = useUiActions(scope);
+  const [pendingSetupPath, setPendingSetupPath] = useState<string | undefined>(undefined);
+  const onOpenProjectWithSetup = useCallback(
+    (projectPath: string) => {
+      setPendingSetupPath(projectPath);
+      actions.onOpenProject(projectPath);
+    },
+    [actions],
+  );
+  const clearPendingSetup = useCallback(() => setPendingSetupPath(undefined), []);
   const defaultsCanvas = useDesktopDefaultsCanvas(scope);
   const componentEditing = useComponentEditing(scope.project?.path, scope.scan.components);
   // The project's role (.stacki/roles.json and the signed-in GitHub user) drives what the UI shows.
@@ -42,6 +51,9 @@ export default function App() {
   const app: AppView = {
     ...scope,
     ...actions,
+    onOpenProjectWithSetup,
+    pendingSetupPath,
+    clearPendingSetup,
     defaultsCanvas,
     componentEditing,
     setSelectedId: defaultsSelection(scope, defaultsCanvas),
@@ -58,6 +70,7 @@ export default function App() {
         onOpenFile={(rel) => void app.openProjectFile(rel)}
         onRecordUndo={app.pushCommand}
         componentFiles={componentFiles}
+        showToast={app.showToast}
       />
     </>
   );
@@ -89,6 +102,9 @@ function ShellHost({ app, project }: { readonly app: AppView; readonly project: 
 type AppScope = ReturnType<typeof useAppScope>;
 export type AppView = AppScope &
   ReturnType<typeof useUiActions> & {
+    readonly onOpenProjectWithSetup: (projectPath: string) => void;
+    readonly pendingSetupPath: string | undefined;
+    readonly clearPendingSetup: () => void;
     readonly defaultsCanvas: ReturnType<typeof useDesktopDefaultsCanvas>;
     /** How each component's text is edited (.stacki/components.json lineBreaks, richText). */
     readonly componentEditing: ComponentEditingLookup;

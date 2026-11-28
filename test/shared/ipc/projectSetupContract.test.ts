@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseIpcPayload } from '#dist/shared/ipc/ipcPayloads.js';
-import { PROJECT_SETUP_ENTRIES_MAX, parseProjectSetupResult } from '#dist/shared/ipc/projectSetup.js';
+import { PROJECT_SETUP_ENTRIES_MAX, PROJECT_SETUP_PROMPT_CHARS_MAX, buildProjectSetupPrompt, parseProjectSetupResult } from '#dist/shared/ipc/projectSetup.js';
 
 const projectPath = '/projects/site';
 const revision = 'a'.repeat(64);
@@ -18,6 +18,13 @@ const suggestion = {
   studioAdded: [],
   studioRemoved: ['public/Legacy.astro', 'src/Legacy.astro'],
 };
+const finding = {
+  code: 'dependencies-missing',
+  severity: 'blocker',
+  summary: 'Astro dependencies are not installed.',
+  action: 'Run pnpm install before opening preview.',
+  files: ['package.json'],
+};
 const report = {
   revision,
   pagesFolder: 'src/pages',
@@ -27,6 +34,10 @@ const report = {
   incomplete: false,
   settings: 'editable',
   suggestions: [suggestion],
+  workspaceAppPath: 'apps/web',
+  packageManager: 'pnpm',
+  dependenciesInstalled: false,
+  findings: [finding],
 };
 
 test('project setup IPC parses an exact revision and a bounded list of selected kinds', () => {
@@ -65,7 +76,24 @@ test('project setup reports refuse invalid counts and folder mappings', () => {
     { suggestions: [{ ...suggestion, folders: ['src/ui', 'src/ui/headers'] }] },
     { suggestions: [{ ...suggestion, desktopAdded: ['src/../Outside.astro'] }] },
     { suggestions: [{ ...suggestion, studioRemoved: Array.from({ length: 4 }, () => 'src/Legacy.astro') }] },
+    { workspaceAppPath: '../apps/web' },
+    { packageManager: 'deno' },
+    { dependenciesInstalled: 'yes' },
+    { findings: [finding, finding] },
+    { findings: [{ ...finding, code: 'unknown-code' }] },
+    { findings: [{ ...finding, severity: 'critical' }] },
+    { findings: [{ ...finding, files: ['/absolute/file.ts'] }] },
+    { findings: [{ ...finding, files: Array.from({ length: 7 }, (_, index) => `src/f${index}.ts`) }] },
   ]) {
     assert.throws(() => parseProjectSetupResult({ ok: true, value: { ...report, ...changes } }));
+  }
+  const parsed = parseProjectSetupResult({ ok: true, value: report });
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) {
+    const prompt = buildProjectSetupPrompt(parsed.value, { projectName: 'web' });
+    assert.ok(prompt.includes('Monorepo Astro app path: apps/web'));
+    assert.ok(prompt.includes('[Blocker] Astro dependencies are not installed.'));
+    assert.ok(prompt.includes('Suggested .stacki/folders.json mappings:'));
+    assert.ok(prompt.length <= PROJECT_SETUP_PROMPT_CHARS_MAX);
   }
 });

@@ -1116,9 +1116,13 @@ Failure results may carry an optional `messageRef` (`{ key, params? }`, `parseMe
 
 The Welcome screen's "Open from folder" calls `project:openSiteDialog` (no payload): main shows the folder
 picker and answers `SiteFolderChoice`, one of `canceled`, `astro` (open it, as `project:openDialog` did),
+`workspace` (a monorepo workspace root containing up to `WORKSPACE_ASTRO_APPS_MAX` nested Astro apps, each
+with `name`, `relativePath`, and `projectPath`, discovered read-only from `pnpm-workspace.yaml`,
+`package.json#workspaces`, or standard top-level app folders without following symlinks),
 `plainWebsite` (the folder, its parent, the suggested `<folder>-astro` name and the home folder for display)
 or `notWebsite` (a toast). Detection (`electron/project/plainSiteScan.ts`) is `isAstroProject` or a
-`src/pages/*.astro`, else at least one `.html`/`.htm` page in the folder's top two levels, skipping installed
+`src/pages/*.astro`, else `findWorkspaceAstroApps` (`electron/project/workspaceAstro.ts`), else at least one
+`.html`/`.htm` page in the folder's top two levels, skipping installed
 packages, build output, vendored code and hidden folders; it reads names only, bounded by depth and entries
 (`PLAIN_SITE_LIMITS`), and never follows a link to a folder or out of the picked folder.
 

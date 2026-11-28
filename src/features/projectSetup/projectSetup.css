@@ -1,7 +1,7 @@
 .modal.project-setup-dialog {
   display: flex;
   flex-direction: column;
-  width: 560px;
+  width: 600px;
   max-height: calc(100vh - 48px);
 }
 .project-setup-dialog .modal-body {
@@ -10,6 +10,8 @@
   scrollbar-gutter: stable;
   color: var(--text-dim);
   line-height: 1.45;
+  display: grid;
+  gap: 12px;
 }
 .project-setup-dialog :is(.modal-header, .modal-footer) {
   flex-shrink: 0;
@@ -20,10 +22,83 @@
 .project-setup-dialog p {
   margin: 0;
 }
+.project-setup-workspace-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.project-setup-workspace-label {
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+}
 .project-setup-saved,
 .project-setup-pages {
   display: grid;
   gap: 4px;
+}
+.project-setup-section-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.project-setup-findings {
+  display: grid;
+  gap: 6px;
+}
+.project-setup-findings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.project-setup-finding {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg, transparent);
+}
+.project-setup-finding-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.project-setup-finding-summary {
+  color: var(--text);
+  font-weight: 500;
+}
+.project-setup-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.project-setup-badge.severity-blocker {
+  color: var(--danger, #e5534b);
+  border-color: color-mix(in srgb, var(--danger, #e5534b) 45%, transparent);
+}
+.project-setup-badge.severity-warning {
+  color: var(--warning, #d29922);
+  border-color: color-mix(in srgb, var(--warning, #d29922) 45%, transparent);
+}
+.project-setup-badge.severity-info {
+  color: var(--text-dim);
+}
+.project-setup-finding-action {
+  color: var(--text-dim);
+}
+.project-setup-finding-files {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
 }
 .project-setup-suggestions {
   width: 100%;

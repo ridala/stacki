@@ -98,3 +98,51 @@ test('clone handler creates a new Astro checkout and refuses an existing directo
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('clone handler resolves a nested Astro app inside a cloned monorepo and grants setup access', async () => {
+  const { registerGitRepositoryHandlers } = require('#dist/electron/handlers/gitRepositoryHandlers.js');
+  const { createProjectSetupAccess } = require('#dist/electron/handlers/projectSetupHandlers.js');
+  const tools = require('#dist/electron/lib/nodeTools.js');
+  const originalRun = tools.run;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stacki-clone-mono-'));
+  try {
+    const source = path.join(directory, 'source');
+    const parent = path.join(directory, 'downloads');
+    fs.mkdirSync(path.join(source, 'apps', 'landing'), { recursive: true });
+    fs.mkdirSync(parent);
+    git(source, ['init', '--initial-branch=main']);
+    git(source, ['config', 'user.name', 'Test']);
+    git(source, ['config', 'user.email', 'test@example.com']);
+    fs.writeFileSync(path.join(source, 'pnpm-workspace.yaml'), "packages:\n  - 'apps/*'\n");
+    fs.writeFileSync(path.join(source, 'apps', 'landing', 'package.json'), JSON.stringify({ name: '@mono/landing', dependencies: { astro: '^7.0.0' } }));
+    git(source, ['add', '.']);
+    git(source, ['commit', '--message', 'Monorepo with Astro landing app']);
+    tools.run = async (command, args, cwd) => {
+      assert.equal(command, 'gh');
+      assert.deepEqual(args, ['repo', 'clone', 'https://github.com/owner/mono', '.']);
+      return { stdout: git(cwd, ['clone', source, '.']), stderr: '' };
+    };
+    const handlers = new Map();
+    const setup = createProjectSetupAccess();
+    registerGitRepositoryHandlers(
+      {
+        ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
+        showOpenDialog: async () => ({ canceled: false, filePaths: [parent] }),
+      },
+      setup,
+      () => true,
+    );
+    const clone = handlers.get('git:clone');
+    const result = await clone({}, { repository: 'owner/mono' });
+    const expectedAppPath = path.join(parent, 'mono', 'apps', 'landing');
+    assert.deepEqual(result, {
+      canceled: false,
+      projectPath: expectedAppPath,
+      workspaceApps: [{ name: '@mono/landing', relativePath: 'apps/landing', projectPath: expectedAppPath }],
+    });
+    assert.ok(setup.authorize(expectedAppPath, undefined));
+  } finally {
+    tools.run = originalRun;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

@@ -81,6 +81,10 @@ export interface FolderSettingsProps {
   readonly pages?: { readonly folder: string; readonly configFile: string | undefined };
   /** Opens a project file in the code panel; the tab's "Open …" links need it. */
   readonly onOpenFile?: (rel: string) => void;
+  /** Surfaces toast notifications for setup actions like copying or sending the prompt. */
+  readonly showToast?: (message: string, kind: 'success' | 'error' | 'info') => void;
+  /** Closes the surrounding Settings modal after sending a setup prompt to the AI panel. */
+  readonly onCloseSettings?: () => void;
 }
 
 export function FolderSettings(props: FolderSettingsProps) {
@@ -99,6 +103,8 @@ export function FolderSettings(props: FolderSettingsProps) {
         <ProjectSetupDialog
           mode="settings"
           projectPath={props.projectPath}
+          {...(props.showToast === undefined ? {} : { showToast: props.showToast })}
+          {...(props.onCloseSettings === undefined ? {} : { onPromptSent: props.onCloseSettings })}
           onClose={() => setReviewing(false)}
           onSaved={() => {
             setSetupVersion((version) => version + 1);

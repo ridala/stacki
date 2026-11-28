@@ -15,16 +15,27 @@ import HeroUIStarterWizard from './HeroUIStarterWizard';
 import { ShadcnStarterLogo } from '../../ui/ShadcnStarterLogo';
 import AstroCopyDialog, { announceAstroCopy, type AstroCopySource } from './AstroCopyDialog';
 import { FolderDropHost, useFolderChoiceRoute } from './FolderDropHost';
-import { hasProjectSetupChannels } from '../../ipc/projectSetupBridge';
+import type { WorkspaceAstroApp } from '../../../shared/ipc/astroCopy';
+import Dropdown from '../../ui/Dropdown';
+import Popup from '../../ui/Popup';
 
 export interface WelcomeSetupDialogProps {
   readonly projectPath: string;
+  readonly workspaceApps?: readonly WorkspaceAstroApp[];
+  readonly onSelectProject: (projectPath: string) => void;
   readonly onClose: () => void;
   readonly onContinue: () => void;
 }
 
+interface WelcomeSetupTarget {
+  readonly projectPath: string;
+  readonly workspaceApps?: readonly WorkspaceAstroApp[];
+}
+
 interface WelcomeScreenProps {
   readonly onOpen: (projectPath: string) => void;
+  /** Opens a newly picked or cloned Astro project and shows Review setup once the editor loads. */
+  readonly onOpenWithSetup?: (projectPath: string) => void;
   readonly showToast: (message: string, kind: 'success' | 'error' | 'info') => void;
   readonly renderSetupDialog?: (props: WelcomeSetupDialogProps) => React.ReactNode;
 }
@@ -36,17 +47,25 @@ interface ProjectCreation {
   readonly parentPath: string;
 }
 
-export default function WelcomeScreen({ onOpen, showToast, renderSetupDialog }: WelcomeScreenProps) {
+export default function WelcomeScreen({ onOpen, onOpenWithSetup, showToast }: WelcomeScreenProps) {
   const translate = useTranslate();
   const [cloning, setCloning] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [creation, setCreation] = useState<ProjectCreation | undefined>(undefined);
   const [copySource, setCopySource] = useState<AstroCopySource | undefined>(undefined);
-  const [setupPath, setSetupPath] = useState<string | undefined>(undefined);
+  const [workspaceChoice, setWorkspaceChoice] = useState<WelcomeSetupTarget | undefined>(undefined);
   const recent = useRecentProjects(showToast);
-  const actions = useWelcomeActions(renderSetupDialog !== undefined && hasProjectSetupChannels() ? setSetupPath : onOpen, setError, setCreation, setCopySource);
+  const openReviewed = onOpenWithSetup ?? onOpen;
+  const openPickedTarget = (target: WelcomeSetupTarget): void => {
+    if (target.workspaceApps !== undefined && target.workspaceApps.length > 1) {
+      setWorkspaceChoice(target);
+      return;
+    }
+    openReviewed(target.projectPath);
+  };
+  const actions = useWelcomeActions(setError, setCreation, setCopySource, openPickedTarget);
   const ProjectWizard = PROJECT_WIZARDS[creation?.kind ?? 'lumos'];
-  // Drop and recent paths open first. Only the native picker grants setup access before a project opens.
+  // Drop and recent paths open directly. Picked or cloned Astro apps open straight into the editor, then show Review setup.
   const routeFolder = useFolderChoiceRoute({ open: onOpen, offerCopy: setCopySource, showToast });
 
   return (
@@ -62,27 +81,31 @@ export default function WelcomeScreen({ onOpen, showToast, renderSetupDialog }: 
       <RecentRail projects={recent.projects} refreshing={recent.refreshing} open={onOpen} remove={(projectPath) => void recent.remove(projectPath)} />
       <FolderDropHost
         onChoice={(choice) => {
-          if (setupPath === undefined) {
+          if (workspaceChoice === undefined) {
             routeFolder(choice);
           }
         }}
         showToast={showToast}
       />
-      {setupPath !== undefined &&
-        renderSetupDialog?.({
-          projectPath: setupPath,
-          onClose: () => setSetupPath(undefined),
-          onContinue: () => {
-            setSetupPath(undefined);
-            onOpen(setupPath);
-          },
-        })}
+      {workspaceChoice !== undefined && workspaceChoice.workspaceApps !== undefined && (
+        <WorkspaceAppChooser
+          selectedPath={workspaceChoice.projectPath}
+          apps={workspaceChoice.workspaceApps}
+          onSelect={(projectPath) => setWorkspaceChoice((current) => (current === undefined ? undefined : { ...current, projectPath }))}
+          onClose={() => setWorkspaceChoice(undefined)}
+          onOpen={() => {
+            const targetPath = workspaceChoice.projectPath;
+            setWorkspaceChoice(undefined);
+            openReviewed(targetPath);
+          }}
+        />
+      )}
       {cloning && (
         <CloneRepositoryModal
           onClose={() => setCloning(false)}
-          onOpen={(directory) => {
+          onOpen={(target) => {
             setCloning(false);
-            onOpen(directory);
+            openPickedTarget(target);
           }}
         />
       )}
@@ -113,13 +136,13 @@ export default function WelcomeScreen({ onOpen, showToast, renderSetupDialog }: 
 }
 
 function useWelcomeActions(
-  openPickedAstro: WelcomeScreenProps['onOpen'],
   setError: React.Dispatch<React.SetStateAction<string | undefined>>,
   setCreation: React.Dispatch<React.SetStateAction<ProjectCreation | undefined>>,
   setCopySource: React.Dispatch<React.SetStateAction<AstroCopySource | undefined>>,
+  openPickedAstro: (target: WelcomeSetupTarget) => void,
 ) {
   const translate = useTranslate();
-  // An Astro project can review its setup; a plain website is offered an Astro copy.
+  // An Astro project or monorepo workspace can review its setup; a plain website is offered an Astro copy.
   const openExisting = async (): Promise<void> => {
     setError(undefined);
     const result = await chooseSiteFolder();
@@ -132,8 +155,15 @@ function useWelcomeActions(
       case 'canceled':
         return;
       case 'astro':
-        openPickedAstro(choice.projectPath);
+        openPickedAstro({ projectPath: choice.projectPath });
         return;
+      case 'workspace': {
+        const first = choice.apps[0];
+        if (first !== undefined) {
+          openPickedAstro({ projectPath: first.projectPath, workspaceApps: choice.apps });
+        }
+        return;
+      }
       case 'plainWebsite':
         setCopySource({ sourcePath: choice.sourcePath, parentPath: choice.parentPath, name: choice.name, homePath: choice.homePath });
         return;
@@ -319,6 +349,52 @@ function RecentRail({
         ))}
       </RecentRailScroller>
     </div>
+  );
+}
+
+function WorkspaceAppChooser({
+  selectedPath,
+  apps,
+  onSelect,
+  onClose,
+  onOpen,
+}: {
+  readonly selectedPath: string;
+  readonly apps: readonly WorkspaceAstroApp[];
+  readonly onSelect: (projectPath: string) => void;
+  readonly onClose: () => void;
+  readonly onOpen: () => void;
+}) {
+  const translate = useTranslate();
+  const title = translate('settings.folders.setup.workspaceApp');
+  return (
+    <Popup className="modal" onClose={onClose} label={title}>
+      {({ close, finish }) => (
+        <>
+          <div className="modal-header">{title}</div>
+          <div className="modal-body">
+            <Dropdown
+              ariaLabel={title}
+              value={selectedPath}
+              options={apps.map((app) => ({
+                value: app.projectPath,
+                label: app.relativePath,
+                hint: app.name,
+              }))}
+              onChange={onSelect}
+            />
+          </div>
+          <div className="modal-footer">
+            <button type="button" onClick={close}>
+              {translate('ui.cancel')}
+            </button>
+            <button type="button" className="primary" onClick={() => finish(onOpen)}>
+              {translate('settings.folders.setup.continue')}
+            </button>
+          </div>
+        </>
+      )}
+    </Popup>
   );
 }
 
