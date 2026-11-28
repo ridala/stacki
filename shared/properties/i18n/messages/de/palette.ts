@@ -187,4 +187,11 @@ export const messages = {
   'palette.rename.badCharacter': '„{character}“ darf in einem Namen nicht vorkommen.',
   'palette.rename.spacesRemoved': 'Leerzeichen entfernt: {name}',
   'palette.rename.normalized': 'Gespeichert als {name}',
+  'palette.framework.heading': 'Projektkomponenten',
+  'palette.framework.note': 'React-, Vue- oder Svelte-Komponenten. Füge eine hinzu, um einen Astro-Wrapper zu erstellen, den du auf Seiten ziehen kannst.',
+  'palette.framework.wrap': 'Hinzufügen',
+  'palette.framework.wrapFailed': '{name} konnte nicht hinzugefügt werden — {detail}',
+  'palette.framework.wrapWithAI': 'Mit KI einbinden',
+  'palette.framework.wrapped': '{name} ({file}) zu Komponenten hinzugefügt.',
+  'palette.framework.wrapping': 'Wird hinzugefügt…',
 } as const satisfies CatalogOf<MessageKey>;

@@ -87,4 +87,10 @@ export const messages = {
   'variables.undo.variable': 'वेरिएबल',
   'variables.visibility.blocked': 'वेरिएबल सुझाव फ़िल्टर नहीं हो रहे: {detail} उस फ़ाइल को ओवरराइट होने से बचाने के लिए छिपाना रोक दिया गया है।',
   'variables.visibility.saveFailed': 'कौन-से वेरिएबल छिपे हैं, यह सहेजा नहीं जा सका: {detail}',
+  'variables.error.libraryReadOnly': 'लाइब्रेरी की डिफ़ॉल्ट शैलियाँ केवल पढ़ने के लिए हैं। स्थानीय ओवरराइड सहेजने के लिए कोई मान संपादित करें।',
+  'variables.source.library': 'डिफ़ॉल्ट',
+  'variables.source.libraryDetail':
+    'इस लाइब्रेरी के डिफ़ॉल्ट मान। किसी मान को संपादित करने से node_modules बदले बिना आपकी स्टाइलशीट में स्थानीय ओवरराइड सहेजा जाता है।',
+  'variables.source.workspace': 'साझा',
+  'variables.source.workspaceDetail': 'साझा वर्कस्पेस पैकेज से आयात किया गया।',
 } as const satisfies CatalogOf<MessageKey>;

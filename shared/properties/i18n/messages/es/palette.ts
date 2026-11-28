@@ -182,4 +182,11 @@ export const messages = {
   'palette.rename.badCharacter': '“{character}” no se puede usar en un nombre.',
   'palette.rename.spacesRemoved': 'Espacios eliminados: {name}',
   'palette.rename.normalized': 'Se guardará como {name}',
+  'palette.framework.heading': 'Componentes del proyecto',
+  'palette.framework.note': 'Componentes de React, Vue o Svelte. Agrega uno para crear un envoltorio Astro que puedas arrastrar a las páginas.',
+  'palette.framework.wrap': 'Agregar',
+  'palette.framework.wrapFailed': 'No se pudo agregar {name} — {detail}',
+  'palette.framework.wrapWithAI': 'Envolver con IA',
+  'palette.framework.wrapped': 'Se agregó {name} ({file}) a Componentes.',
+  'palette.framework.wrapping': 'Agregando…',
 } as const satisfies CatalogOf<MessageKey>;

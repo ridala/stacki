@@ -71,6 +71,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': 'Masukkan kode preset shadcn.',
   'welcome.shadcn.presetLink': 'Buka shadcn Create',
   'welcome.shadcn.rtl': 'Aktifkan dukungan tata letak kanan ke kiri',
+  'welcome.shadcn.sharedPackage': 'Paket bersama: {path}',
   'welcome.siteCreated': 'Situs dibuat',
   'welcome.siteName': 'Nama situs',
   'welcome.starter.nameEmpty': 'Masukkan nama situs.',

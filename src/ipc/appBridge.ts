@@ -335,6 +335,38 @@ export function createProjectComponent(input: CreateComponentInput): Promise<Ipc
   });
 }
 
+export function wrapProjectFrameworkComponent(input: {
+  readonly projectPath: string;
+  readonly name: string;
+  readonly importPath: string;
+  readonly exportKind: 'default' | 'named';
+  readonly framework: 'react' | 'vue' | 'svelte';
+}): Promise<IpcResults['component:wrapFramework']> {
+  const payload = parseIpcPayload('component:wrapFramework', input);
+  return window.avb.wrapFrameworkComponent(payload).then((raw) => {
+    const value = record(raw);
+    if (value['ok'] === true) {
+      const wrapped = record(value['value']);
+      return {
+        ok: true,
+        value: {
+          path: pathText(wrapped['path']),
+          rel: pathText(wrapped['rel']),
+          name: text(wrapped['name']),
+        },
+      };
+    }
+    const error = record(value['error']);
+    return {
+      ok: false,
+      error: {
+        code: text(error['code']),
+        message: text(error['message']),
+      },
+    };
+  });
+}
+
 /** Undo of creating a component: delete its file while it holds the bytes it
  *  was created with (`checksum`), or regardless when `force` (the person said so). */
 export function discardProjectComponent(input: {

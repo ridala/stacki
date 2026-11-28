@@ -179,4 +179,11 @@ export const messages = {
   'palette.rename.badCharacter': '“{character}” tidak dapat dipakai dalam nama.',
   'palette.rename.spacesRemoved': 'Spasi dihapus: {name}',
   'palette.rename.normalized': 'Disimpan sebagai {name}',
+  'palette.framework.heading': 'Komponen proyek',
+  'palette.framework.note': 'Komponen React, Vue, atau Svelte. Tambahkan untuk membuat pembungkus Astro yang bisa diseret ke halaman.',
+  'palette.framework.wrap': 'Tambah',
+  'palette.framework.wrapFailed': 'Tidak dapat menambahkan {name} — {detail}',
+  'palette.framework.wrapWithAI': 'Bungkus dengan AI',
+  'palette.framework.wrapped': '{name} ({file}) ditambahkan ke Komponen.',
+  'palette.framework.wrapping': 'Menambahkan…',
 } as const satisfies CatalogOf<MessageKey>;

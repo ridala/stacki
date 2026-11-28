@@ -73,6 +73,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': 'shadcn का प्रीसेट कोड दर्ज करें।',
   'welcome.shadcn.presetLink': 'shadcn Create खोलें',
   'welcome.shadcn.rtl': 'दाएँ से बाएँ लेआउट का समर्थन चालू करें',
+  'welcome.shadcn.sharedPackage': 'साझा पैकेज: {path}',
   'welcome.siteCreated': 'साइट बन गई',
   'welcome.siteName': 'साइट का नाम',
   'welcome.starter.nameEmpty': 'साइट का नाम दर्ज करें।',

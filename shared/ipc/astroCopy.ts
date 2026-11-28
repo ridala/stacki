@@ -856,7 +856,11 @@ function parseShadcnIconLibrary(input: unknown): ShadcnIconLibrary {
 
 export const parseShadcnSettingsRequest = object({ projectPath: parseAbsolutePath });
 export const parseShadcnSettingsChange = object({ projectPath: parseAbsolutePath, setting: parseShadcnSetting, enabled: boolean });
-const parseShadcnSettingsValue = object({ pointer: boolean, rtl: boolean });
+const parseShadcnSettingsValue = object({
+  pointer: boolean,
+  rtl: boolean,
+  packagePath: optional(parseRelativeProjectPath),
+});
 const parseShadcnSettingsError = object({ message: text });
 
 export type ShadcnSettings = ReturnType<typeof parseShadcnSettingsValue>;

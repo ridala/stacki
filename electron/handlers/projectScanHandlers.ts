@@ -22,6 +22,7 @@ import { packageComponentFilesSliced, packageComponentImport } from '../lib/comp
 import { runSliced, type SlicedWork } from '../lib/slicedWork';
 import { packageOf } from '../lib/installedPackages';
 import { readLengthUnit } from '../project/lengthUnitMarkers';
+import { discoverFrameworkComponents } from '../project/frameworkComponents';
 import { readProjectFolders } from '../lib/projectFolders';
 import { readAstroPages, type AstroPages } from '../lib/astroConfig';
 import { componentGroup, configOf, foldersFor, type ProjectFolders } from '../../shared/properties/projectFolders';
@@ -156,10 +157,14 @@ function* projectScanSliced(projectPath: string, run: ScanRun) {
     run.add(dependencyWarning(manager ?? 'npm'));
   }
 
+  const existingAstroNames = new Set(components.map((entry) => entry.name.toLowerCase()));
+  const frameworkComponents = run.step('framework components', [], () => discoverFrameworkComponents(projectPath, componentFolders, existingAstroNames));
+
   return {
     pages: yield* run.guard<readonly ScanPage[]>('page titles', pages, () => pageTitlesSliced(pages, allSources, importAliases)),
     layouts,
     components,
+    ...(frameworkComponents.length > 0 ? { frameworkComponents } : {}),
     pageFolders,
     lengthUnit: run.step<ReturnType<typeof readLengthUnit>>('length unit', { kind: 'px' }, () => readLengthUnit(projectPath)),
     // Shown in Settings → Folders; pages are read from this folder (docs/contracts.md).

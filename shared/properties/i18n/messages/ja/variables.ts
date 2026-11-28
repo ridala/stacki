@@ -88,4 +88,9 @@ export const messages = {
   'variables.undo.variable': '変数', // review
   'variables.visibility.blocked': '変数の候補が絞り込まれていません：{detail} そのファイルが上書きされないよう、非表示は一時停止されています。',
   'variables.visibility.saveFailed': '非表示にする変数を保存できませんでした：{detail}',
+  'variables.error.libraryReadOnly': 'ライブラリの既定スタイルは読み取り専用です。値を編集するとローカルの上書きが保存されます。',
+  'variables.source.library': '既定',
+  'variables.source.libraryDetail': 'このライブラリの既定値です。値を編集すると node_modules を変更せずにスタイルシートへローカル上書きを保存します。',
+  'variables.source.workspace': '共有',
+  'variables.source.workspaceDetail': '共有ワークスペースパッケージからインポートされました。',
 } as const satisfies CatalogOf<MessageKey>;

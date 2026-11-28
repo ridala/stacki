@@ -143,6 +143,7 @@ function VariableFileRow({ file, selected, onOpen, onSelect }: FileRowProps) {
     >
       <FileTypeIcon name={file.rel} />
       <span className="cms-collection-name">{file.name}</span>
+      {file.sourceKind !== undefined && <VariableSourceBadge kind={file.sourceKind} />}
       {onlyGroup(file) && <VariableScopeBadge scope={file.groups[0]?.scope} />}
       <span className="cms-collection-count">{file.error ? '' : translate('variables.count', { count: file.count ?? 0 })}</span>
       {!onlyGroup(file) && (
@@ -196,6 +197,17 @@ export function fileToOpen(files: readonly VariableFile[], selected: VariableSel
   assert(onlyGroup(file) || file.groups.length === 0, 'fileToOpen: a file not opened has at most one group');
   return undefined;
 }
+function VariableSourceBadge({ kind }: { readonly kind: 'workspace' | 'library' }) {
+  const translate = useTranslate();
+  const label = kind === 'library' ? translate('variables.source.library') : translate('variables.source.workspace');
+  const detail = kind === 'library' ? translate('variables.source.libraryDetail') : translate('variables.source.workspaceDetail');
+  return (
+    <span className="vars-scope" title={detail}>
+      {label}
+    </span>
+  );
+}
+
 function onlyGroup(file: VariableFile): boolean {
   return file.groups.length === 1;
 }

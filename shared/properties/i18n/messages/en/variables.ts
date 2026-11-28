@@ -87,6 +87,12 @@ export const messages = {
   'variables.undo.variable': 'the variable',
   'variables.visibility.blocked': 'Variable suggestions are not being filtered: {detail} Hiding is paused so that file is not overwritten.',
   'variables.visibility.saveFailed': 'Could not save which variables are hidden: {detail}',
+  'variables.error.libraryReadOnly': 'Library default styles are read-only. Edit a value to save a local override.',
+  'variables.source.library': 'Defaults',
+  'variables.source.libraryDetail':
+    'Default values from this library. Editing a value saves a local override in your stylesheet without changing node_modules.',
+  'variables.source.workspace': 'Shared',
+  'variables.source.workspaceDetail': 'Imported from a shared workspace package.',
 } as const satisfies CatalogOf<`variables.${string}`>;
 
 export type MessageKey = keyof typeof messages;

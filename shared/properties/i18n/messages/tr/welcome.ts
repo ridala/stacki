@@ -73,6 +73,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': 'shadcn hazır ayar kodunu girin.',
   'welcome.shadcn.presetLink': 'shadcn Create’i aç',
   'welcome.shadcn.rtl': 'Sağdan sola yerleşim desteğini etkinleştir',
+  'welcome.shadcn.sharedPackage': 'Paylaşılan paket: {path}',
   'welcome.siteCreated': 'Site oluşturuldu',
   'welcome.siteName': 'Site adı',
   'welcome.starter.nameEmpty': 'Site için bir ad girin.',

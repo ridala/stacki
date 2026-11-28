@@ -150,6 +150,8 @@ export type WireFileModel = {
   readonly error?: string;
   readonly errorRef?: MessageRef | undefined;
   readonly count?: number;
+  readonly sourceKind?: 'workspace' | 'library';
+  readonly overrideTarget?: string;
   readonly declarations?: ReadonlyArray<WireRule>;
 };
 

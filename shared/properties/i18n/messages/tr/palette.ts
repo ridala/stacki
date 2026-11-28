@@ -184,4 +184,11 @@ export const messages = {
   'palette.rename.badCharacter': '“{character}” bir adda kullanılamaz.',
   'palette.rename.spacesRemoved': 'Boşluklar kaldırıldı: {name}',
   'palette.rename.normalized': '{name} olarak kaydedildi',
+  'palette.framework.heading': 'Proje bileşenleri',
+  'palette.framework.note': 'React, Vue veya Svelte bileşenleri. Sayfalara sürükleyebileceğiniz bir Astro sarmalayıcısı oluşturmak için ekleyin.',
+  'palette.framework.wrap': 'Ekle',
+  'palette.framework.wrapFailed': '{name} eklenemedi — {detail}',
+  'palette.framework.wrapWithAI': 'Yapay zeka ile sar',
+  'palette.framework.wrapped': '{name} ({file}) Bileşenlere eklendi.',
+  'palette.framework.wrapping': 'Ekleniyor…',
 } as const satisfies CatalogOf<MessageKey>;

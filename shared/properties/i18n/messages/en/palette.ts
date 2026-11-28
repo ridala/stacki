@@ -180,6 +180,13 @@ export const messages = {
   'palette.rename.badCharacter': '“{character}” can’t be used in a name.',
   'palette.rename.spacesRemoved': 'Spaces removed: {name}',
   'palette.rename.normalized': 'Saved as {name}',
+  'palette.framework.heading': 'Project components',
+  'palette.framework.note': 'React, Vue, or Svelte components. Add one to create an Astro wrapper you can drag onto pages.',
+  'palette.framework.wrap': 'Add',
+  'palette.framework.wrapFailed': 'Could not add {name} — {detail}',
+  'palette.framework.wrapWithAI': 'Wrap with AI',
+  'palette.framework.wrapped': 'Added {name} ({file}) to Components.',
+  'palette.framework.wrapping': 'Adding…',
 } as const satisfies CatalogOf<`palette.${string}`>;
 
 export type MessageKey = keyof typeof messages;

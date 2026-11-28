@@ -71,6 +71,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': 'shadcn のプリセットコードを入力してください。',
   'welcome.shadcn.presetLink': 'shadcn Create を開く',
   'welcome.shadcn.rtl': '右から左への表示のサポートを有効にする',
+  'welcome.shadcn.sharedPackage': '共有パッケージ: {path}',
   'welcome.siteCreated': 'サイトを作成しました',
   'welcome.siteName': 'サイト名',
   'welcome.starter.nameEmpty': 'サイト名を入力してください。',

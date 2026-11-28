@@ -88,4 +88,10 @@ export const messages = {
   'variables.undo.variable': 'переменная',
   'variables.visibility.blocked': 'Подсказки переменных не фильтруются: {detail} Скрытие приостановлено, чтобы не перезаписать этот файл.',
   'variables.visibility.saveFailed': 'Не удалось сохранить список скрытых переменных: {detail}',
+  'variables.error.libraryReadOnly': 'Стили библиотеки по умолчанию доступны только для чтения. Измените значение, чтобы сохранить локальное переопределение.',
+  'variables.source.library': 'По умолчанию',
+  'variables.source.libraryDetail':
+    'Значения библиотеки по умолчанию. Изменение значения сохраняет локальное переопределение в таблице стилей без изменения node_modules.',
+  'variables.source.workspace': 'Общие',
+  'variables.source.workspaceDetail': 'Импортировано из общего пакета рабочего пространства.',
 } as const satisfies CatalogOf<MessageKey>;

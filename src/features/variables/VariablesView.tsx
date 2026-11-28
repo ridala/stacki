@@ -313,7 +313,8 @@ function useVariableSave(model: VariableModel, writeWithUndo: VariableHistory) {
   // held arrow is one step, however many writes it took.
   const writeOnce = useCallback(
     async (cell: VariableCell, value: string): Promise<boolean> => {
-      return writeWithUndo(cell.file, 'variables.undo.value', `var:${cell.file}:${cell.name}`, async () => {
+      const targetFile = filesRef.current.find((entry) => entry.rel === cell.file)?.overrideTarget ?? cell.file;
+      return writeWithUndo(targetFile, 'variables.undo.value', `var:${targetFile}:${cell.name}`, async () => {
         const result = await bridge('setCssVariable', {
           projectPath: project.path,
           file: cell.file,

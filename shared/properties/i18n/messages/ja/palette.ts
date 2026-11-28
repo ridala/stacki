@@ -182,4 +182,11 @@ export const messages = {
   'palette.rename.badCharacter': '「{character}」は名前に使用できません。',
   'palette.rename.spacesRemoved': 'スペースを削除しました：{name}',
   'palette.rename.normalized': '{name} として保存',
+  'palette.framework.heading': 'プロジェクトコンポーネント',
+  'palette.framework.note': 'React・Vue・Svelte コンポーネントです。追加するとページへドラッグできる Astro ラッパーを作成します。',
+  'palette.framework.wrap': '追加',
+  'palette.framework.wrapFailed': '{name} を追加できませんでした — {detail}',
+  'palette.framework.wrapWithAI': 'AI でラップ',
+  'palette.framework.wrapped': '{name}（{file}）をコンポーネントに追加しました。',
+  'palette.framework.wrapping': '追加中…',
 } as const satisfies CatalogOf<MessageKey>;

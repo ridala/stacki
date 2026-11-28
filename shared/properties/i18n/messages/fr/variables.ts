@@ -88,4 +88,11 @@ export const messages = {
   'variables.undo.variable': 'la variable', // review
   'variables.visibility.blocked': 'Les suggestions de variables ne sont pas filtrées : {detail} Le masquage est suspendu pour ne pas écraser ce fichier.',
   'variables.visibility.saveFailed': 'Impossible d’enregistrer les variables masquées : {detail}',
+  'variables.error.libraryReadOnly':
+    'Les styles par défaut de la bibliothèque sont en lecture seule. Modifiez une valeur pour enregistrer une surcharge locale.',
+  'variables.source.library': 'Par défaut',
+  'variables.source.libraryDetail':
+    'Valeurs par défaut de cette bibliothèque. Modifier une valeur enregistre une surcharge locale dans votre feuille de style sans toucher à node_modules.',
+  'variables.source.workspace': 'Partagé',
+  'variables.source.workspaceDetail': 'Importé depuis un paquet partagé de l’espace de travail.',
 } as const satisfies CatalogOf<MessageKey>;

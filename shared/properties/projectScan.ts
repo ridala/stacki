@@ -96,11 +96,28 @@ export interface ScanComponentUse {
   readonly count: number;
 }
 
+export const FRAMEWORK_COMPONENT_KINDS = ['react', 'vue', 'svelte'] as const;
+export type FrameworkComponentKind = (typeof FRAMEWORK_COMPONENT_KINDS)[number];
+
+export interface ScanFrameworkComponent {
+  readonly name: string;
+  /** POSIX path relative to project root (or workspace-relative path for shared packages). */
+  readonly file: string;
+  /** Import specifier ready to use from an `.astro` wrapper in the primary component folder. */
+  readonly importPath: string;
+  readonly exportKind: 'default' | 'named';
+  readonly framework: FrameworkComponentKind;
+  readonly packageName?: string;
+  readonly wrapped?: boolean;
+}
+
 export interface ScanResult {
   readonly pages: readonly ScanPage[];
   readonly pageFolders: readonly string[];
   readonly layouts: readonly ScanComponent[];
   readonly components: readonly ScanComponent[];
+  /** Non-Astro UI components (`.tsx`/`.jsx`/`.vue`/`.svelte`) discovered locally or in declared workspace packages. */
+  readonly frameworkComponents?: readonly ScanFrameworkComponent[];
   readonly trailingSlash?: string;
   /** What the style panel writes lengths in (lengthUnit.ts). Absent from an older host → px. */
   readonly lengthUnit?: LengthUnit;
@@ -326,7 +343,46 @@ export function parseScanResult(input: unknown): ScanResult {
   if (record['warnings'] !== undefined) {
     result['warnings'] = parseScanWarnings(record['warnings']);
   }
+  if (record['frameworkComponents'] !== undefined) {
+    result['frameworkComponents'] = parseFrameworkComponents(record['frameworkComponents']);
+  }
   return result as unknown as ScanResult;
+}
+
+function parseFrameworkComponents(input: unknown): readonly ScanFrameworkComponent[] {
+  return asArray(input, 'frameworkComponents', LIMITS.scanEntriesMax).map((entry, index) => parseFrameworkComponent(entry, `frameworkComponents[${index}]`));
+}
+
+function parseFrameworkComponent(input: unknown, where: string): ScanFrameworkComponent {
+  const record = asRecord(input, where);
+  const name = asString(record['name'], `${where}.name`);
+  const file = asString(record['file'], `${where}.file`);
+  const importPath = asString(record['importPath'], `${where}.importPath`);
+  const rawExportKind = record['exportKind'];
+  if (rawExportKind !== 'default' && rawExportKind !== 'named') {
+    fail(`${where}.exportKind`, 'expected default or named');
+  }
+  const framework = FRAMEWORK_COMPONENT_KINDS.find((candidate) => candidate === record['framework']);
+  if (framework === undefined) {
+    fail(`${where}.framework`, `expected ${FRAMEWORK_COMPONENT_KINDS.join(', ')}`);
+  }
+  const packageName = record['packageName'] === undefined ? undefined : asString(record['packageName'], `${where}.packageName`);
+  let wrapped: boolean | undefined;
+  if (record['wrapped'] !== undefined) {
+    if (typeof record['wrapped'] !== 'boolean') {
+      fail(`${where}.wrapped`, 'expected boolean');
+    }
+    wrapped = record['wrapped'];
+  }
+  return {
+    name,
+    file,
+    importPath,
+    exportKind: rawExportKind,
+    framework,
+    ...(packageName === undefined ? {} : { packageName }),
+    ...(wrapped === undefined ? {} : { wrapped }),
+  };
 }
 
 export function parseScanWarnings(input: unknown): readonly ScanWarning[] {

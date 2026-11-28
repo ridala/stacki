@@ -232,4 +232,11 @@ export const messages = {
   'palette.rename.badCharacter': 'لا يمكن استخدام “{character}” في الاسم.',
   'palette.rename.spacesRemoved': 'أُزيلت المسافات: {name}',
   'palette.rename.normalized': 'تم الحفظ باسم {name}',
+  'palette.framework.heading': 'مكونات المشروع',
+  'palette.framework.note': 'مكونات React أو Vue أو Svelte. أضف أي مكون لإنشاء غلاف Astro يمكنك سحبه إلى الصفحات.',
+  'palette.framework.wrap': 'إضافة',
+  'palette.framework.wrapFailed': 'تعذرت إضافة {name} — {detail}',
+  'palette.framework.wrapWithAI': 'تغليف بالذكاء الاصطناعي',
+  'palette.framework.wrapped': 'تمت إضافة {name} ({file}) إلى المكونات.',
+  'palette.framework.wrapping': 'جارٍ الإضافة…',
 } as const satisfies CatalogOf<MessageKey>;

@@ -89,4 +89,10 @@ export const messages = {
   'variables.undo.variable': 'la variabile',
   'variables.visibility.blocked': 'I suggerimenti delle variabili non vengono filtrati: {detail} Il nascondere è in pausa per non sovrascrivere quel file.',
   'variables.visibility.saveFailed': 'Impossibile salvare quali variabili sono nascoste: {detail}',
+  'variables.error.libraryReadOnly': 'Gli stili predefiniti della libreria sono di sola lettura. Modifica un valore per salvare una sostituzione locale.',
+  'variables.source.library': 'Predefiniti',
+  'variables.source.libraryDetail':
+    'Valori predefiniti di questa libreria. La modifica salva una sostituzione locale nel foglio di stile senza toccare node_modules.',
+  'variables.source.workspace': 'Condiviso',
+  'variables.source.workspaceDetail': 'Importato da un pacchetto condiviso del workspace.',
 } as const satisfies CatalogOf<MessageKey>;

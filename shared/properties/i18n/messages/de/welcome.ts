@@ -74,6 +74,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': 'Gib einen shadcn-Preset-Code ein.',
   'welcome.shadcn.presetLink': 'shadcn Create öffnen',
   'welcome.shadcn.rtl': 'Unterstützung für Rechts-nach-links-Layouts aktivieren',
+  'welcome.shadcn.sharedPackage': 'Gemeinsames Paket: {path}',
   'welcome.siteCreated': 'Website erstellt',
   'welcome.siteName': 'Name der Website',
   'welcome.starter.nameEmpty': 'Gib einen Namen für die Website ein.',

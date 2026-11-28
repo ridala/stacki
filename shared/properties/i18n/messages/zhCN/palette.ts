@@ -178,4 +178,11 @@ export const messages = {
   'palette.rename.badCharacter': '名称中不能使用“{character}”。',
   'palette.rename.spacesRemoved': '已移除空格：{name}',
   'palette.rename.normalized': '已保存为 {name}',
+  'palette.framework.heading': '项目组件',
+  'palette.framework.note': 'React、Vue 或 Svelte 组件。添加后会生成一个可拖放到页面上的 Astro 包装组件。',
+  'palette.framework.wrap': '添加',
+  'palette.framework.wrapFailed': '无法添加 {name} — {detail}',
+  'palette.framework.wrapWithAI': '用 AI 包装',
+  'palette.framework.wrapped': '已将 {name}（{file}）添加到组件列表。',
+  'palette.framework.wrapping': '添加中…',
 } as const satisfies CatalogOf<MessageKey>;

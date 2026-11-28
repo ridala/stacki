@@ -187,6 +187,13 @@ const metadataSamples: Readonly<Record<string, unknown>> = {
   'ai:setup': { projectPath: '/site', agent: 'claude', action: { kind: 'detect' } },
   'ai:mcpAuth': { projectPath: '/site', request: { kind: 'list', freshness: 'cached' } },
   'ai:review': { ...aiChat, turn: `t${'1'.repeat(16)}`, path: 'src/pages/index.astro', action: { kind: 'keep' } },
+  'component:wrapFramework': {
+    projectPath: '/site',
+    name: 'FeedbackForm',
+    importPath: './FeedbackForm',
+    exportKind: 'default',
+    framework: 'react',
+  },
   'style:selectorUsage': { projectPath: '/site' },
   'style:removeSelectors': {
     projectPath: '/site',

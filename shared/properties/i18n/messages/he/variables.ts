@@ -87,4 +87,9 @@ export const messages = {
   'variables.undo.variable': 'המשתנה',
   'variables.visibility.blocked': 'הצעות המשתנים לא מסוננות: {detail} ההסתרה מושהית כדי שהקובץ הזה לא יידרס.',
   'variables.visibility.saveFailed': 'לא ניתן לשמור אילו משתנים מוסתרים: {detail}',
+  'variables.error.libraryReadOnly': 'סגנונות ברירת המחדל של הספרייה הם לקריאה בלבד. ערכו ערך כדי לשמור עקיפה מקומית.',
+  'variables.source.library': 'ברירות מחדל',
+  'variables.source.libraryDetail': 'ערכי ברירת מחדל מספרייה זו. עריכת ערך שומרת עקיפה מקומית בגיליון הסגנונות בלי לשנות את node_modules.',
+  'variables.source.workspace': 'משותף',
+  'variables.source.workspaceDetail': 'מיובא מחבילה משותפת בסביבת העבודה.',
 } as const satisfies CatalogOf<MessageKey>;

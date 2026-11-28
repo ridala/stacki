@@ -66,3 +66,32 @@ export const variableFiles = {
   readdirSync,
   statSync: (absolute: string) => ({ size: Buffer.byteLength(readFileSync(absolute, 'utf8')) }),
 };
+
+export interface ImportedStylesheet {
+  readonly kind: 'workspace' | 'library';
+  readonly absolutePath: string;
+  readonly rel: string;
+  readonly displayName: string;
+  readonly importerRel: string;
+}
+
+export interface LibrarySourceMatch {
+  readonly absolutePath: string;
+  readonly importerRel: string;
+}
+
+export function isLibraryVariableFile(file: string): boolean {
+  return file.startsWith('library:');
+}
+
+export function discoverImportedStylesheets(_projectPath: string, _localStylesheets: readonly string[]): readonly ImportedStylesheet[] {
+  return [];
+}
+
+export function resolveEditableVariableFile(projectPath: string, file: string): string | undefined {
+  return isLibraryVariableFile(file) ? undefined : path.resolve(projectPath, file);
+}
+
+export function resolveLibrarySourceFile(_projectPath: string, _localStylesheets: readonly string[], _file: string): LibrarySourceMatch | undefined {
+  return undefined;
+}

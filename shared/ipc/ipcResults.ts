@@ -292,6 +292,11 @@ export interface IpcResults extends AiResults, AgentResults, FileExplorerResults
     /** Absolute paths of the folders this creation made, outermost first: empty when the folder was there already. */
     readonly folders: readonly string[];
   };
+  readonly 'component:wrapFramework': Result<{
+    readonly path: string;
+    readonly rel: string;
+    readonly name: string;
+  }>;
   readonly 'component:planRename': Result<ComponentRenameSummary>;
   readonly 'component:rename': Result<ComponentRenameSummary & { readonly undo: string }>;
   readonly 'component:revertRename': Result<{ readonly files: number }>;
@@ -462,6 +467,7 @@ export interface IpcResults extends AiResults, AgentResults, FileExplorerResults
   readonly 'css:setVariable': {
     readonly ok: boolean;
     readonly stale?: boolean;
+    readonly writtenFile?: string;
     readonly error?: string;
     readonly errorRef?: MessageRef | undefined;
   };

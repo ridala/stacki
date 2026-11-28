@@ -71,6 +71,7 @@ export const messages = {
   'welcome.shadcn.presetInvalid': '輸入 shadcn 預設代碼。',
   'welcome.shadcn.presetLink': '開啟 shadcn Create',
   'welcome.shadcn.rtl': '啟用由右至左的版面配置支援',
+  'welcome.shadcn.sharedPackage': '共用套件：{path}',
   'welcome.siteCreated': '已建立網站',
   'welcome.siteName': '網站名稱',
   'welcome.starter.nameEmpty': '輸入網站名稱。',
