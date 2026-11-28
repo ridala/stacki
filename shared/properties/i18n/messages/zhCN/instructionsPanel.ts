@@ -54,4 +54,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': '名称最多 {max} 个字符。',
   'instructionsPanel.problem.fileNameChars': '名称不能包含 / \\ : * ? " < > 或 |。',
   'instructionsPanel.problem.fileNameDot': '名称不能以点开头。',
+  'instructionsPanel.skills.addRecommended': '添加',
+  'instructionsPanel.skills.addedRecommended': '已添加 {name} 技能。',
+  'instructionsPanel.skills.lintSetup': '使用 AI 配置',
+  'instructionsPanel.skills.recommended': '为此项目推荐',
 } as const satisfies CatalogOf<MessageKey>;

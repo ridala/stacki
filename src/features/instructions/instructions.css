@@ -35,6 +35,56 @@
   gap: 6px;
 }
 
+.instructions-recommended {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-block: 6px 2px;
+  padding: 6px;
+  border-radius: var(--radius);
+  background: var(--bg-hover);
+}
+.instructions-recommended-title {
+  padding-inline: 2px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.instructions-recommended-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 4px;
+  border-radius: var(--radius);
+}
+.instructions-recommended-row > svg {
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.instructions-recommended-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.instructions-recommended-button {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.instructions-recommended-button:hover:not(:disabled) {
+  background: var(--bg-active);
+}
+
 /* The reading view covers the canvas as a CMS entry does (.cms-view, .cms-detail). */
 .instructions-view-path {
   min-width: 0;

@@ -19,6 +19,9 @@ import {
   withHidden,
   type InstructionListing,
 } from '../../../shared/properties/instructions';
+import { recommendedSkillSource, type AiToolkitId, type AiToolkitRecommendation, type ProjectAiToolkit } from '../../../shared/properties/mcp';
+import { hasAiToolkitChannel, readProjectAiToolkit } from '../../ipc/aiToolkitBridge';
+import { requestShadcnLintSetup } from '../../lib/agentTasks';
 import { useCurrentRole } from '../../lib/useCurrentRole';
 import { useTranslate, useTranslateDescribed } from '../../lib/i18n/useTranslate';
 import { SETTINGS_SECTION_TITLE_KEYS, type SettingsSectionId, type SettingsSectionsContext } from '../../lib/settingsSections';
@@ -69,13 +72,21 @@ type Listing =
 type Creating =
   { readonly kind: 'none' } | { readonly kind: 'skill' } | { readonly kind: 'rule' } | { readonly kind: 'rule-folder' } | { readonly kind: 'doc' };
 
+const TOOLKIT_LABELS: Readonly<Record<AiToolkitId, string>> = {
+  shadcn: 'shadcn',
+  heroui: 'HeroUI',
+  hugeicons: 'Hugeicons',
+};
+
 export default function InstructionsSections({ projectPath, context, showToast }: Props) {
   const translate = useTranslate();
   const role = useCurrentRole();
   const editable = can(role, 'instructions:edit');
   const listing = useListing(projectPath);
+  const toolkit = useProjectToolkit(projectPath, { enabled: editable, revision: listing.tick });
   const selected = useInstructionSelection(projectPath);
   const [creating, setCreating] = useState<Creating>({ kind: 'none' });
+  const [addingSkillId, setAddingSkillId] = useState<AiToolkitId | undefined>(undefined);
   const [openFolders, setOpenFolders] = useState<ReadonlySet<string>>(new Set());
   const { query, searching } = context;
   const report = useCallback((message: string) => showToast?.(message, 'error'), [showToast]);
@@ -173,6 +184,36 @@ export default function InstructionsSections({ projectPath, context, showToast }
     return undefined;
   }
   const { listing: ready } = listing.state;
+  const missingSkills: readonly AiToolkitRecommendation[] =
+    editable && !searching && toolkit.value !== undefined ? toolkit.value.recommendations.filter((item) => !item.skillInstalled) : [];
+  const lintSetup =
+    editable && !searching && toolkit.value !== undefined && toolkit.value.shadcnLint.applicable && !toolkit.value.shadcnLint.installed
+      ? toolkit.value.shadcnLint
+      : undefined;
+  const addRecommendedSkill = async (recommendation: AiToolkitRecommendation): Promise<void> => {
+    if (addingSkillId !== undefined) {
+      return;
+    }
+    setAddingSkillId(recommendation.id);
+    try {
+      const file = skillPath(skillHome(ready), recommendation.skillSlug);
+      const source = recommendedSkillSource(recommendation.id, recommendation.packagePath === undefined ? {} : { packagePath: recommendation.packagePath });
+      const result = await createInstruction(projectPath, file, source);
+      if (result.ok) {
+        announceInstructionsChanged([file]);
+        listing.refresh();
+        toolkit.refresh();
+        open(file);
+        showToast?.(translate('instructionsPanel.skills.addedRecommended', { name: TOOLKIT_LABELS[recommendation.id] }), 'success');
+      } else {
+        report(result.error.message);
+      }
+    } catch (failure: unknown) {
+      report(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setAddingSkillId(undefined);
+    }
+  };
   return (
     <>
       {!(searching && sections.skills.length === 0) && (
@@ -193,10 +234,49 @@ export default function InstructionsSections({ projectPath, context, showToast }
           }
         >
           {creating.kind === 'skill' && <SkillForm home={skillHome(ready)} projectPath={projectPath} onDone={created} onError={report} />}
-          {sections.skills.length === 0 && creating.kind !== 'skill' && <PanelSectionNote>{translate('instructionsPanel.skills.empty')}</PanelSectionNote>}
+          {sections.skills.length === 0 && creating.kind !== 'skill' && missingSkills.length === 0 && lintSetup === undefined && (
+            <PanelSectionNote>{translate('instructionsPanel.skills.empty')}</PanelSectionNote>
+          )}
           {sections.skills.map((skill) => (
             <SkillItem key={skill.path} skill={skill} selected={selected === skill.path} onOpen={open} menu={menuFor(skill.path, { folder: false })} />
           ))}
+          {(missingSkills.length > 0 || lintSetup !== undefined) && (
+            <div className="instructions-recommended">
+              <div className="instructions-recommended-title">{translate('instructionsPanel.skills.recommended')}</div>
+              {missingSkills.map((recommendation) => (
+                <div className="instructions-recommended-row" key={recommendation.id}>
+                  <SkillIcon size={13} />
+                  <span className="instructions-recommended-label">{TOOLKIT_LABELS[recommendation.id]}</span>
+                  <button
+                    type="button"
+                    className="instructions-recommended-button"
+                    disabled={addingSkillId !== undefined}
+                    onClick={() => void addRecommendedSkill(recommendation)}
+                  >
+                    {translate('instructionsPanel.skills.addRecommended')}
+                  </button>
+                </div>
+              ))}
+              {lintSetup !== undefined && (
+                <div className="instructions-recommended-row">
+                  <SkillIcon size={13} />
+                  {/* @shadcn/lint is the package name of the design-system linter. */}
+                  <span className="instructions-recommended-label">@shadcn/lint</span>
+                  <button
+                    type="button"
+                    className="instructions-recommended-button"
+                    onClick={() =>
+                      void requestShadcnLintSetup(lintSetup, translate, (message, kind) => {
+                        showToast?.(message, kind);
+                      })
+                    }
+                  >
+                    {translate('instructionsPanel.skills.lintSetup')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </PanelSection>
       )}
       {!(searching && countFiles(sections.rules) === 0) && (
@@ -305,7 +385,40 @@ function useListing(projectPath: string) {
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
   }, [refresh]);
-  return { state, refresh };
+  return { state, tick, refresh };
+}
+
+function useProjectToolkit(
+  projectPath: string,
+  options: { readonly enabled: boolean; readonly revision: number },
+): { readonly value: ProjectAiToolkit | undefined; readonly refresh: () => void } {
+  const { enabled, revision } = options;
+  const [value, setValue] = useState<ProjectAiToolkit | undefined>(undefined);
+  const [tick, setTick] = useState(0);
+  const refresh = useCallback(() => setTick((count) => count + 1), []);
+  useEffect(() => {
+    if (!enabled || !hasAiToolkitChannel()) {
+      setValue((current) => (current === undefined ? current : undefined));
+      return undefined;
+    }
+    let active = true;
+    void readProjectAiToolkit(projectPath).then(
+      (inspected) => {
+        if (active) {
+          setValue(inspected);
+        }
+      },
+      () => {
+        if (active) {
+          setValue(undefined);
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [projectPath, enabled, revision, tick]);
+  return { value, refresh };
 }
 
 function keptListing(projectPath: string): Listing {

@@ -19,6 +19,7 @@ import {
   revealMcpServer,
   saveMcpText,
 } from '../content/mcpFiles';
+import { inspectProjectAiToolkit } from '../project/aiToolkit';
 import type { MainHost } from './mainHost';
 
 export function registerMcpHandlers(host: Pick<MainHost, 'ipcMain' | 'assertInProject'>, homeDirectory: () => string = os.homedir): void {
@@ -30,6 +31,7 @@ export function registerMcpHandlers(host: Pick<MainHost, 'ipcMain' | 'assertInPr
     return canonical;
   };
   host.ipcMain.handle('mcp:read', (_event, input) => readMcpListing(root(input.projectPath)));
+  host.ipcMain.handle('mcp:toolkit', (_event, input) => inspectProjectAiToolkit(root(input.projectPath)));
   host.ipcMain.handle('mcp:readText', (_event, input) => readMcpText(root(input.projectPath)));
   host.ipcMain.handle('mcp:reveal', (_event, input) => revealMcpServer(root(input.projectPath), input.revision, input.name));
   host.ipcMain.handle('mcp:apply', (_event, input) => applyMcpChange(root(input.projectPath), input.revision, input.change));

@@ -293,6 +293,7 @@ function pageBridge() {
     applySecretsChange: invoke('secrets:apply'),
     ignoreSecretsFile: invoke('secrets:ignore'),
     readMcp: invoke('mcp:read'),
+    readMcpToolkit: invoke('mcp:toolkit'),
     readMcpText: invoke('mcp:readText'),
     revealMcpServer: invoke('mcp:reveal'),
     applyMcpChange: invoke('mcp:apply'),

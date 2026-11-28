@@ -55,4 +55,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': '名前は最大{max}文字です。',
   'instructionsPanel.problem.fileNameChars': '名前に / \\ : * ? " < > | は使えません。',
   'instructionsPanel.problem.fileNameDot': '名前をドットで始めることはできません。',
+  'instructionsPanel.skills.addRecommended': '追加',
+  'instructionsPanel.skills.addedRecommended': '{name} スキルを追加しました。',
+  'instructionsPanel.skills.lintSetup': 'AIで設定',
+  'instructionsPanel.skills.recommended': 'このプロジェクトにおすすめ',
 } as const satisfies CatalogOf<MessageKey>;

@@ -275,6 +275,7 @@ const metadataSamples: Readonly<Record<string, unknown>> = {
   'secrets:apply': { projectPath: '/site', file: '.env.local', revision: 'a'.repeat(64), change: { kind: 'remove', index: 0 } },
   'secrets:ignore': { projectPath: '/site', file: '.env' },
   'mcp:read': { projectPath: '/site' },
+  'mcp:toolkit': { projectPath: '/site' },
   'mcp:readText': { projectPath: '/site' },
   'mcp:reveal': { projectPath: '/site', revision: 'a'.repeat(64), name: 'Sanity' },
   'mcp:apply': {

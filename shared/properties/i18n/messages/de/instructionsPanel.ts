@@ -56,4 +56,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': 'Ein Name hat höchstens {max} Zeichen.',
   'instructionsPanel.problem.fileNameChars': 'Ein Name darf kein / \\ : * ? " < > oder | enthalten.',
   'instructionsPanel.problem.fileNameDot': 'Ein Name darf nicht mit einem Punkt beginnen.',
+  'instructionsPanel.skills.addRecommended': 'Hinzufügen',
+  'instructionsPanel.skills.addedRecommended': 'Skill „{name}“ hinzugefügt.',
+  'instructionsPanel.skills.lintSetup': 'Mit KI einrichten',
+  'instructionsPanel.skills.recommended': 'Empfohlen für dieses Projekt',
 } as const satisfies CatalogOf<MessageKey>;

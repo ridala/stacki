@@ -58,4 +58,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': 'Un nom compte au plus {max} caractères.',
   'instructionsPanel.problem.fileNameChars': 'Un nom ne peut pas contenir / \\ : * ? " < > ni |.',
   'instructionsPanel.problem.fileNameDot': 'Un nom ne peut pas commencer par un point.',
+  'instructionsPanel.skills.addRecommended': 'Ajouter',
+  'instructionsPanel.skills.addedRecommended': 'Skill {name} ajoutée.',
+  'instructionsPanel.skills.lintSetup': 'Configurer avec l’IA',
+  'instructionsPanel.skills.recommended': 'Recommandé pour ce projet',
 } as const satisfies CatalogOf<MessageKey>;

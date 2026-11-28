@@ -98,7 +98,7 @@ export const DESIGN_CHANNELS: ReadonlySet<string> = new Set([
   // The AI panel's chat list and comment pins live in Stacki's own data folder. The agent itself (prompt, steer,
   // setup, compact, review, remember) is refused: it runs programs that could write anywhere.
   ...['ai:chatCreate', 'ai:chatUpdate', 'ai:chatDelete', 'ai:chatFork', 'ai:chatMove', 'ai:cancel', 'ai:setOption', 'ai:record', 'ai:pinsWrite'],
-  ...['mcp:read', 'mcp:readCodex', 'mcp:readText'],
+  ...['mcp:read', 'mcp:readCodex', 'mcp:readText', 'mcp:toolkit'],
   // The window's own edit commands, the clipboard, the app's settings read, the language and the updater's state.
   ...['native:copy', 'native:paste', 'native:redo', 'native:undo', 'selection:copy', 'settings:get', 'locale:set'],
   ...['update:read', 'roles:identity', 'studio:status', 'microphone:status', 'dictation:status', 'dictation:cancel'],

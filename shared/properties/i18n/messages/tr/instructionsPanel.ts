@@ -55,4 +55,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': 'Ad en fazla {max} karakter olabilir.',
   'instructionsPanel.problem.fileNameChars': 'Ad / \\ : * ? " < > veya | içeremez.',
   'instructionsPanel.problem.fileNameDot': 'Ad nokta ile başlayamaz.',
+  'instructionsPanel.skills.addRecommended': 'Ekle',
+  'instructionsPanel.skills.addedRecommended': '{name} becerisi eklendi.',
+  'instructionsPanel.skills.lintSetup': 'Yapay zeka ile kur',
+  'instructionsPanel.skills.recommended': 'Bu proje için önerilenler',
 } as const satisfies CatalogOf<MessageKey>;

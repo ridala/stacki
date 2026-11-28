@@ -260,3 +260,33 @@
   color: var(--text-dim);
   overflow-wrap: anywhere;
 }
+.shadcn-project-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.shadcn-project-row-label {
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+.shadcn-project-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+.shadcn-project-action {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.shadcn-project-action:hover:not(:disabled) {
+  background: var(--bg-active);
+}

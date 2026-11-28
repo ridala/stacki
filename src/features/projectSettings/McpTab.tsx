@@ -15,9 +15,10 @@ import { agentLabel, type AgentId } from '../../../shared/properties/ai/agentIds
 import { McpSignInControl, offerMcpSignIn, useMcpSignInAllowed, useMcpSignInToasts } from '../../ui/mcpSignIn/McpSignInControl';
 import { checkMcpSignIn, loadMcpSignIns, useMcpSignInEntries } from '../../ui/mcpSignIn/mcpSignInStore';
 import { err, ok } from '../../../shared/core/result';
-import type { McpCodexState, McpListing, McpServerItem } from '../../../shared/properties/mcp';
-import { MCP_PROVIDERS } from '../../../shared/properties/mcpProviders';
+import type { McpCodexState, McpListing, McpServerItem, ProjectAiToolkit } from '../../../shared/properties/mcp';
+import { MCP_PROVIDERS, buildProviderConfig, findMcpProvider, type McpProviderEntry } from '../../../shared/properties/mcpProviders';
 import { moveLiteralsToSecrets } from '../../../shared/properties/mcpSecrets';
+import { readProjectAiToolkit } from '../../ipc/aiToolkitBridge';
 import type { MessageKey } from '../../lib/i18n/localeContext';
 import { DEFAULT_SECRETS_FILE_PARAMS } from './secretsModel';
 import { useTranslate } from '../../lib/i18n/useTranslate';
@@ -51,6 +52,25 @@ function sameCodex(current: McpCodexState, next: McpCodexState): boolean {
 
 function sameNames(current: ReadonlySet<string>, next: ReadonlySet<string>): boolean {
   return current.size === next.size && [...current].every((name) => next.has(name));
+}
+
+function sameToolkit(current: ProjectAiToolkit, next: ProjectAiToolkit): boolean {
+  return JSON.stringify(current) === JSON.stringify(next);
+}
+
+function providerSummaryLine(provider: McpProviderEntry): string {
+  if (provider.transport === 'stdio' && provider.command !== undefined) {
+    const args = provider.args ?? [];
+    return args.length > 0 ? `${provider.command} ${args.join(' ')}` : provider.command;
+  }
+  if (provider.url !== undefined) {
+    try {
+      return new URL(provider.url).host;
+    } catch {
+      return provider.url;
+    }
+  }
+  return provider.name;
 }
 
 /**
@@ -116,11 +136,20 @@ export default function McpTab({ projectPath }: { readonly projectPath: string }
     },
     sameNames,
   );
+  const toolkit = useProjectChannel<ProjectAiToolkit, undefined>(
+    projectPath,
+    async (path) => {
+      const inspected = await readProjectAiToolkit(path);
+      return inspected === undefined ? err(undefined) : ok(inspected);
+    },
+    sameToolkit,
+  );
   const [view, setView] = useState<View>('ui');
   const [jsonDirty, setJsonDirty] = useState(false);
   const [edit, setEdit] = useState<(ServerEdit & { readonly name: string }) | undefined>(undefined);
   const [failure, setFailure] = useState<MessageKey | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [connectingProviderId, setConnectingProviderId] = useState<string | undefined>(undefined);
   const [codexOpen, setCodexOpen] = useState(false);
   const signIns = useServerSignIns(projectPath, listing.state.kind === 'ready' ? listing.state.value.revision : undefined);
 
@@ -190,6 +219,7 @@ export default function McpTab({ projectPath }: { readonly projectPath: string }
           onSaved={(saved) => {
             listing.replace(saved);
             env.reload();
+            toolkit.reload();
           }}
         />
       </div>
@@ -216,6 +246,7 @@ export default function McpTab({ projectPath }: { readonly projectPath: string }
   const applied = (next: McpListing): void => {
     listing.replace(next);
     env.reload();
+    toolkit.reload();
   };
   // A server just added is asked about at once, and a sign-in offered when it needs one.
   const added = (next: McpListing): void => {
@@ -355,6 +386,38 @@ export default function McpTab({ projectPath }: { readonly projectPath: string }
     }
   };
 
+  const connectRecommended = async (provider: McpProviderEntry): Promise<void> => {
+    if (busy || connectingProviderId !== undefined) {
+      return;
+    }
+    const built = buildProviderConfig(provider, { options: {}, optionalSecrets: [] });
+    if (!built.ok) {
+      setFailure('settings.mcp.error.invalid');
+      return;
+    }
+    setBusy(true);
+    setConnectingProviderId(provider.id);
+    setFailure(undefined);
+    const result = await addServerWithSecrets(projectPath, current.revision, provider.id, built.value, []);
+    setConnectingProviderId(undefined);
+    setBusy(false);
+    if (result.ok) {
+      added(result.listing);
+    } else {
+      setFailure(result.messageKey);
+    }
+  };
+
+  const recommendedProviders: readonly McpProviderEntry[] =
+    toolkit.state.kind === 'ready'
+      ? toolkit.state.value.recommendations
+          .filter((item) => item.mcpProviderId !== undefined && !item.mcpConnected)
+          .map((item) => (item.mcpProviderId === undefined ? undefined : findMcpProvider(item.mcpProviderId)))
+          .filter(
+            (provider): provider is McpProviderEntry =>
+              provider !== undefined && !current.servers.some((existing) => existing.name.toLowerCase() === provider.id),
+          )
+      : [];
   const onlyInCodex: readonly McpServerItem[] =
     codexState?.state === 'ready' ? codexState.servers.filter((server) => !current.servers.some((own) => own.name === server.name)) : [];
   const stale = failure === 'settings.mcp.error.changed' || failure === 'settings.mcp.error.notFound';
@@ -375,6 +438,7 @@ export default function McpTab({ projectPath }: { readonly projectPath: string }
                     setEdit(undefined);
                     listing.reload();
                     codex.reload();
+                    toolkit.reload();
                   },
                 },
               ]
@@ -414,6 +478,30 @@ export default function McpTab({ projectPath }: { readonly projectPath: string }
           </div>
         )}
       </section>
+      {recommendedProviders.length > 0 && (
+        <section className="mcp-section" aria-label={translate('settings.mcp.recommended.title')}>
+          <h4>{translate('settings.mcp.recommended.title')}</h4>
+          <div className="mcp-list" role="list">
+            {recommendedProviders.map((provider) => {
+              const connecting = connectingProviderId === provider.id;
+              return (
+                <div className="mcp-card" role="listitem" key={provider.id}>
+                  <div className="mcp-card-head">
+                    <ProviderLogo id={provider.id} name={provider.name} />
+                    <div className="mcp-card-text">
+                      <span className="mcp-card-name">{provider.name}</span>
+                      <span className="mcp-card-line">{providerSummaryLine(provider)}</span>
+                    </div>
+                    <button type="button" className="mcp-small-button" disabled={busy} onClick={() => void connectRecommended(provider)}>
+                      {translate(connecting ? 'settings.mcp.recommended.connecting' : 'settings.mcp.recommended.connect')}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <section className="mcp-section" aria-label={translate('settings.mcp.add.title')}>
         <AddServer {...addProps} />
       </section>

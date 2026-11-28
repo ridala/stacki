@@ -54,4 +54,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': '이름은 최대 {max}자입니다.',
   'instructionsPanel.problem.fileNameChars': '이름에는 / \\ : * ? " < > | 문자를 사용할 수 없습니다.',
   'instructionsPanel.problem.fileNameDot': '이름은 점으로 시작할 수 없습니다.',
+  'instructionsPanel.skills.addRecommended': '추가',
+  'instructionsPanel.skills.addedRecommended': '{name} 스킬이 추가되었습니다.',
+  'instructionsPanel.skills.lintSetup': 'AI로 설정',
+  'instructionsPanel.skills.recommended': '이 프로젝트에 추천',
 } as const satisfies CatalogOf<MessageKey>;

@@ -55,4 +55,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': 'Een naam bestaat uit maximaal {max} tekens.',
   'instructionsPanel.problem.fileNameChars': 'Een naam mag geen / \\ : * ? " < > of | bevatten.',
   'instructionsPanel.problem.fileNameDot': 'Een naam mag niet met een punt beginnen.',
+  'instructionsPanel.skills.addRecommended': 'Toevoegen',
+  'instructionsPanel.skills.addedRecommended': 'Skill {name} toegevoegd.',
+  'instructionsPanel.skills.lintSetup': 'Instellen met AI',
+  'instructionsPanel.skills.recommended': 'Aanbevolen voor dit project',
 } as const satisfies CatalogOf<MessageKey>;

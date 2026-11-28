@@ -33,7 +33,7 @@ const lib = require(output);
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
 
-const FALLBACK = ['context7', 'playwright'];
+const FALLBACK = ['context7', 'heroui', 'hugeicons', 'playwright'];
 
 test('every catalog entry has a brand mark or is a listed monogram fallback, and Webflow is absent', () => {
   for (const provider of lib.MCP_PROVIDERS) {

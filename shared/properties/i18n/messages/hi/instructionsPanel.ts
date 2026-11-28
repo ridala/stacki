@@ -54,4 +54,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': 'नाम अधिकतम {max} वर्णों का हो सकता है।',
   'instructionsPanel.problem.fileNameChars': 'नाम में / \\ : * ? " < > या | नहीं हो सकते।',
   'instructionsPanel.problem.fileNameDot': 'नाम बिंदु से शुरू नहीं हो सकता।',
+  'instructionsPanel.skills.addRecommended': 'जोड़ें',
+  'instructionsPanel.skills.addedRecommended': '{name} स्किल जोड़ दी गई।',
+  'instructionsPanel.skills.lintSetup': 'AI से सेटअप करें',
+  'instructionsPanel.skills.recommended': 'इस प्रोजेक्ट के लिए अनुशंसित',
 } as const satisfies CatalogOf<MessageKey>;

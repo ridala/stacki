@@ -54,4 +54,8 @@ export const messages = {
   'instructionsPanel.problem.fileNameLong': 'שם יכול להכיל עד {max} תווים.',
   'instructionsPanel.problem.fileNameChars': 'שם לא יכול להכיל / \\ : * ? " < > או |.',
   'instructionsPanel.problem.fileNameDot': 'שם לא יכול להתחיל בנקודה.',
+  'instructionsPanel.skills.addRecommended': 'הוסף',
+  'instructionsPanel.skills.addedRecommended': 'מיומנות {name} נוספה.',
+  'instructionsPanel.skills.lintSetup': 'הגדר עם AI',
+  'instructionsPanel.skills.recommended': 'מומלץ לפרויקט זה',
 } as const satisfies CatalogOf<MessageKey>;
