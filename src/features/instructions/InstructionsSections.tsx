@@ -20,7 +20,7 @@ import {
   type InstructionListing,
 } from '../../../shared/properties/instructions';
 import { recommendedSkillSource, type AiToolkitId, type AiToolkitRecommendation, type ProjectAiToolkit } from '../../../shared/properties/mcp';
-import { readProjectAiToolkit } from '../../ipc/aiToolkitBridge';
+import { hasAiToolkitChannel, readProjectAiToolkit } from '../../ipc/aiToolkitBridge';
 import { requestShadcnLintSetup } from '../../lib/agentTasks';
 import { useCurrentRole } from '../../lib/useCurrentRole';
 import { useTranslate, useTranslateDescribed } from '../../lib/i18n/useTranslate';
@@ -83,7 +83,7 @@ export default function InstructionsSections({ projectPath, context, showToast }
   const role = useCurrentRole();
   const editable = can(role, 'instructions:edit');
   const listing = useListing(projectPath);
-  const toolkit = useProjectToolkit(projectPath, { enabled: editable });
+  const toolkit = useProjectToolkit(projectPath, { enabled: editable, revision: listing.tick });
   const selected = useInstructionSelection(projectPath);
   const [creating, setCreating] = useState<Creating>({ kind: 'none' });
   const [addingSkillId, setAddingSkillId] = useState<AiToolkitId | undefined>(undefined);
@@ -111,13 +111,11 @@ export default function InstructionsSections({ projectPath, context, showToast }
     }
   }, [bulk]);
   const { refresh } = listing;
-  const { refresh: refreshToolkit } = toolkit;
   useEffect(() => {
     if (refreshSerial > 0) {
       refresh();
-      refreshToolkit();
     }
-  }, [refreshSerial, refresh, refreshToolkit]);
+  }, [refreshSerial, refresh]);
   const skillCount = sections?.skills.length;
   const ruleCount = sections === undefined ? undefined : countFiles(sections.rules);
   const documentCount = sections === undefined ? undefined : countFiles(sections.docs);
@@ -387,20 +385,20 @@ function useListing(projectPath: string) {
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
   }, [refresh]);
-  return { state, refresh };
+  return { state, tick, refresh };
 }
 
 function useProjectToolkit(
   projectPath: string,
-  options: { readonly enabled: boolean },
+  options: { readonly enabled: boolean; readonly revision: number },
 ): { readonly value: ProjectAiToolkit | undefined; readonly refresh: () => void } {
-  const { enabled } = options;
+  const { enabled, revision } = options;
   const [value, setValue] = useState<ProjectAiToolkit | undefined>(undefined);
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick((count) => count + 1), []);
   useEffect(() => {
-    if (!enabled) {
-      setValue(undefined);
+    if (!enabled || !hasAiToolkitChannel()) {
+      setValue((current) => (current === undefined ? current : undefined));
       return undefined;
     }
     let active = true;
@@ -419,15 +417,7 @@ function useProjectToolkit(
     return () => {
       active = false;
     };
-  }, [projectPath, enabled, tick]);
-  useEffect(() => (enabled ? onInstructionsChanged(() => refresh()) : undefined), [enabled, refresh]);
-  useEffect(() => {
-    if (!enabled) {
-      return undefined;
-    }
-    window.addEventListener('focus', refresh);
-    return () => window.removeEventListener('focus', refresh);
-  }, [enabled, refresh]);
+  }, [projectPath, enabled, revision, tick]);
   return { value, refresh };
 }
 
