@@ -18,13 +18,31 @@ import {
 } from '../../shared/properties/projectFolders';
 import {
   PROJECT_SETUP_EXAMPLES_MAX,
+  PROJECT_SETUP_FINDINGS_MAX,
+  PROJECT_SETUP_FINDING_FILES_MAX,
   PROJECT_SETUP_KINDS,
+  type ProjectSetupFinding,
+  type ProjectSetupFindingSeverity,
   type ProjectSetupKind,
   type ProjectSetupReport,
   type ProjectSetupSuggestion,
 } from '../../shared/ipc/projectSetup';
-import { hashText, setupEvidenceText, setupInventory, setupMetadata, setupPages, setupSyntax, type SetupFile } from './projectSetupDisk';
+import {
+  hashText,
+  setupEvidenceText,
+  setupFramingHeaders,
+  setupInventory,
+  setupMetadata,
+  setupPages,
+  setupPathAliases,
+  setupSyntax,
+  type SetupFile,
+  type SetupPathAlias,
+} from './projectSetupDisk';
+import { detectPackageManager } from './packageManager';
+import { hasDependencies } from './projectFiles';
 import { writeProjectMetadata } from './projectMetadata';
+import { findEnclosingWorkspace } from './workspaceAstro';
 
 const EVIDENCE_BYTES_MAX = 8 * 1024 * 1024;
 const SCAN_BUDGET_MS = 1_500;
@@ -90,13 +108,18 @@ function setupSnapshot(root: string): SetupSnapshot {
   const timeAvailable = () => performance.now() < deadline;
   const pages = setupPages(root);
   const metadata = setupMetadata(root);
+  const aliases = setupPathAliases(root);
+  const framing = setupFramingHeaders(root);
+  const workspace = findEnclosingWorkspace(root);
+  const packageManager = detectPackageManager(root);
+  const dependenciesInstalled = hasDependencies(root);
   const config = metadata.kind === 'editable' ? metadata.config : undefined;
   const roots = ['src', 'public'];
   if (!roots.some((folder) => isWithin(folder, pages.folder))) {
     roots.push(pages.folder);
   }
   const inventory = setupInventory(root, roots, timeAvailable);
-  const evidence = collectEvidence(root, inventory.files, pages.folder, timeAvailable);
+  const evidence = collectEvidence(root, inventory.files, pages.folder, aliases.aliases, timeAvailable);
   const incomplete = inventory.incomplete || evidence.incomplete;
   const candidates =
     !incomplete && pages.source !== 'unverified' && metadata.kind === 'editable'
@@ -104,6 +127,18 @@ function setupSnapshot(root: string): SetupSnapshot {
       : [];
   const complete = !incomplete && candidates !== undefined && timeAvailable();
   const suggestions = complete ? candidates : [];
+  const findings = collectFindings({
+    workspace,
+    packageManager,
+    dependenciesInstalled,
+    pages,
+    incomplete: !complete,
+    settingsKind: metadata.kind,
+    ssrDynamicRoutes: evidence.ssrDynamicRoutes,
+    frameworkComponentCount: inventory.frameworkComponentCount,
+    frameworkComponents: inventory.frameworkComponents,
+    framingFile: framing?.file,
+  });
   const report = {
     pagesFolder: pages.folder,
     pagesSource: pages.source,
@@ -112,12 +147,134 @@ function setupSnapshot(root: string): SetupSnapshot {
     incomplete: !complete,
     settings: metadata.kind,
     suggestions,
+    ...(workspace === undefined ? {} : { workspaceAppPath: workspace.relativeAppPath }),
+    packageManager,
+    dependenciesInstalled,
+    findings,
   };
   const revision = hashText(
-    JSON.stringify([root, report, pages.witness, metadata.kind === 'editable' ? metadata.base : undefined, inventory.files, evidence.witnesses]),
+    JSON.stringify([
+      root,
+      report,
+      pages.witness,
+      aliases.witness,
+      framing?.witness,
+      metadata.kind === 'editable' ? metadata.base : undefined,
+      inventory.files,
+      evidence.witnesses,
+    ]),
   );
   assert(suggestions.length <= PROJECT_SETUP_KINDS.length, 'Setup reports at most one suggestion per kind');
+  assert(findings.length <= PROJECT_SETUP_FINDINGS_MAX, 'Setup findings stay within the finding limit');
   return { report: { ...report, revision }, metadata };
+}
+
+const SEVERITY_ORDER: Readonly<Record<ProjectSetupFindingSeverity, number>> = {
+  blocker: 0,
+  warning: 1,
+  info: 2,
+};
+
+function collectFindings(input: {
+  readonly workspace: ReturnType<typeof findEnclosingWorkspace>;
+  readonly packageManager: ReturnType<typeof detectPackageManager>;
+  readonly dependenciesInstalled: boolean;
+  readonly pages: ReturnType<typeof setupPages>;
+  readonly incomplete: boolean;
+  readonly settingsKind: 'editable' | 'unavailable';
+  readonly ssrDynamicRoutes: readonly string[];
+  readonly frameworkComponentCount: number;
+  readonly frameworkComponents: readonly string[];
+  readonly framingFile: string | undefined;
+}): readonly ProjectSetupFinding[] {
+  const findings: ProjectSetupFinding[] = [];
+  if (!input.dependenciesInstalled) {
+    const location = input.workspace === undefined ? 'the project root' : 'the monorepo root';
+    findings.push({
+      code: 'dependencies-missing',
+      severity: 'blocker',
+      summary: `Astro dependencies are not installed (${input.packageManager} node_modules missing).`,
+      action: `Run ${input.packageManager} install at ${location} before starting Stacki preview.`,
+      files: ['package.json'],
+    });
+  }
+  if (input.workspace !== undefined) {
+    findings.push({
+      code: 'workspace-nested-app',
+      severity: 'info',
+      summary: `Nested Astro app inside monorepo workspace (${input.workspace.relativeAppPath}).`,
+      action: `Keep ${input.workspace.relativeAppPath} as the Stacki app root and install dependencies at the workspace root with ${input.packageManager}.`,
+      files: ['package.json'],
+    });
+  }
+  if (input.pages.source === 'unverified') {
+    findings.push({
+      code: 'astro-config-unverified',
+      severity: 'warning',
+      summary: 'Stacki could not statically verify srcDir in the Astro configuration.',
+      action: 'Use one literal astro.config.mjs or astro.config.ts with a static srcDir (or default src/) so Desktop and Studio resolve pages consistently.',
+      files: input.pages.configFile === undefined ? [] : [input.pages.configFile],
+    });
+  }
+  if (input.pages.externalConfigImports.length > 0 && input.pages.configFile !== undefined) {
+    findings.push({
+      code: 'astro-config-external-imports',
+      severity: 'warning',
+      summary: `Astro config imports ${input.pages.externalConfigImports.length} file(s) outside this app folder (${input.pages.externalConfigImports.join(', ')}).`,
+      action:
+        'Desktop preview runs in place, but standalone Stacki Studio draft copies only copy this app folder unless external imports are guarded or self-contained.',
+      files: [input.pages.configFile],
+    });
+  }
+  if (input.ssrDynamicRoutes.length > 0) {
+    findings.push({
+      code: 'ssr-dynamic-routes',
+      severity: 'warning',
+      summary: `Dynamic route template(s) have no getStaticPaths export (${input.ssrDynamicRoutes.join(', ')}).`,
+      action:
+        'Stacki route picker lists getStaticPaths entries; keep SSR intact and ensure sample slugs or manual preview URLs are documented for visual editing.',
+      files: input.ssrDynamicRoutes.slice(0, PROJECT_SETUP_FINDING_FILES_MAX),
+    });
+  }
+  if (input.framingFile !== undefined) {
+    findings.push({
+      code: 'framing-headers-present',
+      severity: 'warning',
+      summary: `Middleware sets iframe framing headers (X-Frame-Options / frame-ancestors) in ${input.framingFile}.`,
+      action: 'Verify the page loads in Stacki preview canvas; keep production framing headers intact and only relax framing for local preview if blocked.',
+      files: [input.framingFile],
+    });
+  }
+  if (input.frameworkComponentCount > 0) {
+    findings.push({
+      code: 'framework-components-only',
+      severity: 'info',
+      summary: `Found ${input.frameworkComponentCount} framework component file(s) (.tsx/.jsx/.vue/.svelte) under src/components.`,
+      action:
+        'Stacki inserts .astro components directly; wrap interactive islands in .astro wrappers (or add .stacki/components.json recipes) to place them from the palette.',
+      files: input.frameworkComponents.slice(0, PROJECT_SETUP_FINDING_FILES_MAX),
+    });
+  }
+  if (input.incomplete) {
+    findings.push({
+      code: 'scan-incomplete',
+      severity: 'warning',
+      summary: 'Some files or directories were skipped during the bounded setup scan.',
+      action: 'Check for oversized files, symlinked directories, or nested node_modules inside src/ before relying on automatic folder suggestions.',
+      files: [],
+    });
+  }
+  if (input.settingsKind === 'unavailable') {
+    findings.push({
+      code: 'settings-unavailable',
+      severity: 'warning',
+      summary: 'Existing .stacki/folders.json could not be read or validated.',
+      action: 'Inspect and fix .stacki/folders.json before saving folder mappings from Stacki.',
+      files: ['.stacki/folders.json'],
+    });
+  }
+  findings.sort((left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity]);
+  return findings.slice(0, PROJECT_SETUP_FINDINGS_MAX);
 }
 
 function sourceWithMappings(base: string | undefined, selected: readonly ProjectSetupSuggestion[]): string {
@@ -279,9 +436,10 @@ function inferFolderRole(file: string): ReadonlySet<ProjectSetupKind> {
   return roles;
 }
 
-function collectEvidence(root: string, files: readonly SetupFile[], pages: string, timeAvailable: () => boolean) {
+function collectEvidence(root: string, files: readonly SetupFile[], pages: string, aliases: readonly SetupPathAlias[], timeAvailable: () => boolean) {
   const astroFiles = new Set(files.filter((file) => file.path.endsWith('.astro')).map((file) => file.path));
   const roles = new Map<string, Set<ProjectSetupKind>>();
+  const ssrDynamicRoutes: string[] = [];
   const witnesses: string[] = [];
   let remaining = EVIDENCE_BYTES_MAX;
   let incomplete = false;
@@ -308,7 +466,17 @@ function collectEvidence(root: string, files: readonly SetupFile[], pages: strin
     if (fence.kind === 'unreadable') {
       incomplete = true;
     }
-    if (fence.kind !== 'fence' || !fence.code.includes('import')) {
+    const isDynamicPage = desktopPage(file.path, pages) && /\[[^\]]+\]/.test(file.path);
+    if (fence.kind !== 'fence') {
+      if (isDynamicPage && ssrDynamicRoutes.length < PROJECT_SETUP_FINDING_FILES_MAX) {
+        ssrDynamicRoutes.push(file.path);
+      }
+      continue;
+    }
+    if (isDynamicPage && !/\bgetStaticPaths\b/.test(fence.code) && ssrDynamicRoutes.length < PROJECT_SETUP_FINDING_FILES_MAX) {
+      ssrDynamicRoutes.push(file.path);
+    }
+    if (!fence.code.includes('import')) {
       continue;
     }
     const syntax = setupSyntax('frontmatter.ts', fence.code);
@@ -318,11 +486,23 @@ function collectEvidence(root: string, files: readonly SetupFile[], pages: strin
     }
     for (const statement of syntax.statements) {
       if (ts.isImportDeclaration(statement)) {
-        recordImportRole(file.path, source.slice(fence.length), statement, { astroFiles, pages, roles });
+        recordImportRole(file.path, source.slice(fence.length), statement, { astroFiles, pages, aliases, roles });
       }
     }
   }
-  return { roles, witnesses, incomplete };
+  return { roles, ssrDynamicRoutes, witnesses, incomplete };
+}
+
+function resolveImportTarget(importer: string, specifier: string, aliases: readonly SetupPathAlias[]): string | undefined {
+  if (/^\.\.?\//.test(specifier)) {
+    return path.posix.normalize(path.posix.join(path.posix.dirname(importer), specifier));
+  }
+  for (const alias of aliases) {
+    if (specifier.startsWith(alias.prefix)) {
+      return path.posix.normalize(`${alias.targetPrefix}${specifier.slice(alias.prefix.length)}`);
+    }
+  }
+  return undefined;
 }
 
 function recordImportRole(
@@ -332,6 +512,7 @@ function recordImportRole(
   evidence: {
     readonly astroFiles: ReadonlySet<string>;
     readonly pages: string;
+    readonly aliases: readonly SetupPathAlias[];
     readonly roles: Map<string, Set<ProjectSetupKind>>;
   },
 ): void {
@@ -340,11 +521,11 @@ function recordImportRole(
     return;
   }
   const specifier = statement.moduleSpecifier;
-  if (!ts.isStringLiteral(specifier) || !/^\.\.?\//.test(specifier.text)) {
+  if (!ts.isStringLiteral(specifier)) {
     return;
   }
-  const target = path.posix.normalize(path.posix.join(path.posix.dirname(importer), specifier.text));
-  if (!evidence.astroFiles.has(target) || isWithin(evidence.pages, target)) {
+  const target = resolveImportTarget(importer, specifier.text, evidence.aliases);
+  if (target === undefined || !evidence.astroFiles.has(target) || isWithin(evidence.pages, target)) {
     return;
   }
   if (!new RegExp(`<${binding}(?:[\\s/>])`).test(markup)) {

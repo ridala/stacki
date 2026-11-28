@@ -19,6 +19,7 @@ import type { IsSetupFrame, ProjectSetupAccess } from './projectSetupHandlers';
 import type { MainHost } from './mainHost';
 import { translateMain } from '../lib/mainLocale';
 import { folderOpenChoice, siteFolderChoice } from '../project/folderOpen';
+import { findWorkspaceAstroApps } from '../project/workspaceAstro';
 import { checkAstroCopyTarget, createAstroCopy } from '../project/astroCopyWrite';
 import { ASTRO_COPY_LIMITS, type AstroCopyInstall, type AstroCopyReply, type SiteFolderChoice } from '../../shared/ipc/astroCopy';
 import { err, ok } from '../../shared/core/result';
@@ -67,16 +68,28 @@ function registerProjectOpenDialogHandlers(
     }
     const directory = result.filePaths[0];
     assert(directory !== undefined, 'Accepted directory dialog must have a path');
+    let targetDirectory = directory;
     if (!isAstroProject(directory)) {
-      return {
-        canceled: false as const,
-        error: 'That folder does not look like an Astro project ' + '(no astro dependency or astro.config found).',
-      };
+      const workspaceApps = findWorkspaceAstroApps(path.resolve(directory));
+      const onlyApp = workspaceApps.length === 1 ? workspaceApps[0] : undefined;
+      if (onlyApp !== undefined) {
+        targetDirectory = onlyApp.projectPath;
+      } else if (workspaceApps.length > 1) {
+        return {
+          canceled: false as const,
+          error: `This workspace has multiple Astro apps (${workspaceApps.map((app) => app.relativePath).join(', ')}). Open the specific app folder or use Open from folder on the welcome screen.`,
+        };
+      } else {
+        return {
+          canceled: false as const,
+          error: 'That folder does not look like an Astro project ' + '(no astro dependency or astro.config found).',
+        };
+      }
     }
     if (selection !== undefined && isSetupFrame(event)) {
-      setup.acceptPicker(selection, directory);
+      setup.acceptPicker(selection, targetDirectory);
     }
-    return { canceled: false as const, projectPath: directory };
+    return { canceled: false as const, projectPath: targetDirectory };
   });
 }
 
@@ -198,8 +211,15 @@ function registerAstroCopyHandlers(
       return { kind: 'canceled' };
     }
     const choice = siteFolderChoice(path.resolve(directory));
-    if (choice.kind === 'astro' && selection !== undefined && isSetupFrame(event)) {
-      setup.acceptPicker(selection, choice.projectPath);
+    if (selection !== undefined && isSetupFrame(event)) {
+      if (choice.kind === 'astro') {
+        setup.acceptPicker(selection, choice.projectPath);
+      } else if (choice.kind === 'workspace') {
+        setup.acceptPickerPaths(
+          selection,
+          choice.apps.map((app) => app.projectPath),
+        );
+      }
     }
     return choice;
   });

@@ -56,10 +56,19 @@ export interface AstroCopyRequest {
   readonly name: string;
 }
 
+export const WORKSPACE_ASTRO_APPS_MAX = 16;
+
+export interface WorkspaceAstroApp {
+  readonly name: string;
+  readonly relativePath: string;
+  readonly projectPath: string;
+}
+
 /** What the picked folder turned out to be. */
 export type SiteFolderChoice =
   | { readonly kind: 'canceled' }
   | { readonly kind: 'astro'; readonly projectPath: string }
+  | { readonly kind: 'workspace'; readonly workspaceRoot: string; readonly apps: readonly WorkspaceAstroApp[] }
   | {
       readonly kind: 'plainWebsite';
       readonly sourcePath: string;
@@ -223,6 +232,12 @@ export function parseSiteFolderChoice(input: unknown): SiteFolderChoice {
       return { kind };
     case 'astro':
       return { kind, projectPath: parseAbsolutePath(fields['projectPath']) };
+    case 'workspace':
+      return {
+        kind,
+        workspaceRoot: parseAbsolutePath(fields['workspaceRoot']),
+        apps: parseWorkspaceAstroApps(fields['apps']),
+      };
     case 'plainWebsite': {
       const name = parseAstroCopyName(fields['name']);
       const homePath = pathText(fields['homePath']);
@@ -233,6 +248,43 @@ export function parseSiteFolderChoice(input: unknown): SiteFolderChoice {
     default:
       throw new Error('SiteFolderChoice.kind: unknown value');
   }
+}
+
+export function parseWorkspaceAstroApps(input: unknown): readonly WorkspaceAstroApp[] {
+  const raw = boundedArray(input, WORKSPACE_ASTRO_APPS_MAX);
+  if (raw.length === 0) {
+    throw new Error('SiteFolderChoice.apps: expected at least one Astro app');
+  }
+  const apps = raw.map(parseWorkspaceAstroApp);
+  const uniquePaths = new Set(apps.map((app) => app.projectPath));
+  if (uniquePaths.size !== apps.length) {
+    throw new Error('SiteFolderChoice.apps: duplicate project path');
+  }
+  assert(apps.length <= WORKSPACE_ASTRO_APPS_MAX, 'Workspace Astro apps must stay within limit');
+  return apps;
+}
+
+function parseWorkspaceAstroApp(input: unknown): WorkspaceAstroApp {
+  const fields = record(input);
+  const name = text(fields['name']).trim();
+  if (name.length === 0 || name.length > 128) {
+    throw new Error('WorkspaceAstroApp.name: expected non-empty name');
+  }
+  const relativePath = parseRelativeProjectPath(fields['relativePath']);
+  const projectPath = parseAbsolutePath(fields['projectPath']);
+  return { name, relativePath, projectPath };
+}
+
+function parseRelativeProjectPath(input: unknown): string {
+  const value = pathText(input);
+  if (value.startsWith('/') || value.includes('\\') || /^[A-Za-z]:/.test(value)) {
+    throw new Error('Expected a project-relative path');
+  }
+  const segments = value.split('/');
+  if (segments.length === 0 || segments.some((segment) => segment.length === 0 || segment === '.' || segment === '..')) {
+    throw new Error('Expected a normalized project-relative path');
+  }
+  return value;
 }
 
 export function parseAstroCopyTargetProblem(input: unknown): AstroCopyTargetProblem {
@@ -329,8 +381,36 @@ export function parseAstroCopyReply(input: unknown): AstroCopyReply {
 // so Studio's vendored IPC surface stays within its release file target.
 export const PROJECT_SETUP_ENTRIES_MAX = 20_000;
 export const PROJECT_SETUP_EXAMPLES_MAX = 3;
+export const PROJECT_SETUP_FINDINGS_MAX = 12;
+export const PROJECT_SETUP_FINDING_FILES_MAX = 6;
+export const PROJECT_SETUP_FINDING_TEXT_MAX = 400;
+export const PROJECT_SETUP_PROMPT_CHARS_MAX = 12_000;
 export const PROJECT_SETUP_KINDS = ['components', 'layouts'] as const;
 export type ProjectSetupKind = (typeof PROJECT_SETUP_KINDS)[number];
+
+export const PROJECT_SETUP_FINDING_SEVERITIES = ['blocker', 'warning', 'info'] as const;
+export type ProjectSetupFindingSeverity = (typeof PROJECT_SETUP_FINDING_SEVERITIES)[number];
+
+export const PROJECT_SETUP_FINDING_CODES = [
+  'workspace-nested-app',
+  'dependencies-missing',
+  'astro-config-unverified',
+  'astro-config-external-imports',
+  'ssr-dynamic-routes',
+  'framework-components-only',
+  'framing-headers-present',
+  'scan-incomplete',
+  'settings-unavailable',
+] as const;
+export type ProjectSetupFindingCode = (typeof PROJECT_SETUP_FINDING_CODES)[number];
+
+export interface ProjectSetupFinding {
+  readonly code: ProjectSetupFindingCode;
+  readonly severity: ProjectSetupFindingSeverity;
+  readonly summary: string;
+  readonly action: string;
+  readonly files: readonly string[];
+}
 
 export interface ProjectSetupSuggestion {
   readonly kind: ProjectSetupKind;
@@ -354,6 +434,62 @@ export interface ProjectSetupReport {
   readonly incomplete: boolean;
   readonly settings: 'editable' | 'unavailable';
   readonly suggestions: readonly ProjectSetupSuggestion[];
+  readonly workspaceAppPath?: string;
+  readonly packageManager: PackageManager;
+  readonly dependenciesInstalled: boolean;
+  readonly findings: readonly ProjectSetupFinding[];
+}
+
+/** Builds a short, bounded handoff prompt from a setup report so an agent can adapt the project safely. */
+export function buildProjectSetupPrompt(report: ProjectSetupReport, options?: { readonly projectName?: string }): string {
+  const lines: string[] = [];
+  const label = options?.projectName?.trim();
+  const title = label !== undefined && label.length > 0 ? ` (${label})` : '';
+  lines.push(`Adapt this existing Astro project${title} so it opens and edits cleanly in Stacki without breaking production behavior.`);
+  lines.push('');
+  lines.push('Observed project setup (read-only scan):');
+  if (report.workspaceAppPath !== undefined) {
+    lines.push(`- Monorepo Astro app path: ${report.workspaceAppPath}`);
+  }
+  lines.push(`- Package manager: ${report.packageManager} (dependencies ${report.dependenciesInstalled ? 'installed' : 'not installed'})`);
+  lines.push(`- Pages folder: ${report.pagesFolder} (${report.pagesSource}); Desktop pages: ${report.desktopPages}, Studio pages: ${report.studioPages}`);
+
+  if (report.findings.length > 0) {
+    lines.push('');
+    lines.push('Findings to address:');
+    for (const finding of report.findings) {
+      const severityLabel = finding.severity === 'blocker' ? 'Blocker' : finding.severity === 'warning' ? 'Warning' : 'Info';
+      lines.push(`- [${severityLabel}] ${finding.summary}`);
+      lines.push(`  Action: ${finding.action}`);
+      if (finding.files.length > 0) {
+        lines.push(`  Files: ${finding.files.join(', ')}`);
+      }
+    }
+  }
+
+  if (report.suggestions.length > 0) {
+    lines.push('');
+    lines.push('Suggested .stacki/folders.json mappings:');
+    for (const suggestion of report.suggestions) {
+      lines.push(
+        `- ${suggestion.kind}: ${suggestion.folders.join(', ')} (Desktop ${suggestion.desktopBefore} -> ${suggestion.desktopAfter}, Studio ${suggestion.studioBefore} -> ${suggestion.studioAfter})`,
+      );
+    }
+  }
+
+  lines.push('');
+  lines.push('Instructions:');
+  lines.push('1. Inspect the listed files, package manifests, lockfile, and Astro config before making edits.');
+  lines.push('2. Propose any dependency, script, or config changes and wait for approval before modifying them.');
+  lines.push('3. Keep public routes, SEO tags, SSR/adapter behavior, lockfile, and existing build/test checks intact.');
+  lines.push('4. Never read, copy, or commit .env files or local credentials.');
+  lines.push('5. Run the project lint, typecheck, and build after approved changes and report what was verified.');
+
+  const joined = lines.join('\n');
+  const prompt = joined.length <= PROJECT_SETUP_PROMPT_CHARS_MAX ? joined : `${joined.slice(0, PROJECT_SETUP_PROMPT_CHARS_MAX - 1)}…`;
+  assert(prompt.length > 0, 'buildProjectSetupPrompt: prompt must be non-empty');
+  assert(prompt.length <= PROJECT_SETUP_PROMPT_CHARS_MAX, 'buildProjectSetupPrompt: prompt must stay within limit');
+  return prompt;
 }
 
 export const parseProjectSetupScan = object({ projectPath: parseAbsolutePath, permission: optional(parseScanPermission) });
@@ -385,6 +521,10 @@ function parseReport(input: unknown): ProjectSetupReport {
     incomplete: boolean,
     settings,
     suggestions: parseSuggestions,
+    workspaceAppPath: optional(parseRelativeProjectPath),
+    packageManager: parsePackageManagerValue,
+    dependenciesInstalled: boolean,
+    findings: parseFindings,
   })(input);
   if (report.suggestions.length > 0) {
     if (report.incomplete || report.settings === 'unavailable' || report.pagesSource === 'unverified') {
@@ -394,6 +534,65 @@ function parseReport(input: unknown): ProjectSetupReport {
   assert(report.desktopPages <= PROJECT_SETUP_ENTRIES_MAX, 'Desktop page count must stay within setup limit');
   assert(report.studioPages <= PROJECT_SETUP_ENTRIES_MAX, 'Studio page count must stay within setup limit');
   return report;
+}
+
+function parsePackageManagerValue(input: unknown): PackageManager {
+  const manager = PACKAGE_MANAGERS.find((known) => known === input);
+  if (manager === undefined) {
+    throw new Error('Unknown project package manager');
+  }
+  return manager;
+}
+
+function parseFindings(input: unknown): readonly ProjectSetupFinding[] {
+  const findings = boundedArray(input, PROJECT_SETUP_FINDINGS_MAX).map(parseFinding);
+  const codes = new Set(findings.map(({ code }) => code));
+  if (codes.size !== findings.length) {
+    throw new Error('Repeated project setup finding code');
+  }
+  assert(findings.length <= PROJECT_SETUP_FINDINGS_MAX, 'Project setup findings must stay within limit');
+  return findings;
+}
+
+function parseFinding(input: unknown): ProjectSetupFinding {
+  const finding = object({
+    code: parseFindingCode,
+    severity: parseFindingSeverity,
+    summary: parseFindingText,
+    action: parseFindingText,
+    files: parseFindingFiles,
+  })(input);
+  return finding;
+}
+
+function parseFindingCode(input: unknown): ProjectSetupFindingCode {
+  const code = PROJECT_SETUP_FINDING_CODES.find((known) => known === input);
+  if (code === undefined) {
+    throw new Error('Unknown project setup finding code');
+  }
+  return code;
+}
+
+function parseFindingSeverity(input: unknown): ProjectSetupFindingSeverity {
+  const severity = PROJECT_SETUP_FINDING_SEVERITIES.find((known) => known === input);
+  if (severity === undefined) {
+    throw new Error('Unknown project setup finding severity');
+  }
+  return severity;
+}
+
+function parseFindingText(input: unknown): string {
+  const value = text(input).trim();
+  if (value.length === 0 || value.length > PROJECT_SETUP_FINDING_TEXT_MAX) {
+    throw new Error('Project setup finding text out of bounds');
+  }
+  return value;
+}
+
+function parseFindingFiles(input: unknown): readonly string[] {
+  const files = boundedArray(input, PROJECT_SETUP_FINDING_FILES_MAX).map(parseRelativeProjectPath);
+  assert(files.length <= PROJECT_SETUP_FINDING_FILES_MAX, 'Finding files must stay within limit');
+  return files;
 }
 
 function parsePagesFolder(input: unknown): string {

@@ -2,15 +2,17 @@ import { mkdirSync, readdirSync, rmdirSync } from 'node:fs';
 import { readPublishConfig } from '../project/publishConfig';
 import { publishingGitEnvironment } from '../project/publishGitHub';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { assert } from '../../shared/core/assert';
 import { list, record } from '../../shared/core/boundary';
 import { parseGitHubRepository, parseGitHubRepositories } from '../../shared/ipc/githubRepository';
 import { run } from '../lib/nodeTools';
 import { isAstroProject } from '../project/projectFiles';
+import { findWorkspaceAstroApps } from '../project/workspaceAstro';
 import { connectRepository } from '../git/githubRepository';
 import { git } from '../lib/nodeTools';
 import type { MainHost } from './mainHost';
+import type { IsSetupFrame, ProjectSetupAccess } from './projectSetupHandlers';
 import { translateMain } from '../lib/mainLocale';
 import { described } from '../../shared/properties/i18n/messageRef';
 import { referencingIpc } from '../lib/referencingIpc';
@@ -32,7 +34,11 @@ export async function cloneIntoNewFolder(projectPath: string, clone: () => Promi
   }
 }
 
-export function registerGitRepositoryHandlers({ ipcMain: plainIpcMain, showOpenDialog }: Pick<MainHost, 'ipcMain' | 'showOpenDialog'>): void {
+export function registerGitRepositoryHandlers(
+  { ipcMain: plainIpcMain, showOpenDialog }: Pick<MainHost, 'ipcMain' | 'showOpenDialog'>,
+  setup?: ProjectSetupAccess,
+  isSetupFrame?: IsSetupFrame,
+): void {
   const ipcMain = referencingIpc(plainIpcMain);
   ipcMain.handle('git:repositories', async () => {
     const response = await run('gh', ['api', 'user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member'], homedir(), {
@@ -41,7 +47,9 @@ export function registerGitRepositoryHandlers({ ipcMain: plainIpcMain, showOpenD
     const data: unknown = JSON.parse(response.stdout);
     return parseGitHubRepositories(list((entry) => parseGitHubRepository(record(entry)['full_name']))(data));
   });
-  ipcMain.handle('git:clone', async (_event, { repository }) => {
+  ipcMain.handle('git:clone', async (event, { repository }) => {
+    const canAuthorize = setup !== undefined && isSetupFrame !== undefined && isSetupFrame(event);
+    const selection = canAuthorize ? setup.beginPicker() : undefined;
     const result = await showOpenDialog({
       title: translateMain('dialog.open.repositoryTarget.title'),
       properties: ['openDirectory', 'createDirectory'],
@@ -59,11 +67,25 @@ export function registerGitRepositoryHandlers({ ipcMain: plainIpcMain, showOpenD
         timeout: 180000,
       }),
     );
-    if (!isAstroProject(projectPath)) {
-      const cloneNotAstro = described('git.error.cloneNotAstro', { path: projectPath });
-      return { canceled: false as const, error: cloneNotAstro.message, errorRef: cloneNotAstro.messageRef };
+    if (isAstroProject(projectPath)) {
+      if (selection !== undefined && setup !== undefined && isSetupFrame !== undefined && isSetupFrame(event)) {
+        setup.acceptPicker(selection, projectPath);
+      }
+      return { canceled: false as const, projectPath };
     }
-    return { canceled: false as const, projectPath };
+    const workspaceApps = findWorkspaceAstroApps(resolve(projectPath));
+    const firstApp = workspaceApps[0];
+    if (firstApp !== undefined) {
+      if (selection !== undefined && setup !== undefined && isSetupFrame !== undefined && isSetupFrame(event)) {
+        setup.acceptPickerPaths(
+          selection,
+          workspaceApps.map((app) => app.projectPath),
+        );
+      }
+      return { canceled: false as const, projectPath: firstApp.projectPath, workspaceApps };
+    }
+    const cloneNotAstro = described('git.error.cloneNotAstro', { path: projectPath });
+    return { canceled: false as const, error: cloneNotAstro.message, errorRef: cloneNotAstro.messageRef };
   });
   ipcMain.handle('git:connect', async (_event, payload) => {
     const environment = await publishingGitEnvironment(payload.projectPath, readPublishConfig(payload.projectPath));

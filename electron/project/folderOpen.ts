@@ -21,6 +21,7 @@ import { err, ok, type Result } from '../../shared/core/result';
 import { defaultAstroCopyName } from '../../shared/ipc/astroCopy';
 import { FOLDER_OPEN_LIMITS, type FolderOpenChoice, type FolderRejection } from '../../shared/ipc/folderOpen';
 import { classifySiteFolder } from './plainSiteScan';
+import { findWorkspaceAstroApps } from './workspaceAstro';
 import { errorCode } from '../documents/atomicWrite';
 
 /** The three file-system reads the check makes, so a test can stand in for the disk. */
@@ -90,9 +91,16 @@ export function siteFolderChoice(folder: string): Exclude<FolderOpenChoice, { re
     case 'astro':
       return { kind, projectPath: folder };
     case 'plainWebsite':
-      return { kind, sourcePath: folder, parentPath: path.dirname(folder), name: defaultAstroCopyName(path.basename(folder)), homePath: os.homedir() };
-    case 'notWebsite':
+    case 'notWebsite': {
+      const apps = findWorkspaceAstroApps(folder);
+      if (apps.length > 0) {
+        return { kind: 'workspace', workspaceRoot: folder, apps };
+      }
+      if (kind === 'plainWebsite') {
+        return { kind, sourcePath: folder, parentPath: path.dirname(folder), name: defaultAstroCopyName(path.basename(folder)), homePath: os.homedir() };
+      }
       return { kind, folderPath: folder };
+    }
     default: {
       const exhaustive: never = kind;
       return exhaustive;

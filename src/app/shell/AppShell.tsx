@@ -104,6 +104,9 @@ import { SettingsBackScope } from '../SettingsBackScope';
 import { PageLoadLine } from '../../features/preview/PageLoadLine';
 import { useCodeChips } from '../../features/style/codeChips/CodeChips';
 import { DesignModeHost } from '../designMode/DesignModeHost'; // Design mode (experimental): docs/design-mode/REMOVE.md
+import { ProjectSetupDialog } from '../../features/projectSetup/ProjectSetupDialog';
+import { hasProjectSetupChannels } from '../../ipc/projectSetupBridge';
+import { notifyProjectSourcesChanged } from '../state/projectSources';
 
 // The editor around an open project.
 export function AppShell({ app }: { readonly app: ShellView }) {
@@ -198,6 +201,15 @@ export function AppShell({ app }: { readonly app: ShellView }) {
           <AiHost app={app} />
           <PinsHost app={app} />
           <DesignModeHost app={app} /> {/* Design mode (experimental): docs/design-mode/REMOVE.md */}
+          {app.pendingSetupPath === projectPath && hasProjectSetupChannels() && (
+            <ProjectSetupDialog
+              mode="settings"
+              projectPath={projectPath}
+              showToast={app.showToast}
+              onClose={app.clearPendingSetup}
+              onSaved={notifyProjectSourcesChanged}
+            />
+          )}
           {/* The merge review of a pull, here so it opens with the Git panel closed. */}
           <GitSessionDialogs session={git.session} />
         </div>

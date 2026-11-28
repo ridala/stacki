@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { IpcMainInvokeEvent } from 'electron';
 import { err, ok } from '../../shared/core/result';
+import { WORKSPACE_ASTRO_APPS_MAX } from '../../shared/ipc/projectSetup';
 import { applyProjectSetup, scanProjectSetup, staleProjectSetup } from '../project/projectSetup';
 import { isAstroProject } from '../project/projectFiles';
 import { translateMain } from '../lib/mainLocale';
@@ -20,16 +21,43 @@ interface ProjectIdentity {
 /** One native selection can become the active project. Renderer-supplied watch and scan paths carry no grant. */
 export function createProjectSetupAccess(now: () => number = Date.now) {
   let active: ProjectIdentity | undefined;
-  let pending: { readonly project: ProjectIdentity; readonly expires: number } | undefined;
+  let pending: { readonly projects: readonly ProjectIdentity[]; readonly expires: number } | undefined;
   let review: { readonly project: ProjectIdentity; readonly revision: string } | undefined;
   let picker: object | undefined;
 
-  function pendingProject(): ProjectIdentity | undefined {
+  function pendingProjects(): readonly ProjectIdentity[] {
     if (pending !== undefined && now() < pending.expires) {
-      return pending.project;
+      return pending.projects;
     }
     pending = undefined;
+    return [];
+  }
+
+  function matchPending(requested: string | undefined): ProjectIdentity | undefined {
+    for (const candidate of pendingProjects()) {
+      const matched = matchingProject(candidate, requested);
+      if (matched !== undefined) {
+        return matched;
+      }
+    }
     return undefined;
+  }
+
+  function grantPicked(selection: object, selectedPaths: readonly string[]): void {
+    if (selection !== picker) {
+      return;
+    }
+    picker = undefined;
+    const projects: ProjectIdentity[] = [];
+    for (const selectedPath of selectedPaths.slice(0, WORKSPACE_ASTRO_APPS_MAX)) {
+      const project = projectIdentity(selectedPath);
+      if (project !== undefined) {
+        projects.push(project);
+      }
+    }
+    if (projects.length > 0) {
+      pending = { projects, expires: now() + PICKER_GRANT_MS };
+    }
   }
 
   return {
@@ -40,13 +68,10 @@ export function createProjectSetupAccess(now: () => number = Date.now) {
       return selection;
     },
     acceptPicker(selection: object, selectedPath: string) {
-      if (selection === picker) {
-        picker = undefined;
-        const project = projectIdentity(selectedPath);
-        if (project !== undefined) {
-          pending = { project, expires: now() + PICKER_GRANT_MS };
-        }
-      }
+      grantPicked(selection, [selectedPath]);
+    },
+    acceptPickerPaths(selection: object, selectedPaths: readonly string[]) {
+      grantPicked(selection, selectedPaths);
     },
     confirmOpen(selection: object, openPath: string, selectedPath: string) {
       if (selection !== picker) {
@@ -66,7 +91,7 @@ export function createProjectSetupAccess(now: () => number = Date.now) {
       if (matchingProject(active, projectPath) !== undefined) {
         return;
       }
-      active = matchingProject(pendingProject(), projectPath);
+      active = matchPending(projectPath);
       if (active !== undefined) {
         pending = undefined;
       }
@@ -78,7 +103,7 @@ export function createProjectSetupAccess(now: () => number = Date.now) {
       review = undefined;
     },
     authorize(projectPath: string, openProject: string | undefined) {
-      return matchingProject(matchingProject(active, openProject), projectPath) ?? matchingProject(pendingProject(), projectPath);
+      return matchingProject(matchingProject(active, openProject), projectPath) ?? matchPending(projectPath);
     },
     remember(project: ProjectIdentity, revision: string) {
       review = { project, revision };

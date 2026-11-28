@@ -84,11 +84,39 @@ test('a location is shown from home as ~, and a deep one by its last folders', (
 
 test('every folder choice parses, and an unknown kind or a relative path is refused', () => {
   const plain = { kind: 'plainWebsite', sourcePath: '/s/shop', parentPath: '/s', name: 'shop-astro', homePath: '/Users/me' };
+  const workspace = {
+    kind: 'workspace',
+    workspaceRoot: '/s/mono',
+    apps: [{ name: 'web', relativePath: 'apps/web', projectPath: '/s/mono/apps/web' }],
+  };
   assert.deepEqual(parseSiteFolderChoice({ kind: 'canceled' }), { kind: 'canceled' });
   assert.deepEqual(parseSiteFolderChoice({ kind: 'astro', projectPath: '/s/site' }), { kind: 'astro', projectPath: '/s/site' });
+  assert.deepEqual(parseSiteFolderChoice(workspace), workspace);
   assert.deepEqual(parseSiteFolderChoice(plain), plain);
   assert.deepEqual(parseSiteFolderChoice({ kind: 'notWebsite', folderPath: '/s/notes' }), { kind: 'notWebsite', folderPath: '/s/notes' });
   assert.throws(() => parseSiteFolderChoice({ kind: 'astro', projectPath: 'site' }), /absolute/);
+  assert.throws(() => parseSiteFolderChoice({ kind: 'workspace', workspaceRoot: '/s/mono', apps: [] }), /at least one/);
+  assert.throws(
+    () =>
+      parseSiteFolderChoice({
+        kind: 'workspace',
+        workspaceRoot: '/s/mono',
+        apps: [{ name: 'web', relativePath: '../web', projectPath: '/s/mono/apps/web' }],
+      }),
+    /relative/,
+  );
+  assert.throws(
+    () =>
+      parseSiteFolderChoice({
+        kind: 'workspace',
+        workspaceRoot: '/s/mono',
+        apps: [
+          { name: 'web', relativePath: 'apps/web', projectPath: '/s/mono/apps/web' },
+          { name: 'web2', relativePath: 'apps/web', projectPath: '/s/mono/apps/web' },
+        ],
+      }),
+    /duplicate/,
+  );
   assert.throws(() => parseSiteFolderChoice({ ...plain, name: 'a/b' }), /Name/);
   assert.throws(() => parseSiteFolderChoice({ kind: 'error' }), /unknown value/);
 });

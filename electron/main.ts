@@ -1461,7 +1461,7 @@ registerContentHandlers(host, { restartForNewContentConfig: (devUrl) => devServe
 registerCssVariableHandlers(host);
 registerBreakpointSyncHandlers(host);
 registerGitHandlers(host);
-registerGitRepositoryHandlers(host);
+registerGitRepositoryHandlers(host, projectSetupAccess, isSetupFrame);
 registerImageConversionHandler(host);
 registerPageHandlers(host, { current: () => devServers.current(), restart: (projectPath) => devServers.restartForNewIntegration(projectPath) });
 registerDesignModeHandlers(host, { appDataRoot: app.getPath('userData'), onQuit: (listener) => app.on('will-quit', listener), platform: process.platform }); // Design mode (experimental): docs/design-mode/REMOVE.md

@@ -1,5 +1,6 @@
-// Goal: a native Astro selection stays in review until the user saves or opens the editor.
-// Method: bundle the Welcome screen and setup dialog in jsdom and drive the real controls against a scripted preload bridge.
+// Goal: Welcome opens Astro projects and monorepo apps directly, and Review setup inside the project supports
+// witnessed folder saves, toast-backed prompt copying, and closing on Send to AI.
+// Method: bundle WelcomeScreen, ProjectSetupDialog, and registerAgentTaskHandler in jsdom and drive the real controls.
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const fs = require('node:fs');
@@ -20,6 +21,17 @@ const report = {
   studioPages: 2,
   incomplete: false,
   settings: 'editable',
+  packageManager: 'pnpm',
+  dependenciesInstalled: false,
+  findings: [
+    {
+      code: 'dependencies-missing',
+      severity: 'blocker',
+      summary: 'Astro dependencies are not installed.',
+      action: 'Run pnpm install before starting preview.',
+      files: ['package.json'],
+    },
+  ],
   suggestions: [
     {
       kind: 'components',
@@ -46,14 +58,15 @@ const report = {
   ],
 };
 
-test('Welcome scans before opening, requires a fresh selection after stale, and waits for Continue after save or skip', async (context) => {
+test('Welcome opens Astro projects directly and Review setup handles stale saves, toast prompt copy, and closing on Send to AI', async (context) => {
   const output = repoPath('node_modules/.stacki-test/project-setup.cjs');
   fs.mkdirSync(path.dirname(output), { recursive: true });
   await esbuild.build({
     stdin: {
       contents: `
 export { default as WelcomeScreen } from './src/features/welcome/WelcomeScreen';
-export { ProjectSetupDialog } from './src/features/projectSetup/ProjectSetupDialog';`,
+export { ProjectSetupDialog } from './src/features/projectSetup/ProjectSetupDialog';
+export { registerAgentTaskHandler } from './src/lib/agentTasks';`,
       resolveDir: repoPath('.'),
     },
     outfile: output,
@@ -77,7 +90,7 @@ export { ProjectSetupDialog } from './src/features/projectSetup/ProjectSetupDial
   global.WebGLRenderingContext = dom.window.WebGLRenderingContext = function WebGLRenderingContext() {};
   const { createElement, act } = require('react');
   const { createRoot } = require('react-dom/client');
-  const { WelcomeScreen, ProjectSetupDialog } = require(output);
+  const { WelcomeScreen, ProjectSetupDialog, registerAgentTaskHandler } = require(output);
   const root = createRoot(document.getElementById('root'));
   context.after(async () => {
     await act(async () => root.unmount());
@@ -85,9 +98,35 @@ export { ProjectSetupDialog } from './src/features/projectSetup/ProjectSetupDial
   });
 
   const open = [];
+  const openWithSetup = [];
   const scans = [];
   const writes = [];
+  const copied = [];
+  const toasts = [];
+  const sentTasks = [];
   let replyToScan;
+  const previousClipboard = Object.getOwnPropertyDescriptor(global.navigator, 'clipboard');
+  Object.defineProperty(global.navigator, 'clipboard', {
+    configurable: true,
+    value: {
+      writeText: async (value) => {
+        copied.push(value);
+      },
+    },
+  });
+  context.after(() => {
+    if (previousClipboard === undefined) {
+      delete global.navigator.clipboard;
+    } else {
+      Object.defineProperty(global.navigator, 'clipboard', previousClipboard);
+    }
+  });
+  const unregisterAgent = registerAgentTaskHandler('ai-panel', 100, async (task) => {
+    sentTasks.push(task);
+    return { tag: 'sent', where: 'Codex in the AI panel' };
+  });
+  context.after(unregisterAgent);
+
   window.avb = {
     listRecents: async () => [],
     takeOpenedFolders: async () => [],
@@ -120,31 +159,83 @@ export { ProjectSetupDialog } from './src/features/projectSetup/ProjectSetupDial
   const checkboxes = () => [...dialog().querySelectorAll('input[type="checkbox"]')];
   const welcome = () => control('Open from folder', document);
 
+  // Welcome opens single Astro projects directly with setup review instead of showing the full setup modal on Welcome.
   await act(async () =>
     root.render(
       createElement(WelcomeScreen, {
         onOpen: (directory) => open.push(directory),
-        showToast: assert.fail,
-        renderSetupDialog: (setup) => createElement(ProjectSetupDialog, { mode: 'welcome', ...setup }),
+        onOpenWithSetup: (directory) => openWithSetup.push(directory),
+        showToast: (message, kind) => toasts.push({ message, kind }),
       }),
     ),
   );
-  welcome().focus();
   await click(welcome());
+  assert.equal(Boolean(dialog()), false);
+  assert.deepEqual(openWithSetup, [projectPath]);
+  assert.deepEqual(open, []);
+
+  // Multi-app monorepo shows the compact workspace app chooser before opening.
+  const webAppPath = '/projects/mono/apps/web';
+  const docsAppPath = '/projects/mono/apps/docs';
+  window.avb.openSiteDialog = async () => ({
+    kind: 'workspace',
+    workspaceRoot: '/projects/mono',
+    apps: [
+      { name: 'web', relativePath: 'apps/web', projectPath: webAppPath },
+      { name: 'docs', relativePath: 'apps/docs', projectPath: docsAppPath },
+    ],
+  });
+  await click(welcome());
+  assert.equal(dialog().getAttribute('aria-label'), 'Workspace app');
+  await click(control('Continue to editor'));
+  assert.equal(openWithSetup.at(-1), webAppPath);
+
+  // Inside the project: Review setup scans, copies via toast (not raw inline text), handles stale saves, and closes on Send to AI.
+  let closed = 0;
+  let promptSent = 0;
+  let savedCount = 0;
+  await act(async () =>
+    root.render(
+      createElement(ProjectSetupDialog, {
+        projectPath,
+        mode: 'settings',
+        showToast: (message, kind) => toasts.push({ message, kind }),
+        onClose: () => {
+          closed += 1;
+        },
+        onPromptSent: () => {
+          promptSent += 1;
+        },
+        onSaved: () => {
+          savedCount += 1;
+        },
+      }),
+    ),
+  );
   assert.equal(dialog().getAttribute('aria-label'), 'Review setup');
   assert.deepEqual(scans, [{ projectPath }]);
   assert.match(dialog().querySelector('[role="status"]').textContent, /Checking project files/);
-  assert.deepEqual(open, []);
 
   await resolveScan({ ok: true, value: report });
   assert.match(dialog().textContent, /Desktop pages: 1\. Studio pages: 2\./);
+  assert.match(dialog().textContent, /Compatibility report/);
+  assert.match(dialog().textContent, /Astro dependencies are not installed\./);
   assert.match(dialog().textContent, /\+ src\/ui\/Card\.astro/);
   assert.match(dialog().textContent, /− public\/Legacy\.astro/);
+
+  // Copy prompt uses toast feedback rather than pushing plain status text into the modal body.
+  await click(control('Copy prompt'));
+  assert.equal(copied.length, 1);
+  assert.match(copied[0], /\[Blocker\] Astro dependencies are not installed\./);
+  assert.equal(toasts.at(-1).kind, 'success');
+  assert.match(toasts.at(-1).message, /Setup prompt copied\./);
+  assert.equal(Boolean(dialog().querySelector('[role="status"]')), false);
+
+  // Stale save forces a fresh scan and clears prior selections.
   assert.deepEqual(selected(), []);
   assert.equal(save().disabled, true);
   await click(checkboxes()[0]);
   assert.deepEqual(selected(), ['Components']);
-  assert.deepEqual(writes, []);
   await click(save());
   assert.deepEqual(writes, [{ projectPath, revision: firstRevision, kinds: ['components'] }]);
   assert.deepEqual(scans, [{ projectPath }, { projectPath }]);
@@ -156,33 +247,47 @@ export { ProjectSetupDialog } from './src/features/projectSetup/ProjectSetupDial
   await click(checkboxes()[1]);
   await click(save());
   assert.deepEqual(writes[1], { projectPath, revision: freshRevision, kinds: ['layouts'] });
+  assert.equal(savedCount, 1);
   assert.match(dialog().querySelector('[role="status"]').textContent, /Folder settings saved/);
-  assert.deepEqual(open, []);
-  assert.equal(document.activeElement, control('Continue to editor'));
-  await click(control('Continue to editor'));
-  assert.deepEqual(open, [projectPath]);
 
-  welcome().focus();
-  await click(welcome());
-  await resolveScan({ ok: true, value: report });
-  await click(checkboxes()[0]);
-  await click(control('Cancel'));
-  assert.equal(Boolean(dialog()), false);
-  assert.equal(document.activeElement, welcome());
-  assert.deepEqual(open, [projectPath]);
-  assert.equal(writes.length, 2);
+  // Send to AI dispatches to the registered agent, shows a toast, and closes the modal (plus parent Settings via onPromptSent).
+  await act(async () =>
+    root.render(
+      createElement(ProjectSetupDialog, {
+        key: 'send-to-ai',
+        projectPath,
+        mode: 'settings',
+        showToast: (message, kind) => toasts.push({ message, kind }),
+        onClose: () => {
+          closed += 1;
+        },
+        onPromptSent: () => {
+          promptSent += 1;
+        },
+        onSaved: assert.fail,
+      }),
+    ),
+  );
+  await resolveScan({ ok: true, value: { ...report, suggestions: [] } });
+  await click(control('Send to AI'));
+  assert.equal(sentTasks.length, 1);
+  assert.equal(toasts.at(-1).kind, 'success');
+  assert.match(toasts.at(-1).message, /Setup prompt sent to Codex in the AI panel\./);
+  assert.equal(closed, 1);
+  assert.equal(promptSent, 1);
 
-  await click(welcome());
-  await resolveScan({ ok: true, value: report });
-  await click(control('Skip setup'));
-  assert.deepEqual(open, [projectPath]);
-  assert.equal(writes.length, 2);
-  assert.equal(document.activeElement, control('Continue to editor'));
-  await click(control('Continue to editor'));
-  assert.deepEqual(open, [projectPath, projectPath]);
-  assert.equal(writes.length, 2);
-
-  await act(async () => root.render(createElement(ProjectSetupDialog, { projectPath, mode: 'settings', onClose: assert.fail, onSaved: assert.fail })));
+  // Settings native folder confirmation flow when unauthorized.
+  await act(async () =>
+    root.render(
+      createElement(ProjectSetupDialog, {
+        key: 'confirm',
+        projectPath,
+        mode: 'settings',
+        onClose: assert.fail,
+        onSaved: assert.fail,
+      }),
+    ),
+  );
   await resolveScan({ ok: false, error: { code: 'unauthorized', message: 'Permission denied.' } });
   assert.match(dialog().querySelector('[role="alert"]').textContent, /Choose the open project folder/);
   await click(control('Choose…'));

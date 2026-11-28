@@ -6,8 +6,14 @@ import { useRef, useState } from 'react';
 import RepositoryPicker from '../../ui/RepositoryPicker';
 import { cloneRepository } from '../../ipc/repositoryBridge';
 import { parseGitHubRepository } from '../../../shared/ipc/githubRepository';
+import type { WorkspaceAstroApp } from '../../../shared/ipc/astroCopy';
 
-export default function CloneRepositoryModal(props: { readonly onClose: () => void; readonly onOpen: (projectPath: string) => void }) {
+export interface ClonedProjectTarget {
+  readonly projectPath: string;
+  readonly workspaceApps?: readonly WorkspaceAstroApp[];
+}
+
+export default function CloneRepositoryModal(props: { readonly onClose: () => void; readonly onOpen: (target: ClonedProjectTarget) => void }) {
   const translate = useTranslate();
   const [repository, setRepository] = useState('');
   const [state, setState] = useState<{ readonly kind: 'ready'; readonly error?: string } | { readonly kind: 'cloning' }>({ kind: 'ready' });
@@ -33,7 +39,10 @@ export default function CloneRepositoryModal(props: { readonly onClose: () => vo
       } else if ('error' in result.value) {
         setState({ kind: 'ready', error: translateReference(result.value.error, result.value.errorRef, translate) });
       } else {
-        props.onOpen(result.value.projectPath);
+        props.onOpen({
+          projectPath: result.value.projectPath,
+          ...(result.value.workspaceApps === undefined ? {} : { workspaceApps: result.value.workspaceApps }),
+        });
       }
     } finally {
       running.current = false;

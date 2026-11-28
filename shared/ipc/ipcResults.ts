@@ -16,6 +16,7 @@ import type { AccountState } from './publishAccount';
 import type { PreviewHealth } from './previewHealth';
 import type { DevNetworkReply, DevNetworkState } from './devNetwork';
 import type { AstroCopyCheck, AstroCopyReply, ProjectSetupReport, ShadcnPresetReply, ShadcnSettingsReply, SiteFolderChoice } from './astroCopy';
+import type { CloneRepositoryResult } from './githubRepository';
 import type { FolderOpenChoice } from './folderOpen';
 import type { CmsCheckResult, CmsConnectionList, CmsSaveResult, SanityLoginState } from '../properties/cmsConnections';
 import type { ConstantEditReply, ConstantListingReply } from '../properties/cmsConstants';
@@ -585,7 +586,7 @@ export interface IpcResults extends AiResults, AgentResults, FileExplorerResults
     readonly branch: undefined | string;
   };
   readonly 'git:repositories': readonly string[];
-  readonly 'git:clone': IpcResults['project:openDialog'];
+  readonly 'git:clone': CloneRepositoryResult;
   readonly 'git:connect': IpcResults['git:publish'];
   readonly 'publish:start': DesktopPublishState;
   readonly 'publish:state': DesktopPublishState;
